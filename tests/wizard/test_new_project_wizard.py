@@ -371,6 +371,7 @@ def test_custom_command_pane_requires_name_and_command(
             assert "custom command" in error_text.lower()
 
             app.screen.query_one("#custom-name-input", Input).value = "Docs"
+            await pilot.pause()
             app.screen.query_one("#custom-command-input", Input).value = "mkdocs serve"
             await pilot.pause()
             await _click(pilot, "#next-button")
