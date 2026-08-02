@@ -1,230 +1,183 @@
-# terminal-home
+<div align="center">
 
-Pablo's personal terminal development dashboard, built with [Textual](https://textual.textualize.io/).
-Version 2 added a full New Project wizard that scaffolds a project directory and launches
-a tmux workspace for it. Version 3 (this version) completes the **Open Project** workflow:
-selecting an existing directory under `~/projects` now resumes its running tmux session,
-recreates its previously saved workspace, or walks through configuring one -- reusing the
-same `WorkspaceSpec`/tmux orchestration machinery the New Project wizard already built.
+# Terminal Home
 
-## Requirements
+A keyboard-driven terminal workspace manager for creating, configuring,
+resuming, and rebuilding project-specific tmux environments.
 
-- Python 3.10+
-- Linux/WSL with `tmux` installed (required to actually launch a workspace; the dashboard
-  itself still runs and degrades gracefully without it)
-- Optional, with graceful fallbacks (see "Tool requirements and fallbacks" below):
-  `nvim`, `claude` (Claude Code), `lazygit`, `tree`, `git`
+![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
-## Setup
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Textual](https://img.shields.io/badge/UI-Textual-5A4FCF)
+![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC)
+![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64)
+![mypy](https://img.shields.io/badge/types-mypy-2A6DB2)
+![MIT License](https://img.shields.io/badge/license-MIT-green)
 
-A virtual environment already exists at `.venv/`. To (re)create it and install the
-project in editable mode with dev tools:
+</div>
 
-```bash
-cd ~/projects/terminal-home
-python3 -m venv .venv                 # skip if .venv already exists
-.venv/bin/pip install -e ".[dev]"
+## Why Terminal Home
+
+Every project ends up needing the same handful of terminals: an editor, a
+Git tool, a dev server, a test shell, an AI assistant. Rebuilding that layout
+by hand every time you switch projects — cd into the directory, split panes,
+launch each tool, get the sizing right — gets old fast. Terminal Home turns
+that layout into something you configure once per project and either resume
+(if it's still running) or recreate (if it isn't) from a searchable
+dashboard.
+
+## Features
+
+- Searchable project dashboard with recent projects and running-session status
+- Guided new-project wizard (name, folder, optional `git init`, workspace layout)
+- Configurable tmux windows with 1-4 pane layouts per window
+- Saved workspace persistence — layouts survive tmux restarts and WSL reboots
+- Resume-if-running, recreate-if-not launch behavior with no duplicate sessions
+- Neovim, Claude Code, Git (lazygit), file tree, test, dev server, blank shell,
+  and custom-command pane types
+- Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
+- Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
+- Keyboard-first [Textual](https://textual.textualize.io/) interface
+
+## Demo workflow
+
+```
+dev
+  -> Continue Project
+    -> SHPE-Connect
+      -> Resume Session   (or Recreate Workspace, if nothing's running)
+        -> Neovim + Claude Code + dev server, tiled and ready
 ```
 
-## Running the dashboard
+## Installation
+
+Requires Linux or WSL with `tmux` installed.
 
 ```bash
-.venv/bin/python -m dashboard
+git clone https://github.com/PabloAlmanza47/Terminal-Home.git
+cd Terminal-Home
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -e ".[dev]"
+
+tmux -V   # confirm tmux is installed and on PATH
+
+dev       # launch the dashboard
 ```
 
-Once activated (`source .venv/bin/activate`), you can also run it as `python -m dashboard`,
-or as `dev` since the editable install registers a `dev` console script inside the
-virtual environment. Wiring `dev` up as a global command (e.g. via a `.bashrc` alias or
-PATH entry) is intentionally left for a later version.
+**Required:** Python 3.10+, `tmux`.
+**Optional** (each pane type falls back to a plain shell if missing): `nvim`,
+`claude` (Claude Code), `lazygit`, `tree`, `git`.
+
+## Usage
+
+- **Create New Project** — a short wizard: project name and folder, optional
+  `git init`, then window/pane configuration. Nothing touches disk or tmux
+  until you confirm the final review step.
+- **Continue Project** — lists existing projects under `~/projects` with git
+  branch, saved-workspace, and running-session status; opens **Project
+  Detail** for whichever one you pick.
+- **Configure Workspace** — the same window/pane builder used by the new
+  project wizard, for a project that doesn't have a saved layout yet (or to
+  edit one that does).
+- **Resume Session** — attaches to an already-running tmux session for the
+  project; never recreates panes that are already there.
+- **Recreate Workspace** — rebuilds a saved layout (windows, panes, startup
+  commands) from scratch when no session is currently running.
+
+## Workspace layouts
+
+| Panes | Layout                                                             | tmux layout name  |
+|-------|---------------------------------------------------------------------|-------------------|
+| 1     | fills the window                                                    | (none)            |
+| 2     | equal, side by side                                                  | `even-horizontal` |
+| 3     | one full-height pane left; two stacked panes right                   | `main-vertical`   |
+| 4     | balanced 2x2 grid                                                    | `tiled`           |
+
+`dashboard/models/layout.py` is the single source of truth for these rules —
+the wizard's preview, its review step, and the real tmux `select-layout` call
+all derive from it.
+
+## Architecture
+
+- **Screens** (`dashboard/screens/`) — one Textual screen per view: home
+  dashboard, project list, project detail, the shared new/edit workspace
+  wizard, system info, settings.
+- **Models** (`dashboard/models/`) — plain, validated dataclasses
+  (`WorkspaceSpec`, `WindowSpec`, `PaneSpec`, `LaunchRequest`, ...) with no
+  Textual imports and no subprocess calls, so they're trivially unit tested.
+- **Services** (`dashboard/services/`) — the logic layer: project scanning,
+  git info, slug generation, pane command resolution, and the tmux
+  orchestration itself. No Textual imports here either.
+- **Persistence** — confirmed workspaces are saved as JSON under
+  `$XDG_DATA_HOME/terminal-home/workspaces.json`; presentation preferences
+  under `$XDG_CONFIG_HOME/terminal-home/settings.json`. Never inside the
+  project directory.
+- **tmux orchestration** — runs strictly *after* Textual exits
+  (`dashboard/services/workspace_launcher.py`); Textual and tmux can't both
+  own the terminal at once. Every window and pane is targeted by the stable
+  id (`@N` / `%N`) tmux reports back at creation time via `-P -F`, never by
+  an assumed numeric index, so custom `base-index`/`pane-base-index` tmux.conf
+  settings are handled correctly.
+
+See [Reference](#reference) below for the full project layout and deeper
+per-screen behavior.
+
+## Testing
+
+Current status: 302 pytest tests passing, Ruff clean, mypy clean.
+
+```bash
+pytest
+ruff check dashboard tests
+mypy dashboard
+```
+
+Tests mock every filesystem-writing and subprocess-executing call — no test
+creates a real tmux session, attaches to tmux, or touches your real
+`~/projects` or XDG data directories.
+
+## Safety guarantees
+
+- Never deletes a project directory or its contents.
+- Never overwrites or attaches to the wrong tmux session — creating refuses
+  if a session with that name already exists, and only a session this run
+  just created gets cleaned up on failure.
+- tmux is only ever touched after Textual has fully exited.
+- Missing tools (tmux itself, or a pane's preferred command) degrade to a
+  plain shell instead of crashing.
+
+Full detail in [Reference](#reference).
 
 ## Keyboard controls
 
-- **Arrow keys** -- move through menus and lists
-- **Enter** -- select the highlighted item
-- **Escape** -- go back one step (or cancel, on the first step of a flow)
-- **F5** -- refresh (Open Project's list and Project Detail's status)
-- **q** -- quit, from the home screen
+- **Arrow keys** — move through menus and lists
+- **Enter** — select the highlighted item
+- **Escape** — go back one step (or cancel, on the first step of a flow)
+- **F5** — refresh (project list, session status)
+- **q** — quit, from the home screen
 - Full shortcut list is always visible in the footer at the bottom of the screen
 
-## Workspace, window, and pane terminology
+## Roadmap
 
-- A **workspace** is one tmux **session** for a project: a project name, its directory,
-  a generated session name, and one or more windows. Modeled by `WorkspaceSpec`.
-- A **window** is one tmux window: a name, and 1-4 ordered panes. Modeled by `WindowSpec`.
-- A **pane** is one tmux pane: a type (see the catalogue below), a display name, and --
-  for custom panes only -- a literal shell command. Modeled by `PaneSpec`. Pane *order*
-  within a window is preserved exactly as configured, since it determines left-to-right,
-  top-to-bottom placement once a layout is applied.
+- Project-aware development/test command detection
+- Portable, shareable workspace templates
+- Optional remote/SSH project support
+- Packaging and installation improvements
 
-These models (`dashboard/models/`) have no Textual imports and no subprocess calls --
-they're plain, validated dataclasses so they can be unit tested in isolation, and so the
-same models can eventually back a "launch an existing project's workspace" flow, not just
-the New Project wizard.
+## License
 
-## New Project wizard
+[MIT](LICENSE)
 
-"Create New Project" on the home menu opens a 5-step wizard. Nothing is written to disk,
-and no tmux session is created, until the final step is confirmed.
+---
 
-1. **Project Info** -- project display name, folder name (defaulted from the project name
-   via a filesystem-safe slug, e.g. "My Cool Project" -> `my-cool-project`), and whether to
-   `git init` the new directory (on by default). The destination (`~/projects/<folder>`) is
-   shown live. Validation (empty names, path separators in the folder name, an existing
-   directory at the destination, escaping `~/projects`) is reported inline without crashing.
-2. **Configure Window** -- a window name (defaults to `main` for the very first window), and
-   a checkable list of 1-4 pane types (see below), with Move Up/Move Down controls to set
-   their final order. Trying to select a 5th pane is blocked with an inline explanation.
-   Choosing "Custom Command" reveals a name + command field and a warning that the command
-   will run automatically when the workspace starts (it is never run during the wizard).
-3. **Layout Preview** -- a compact ASCII preview of the pane layout that Step 2 will
-   produce, with a way back to Step 2 to change the selection or order.
-4. **Windows** -- a summary of every configured window so far, with Add Another Window,
-   Edit Selected Window, Remove Selected Window (blocked if it's the only one left), Finish
-   Workspace, and Cancel. Window names must be unique within a workspace; there's no fixed
-   limit on the number of windows.
-5. **Review** -- project name, full destination path, git-init choice, the generated tmux
-   session name, every window with its ordered panes, and a compact layout preview per
-   window. "Create and Open" is the only action that touches the filesystem, git, or tmux.
+## Reference
 
-### Pane types
+Deeper technical detail for anyone extending or reviewing the code.
 
-| Pane            | Preferred command | Fallback                                   |
-|-----------------|--------------------|--------------------------------------------|
-| Code Editor     | `nvim .`           | interactive shell (Neovim not found)        |
-| Claude Code     | `claude`           | interactive shell (Claude Code not found)   |
-| Git             | `lazygit`          | `git status` then a shell; or, if the project isn't a git repo yet, a plain shell |
-| File Tree       | `tree -C .`        | `find`-based listing, then a shell          |
-| Test Terminal   | (none -- a plain shell titled "tests")                                          |
-| Development Server | (none -- a plain shell titled "server")                                     |
-| Blank Terminal  | (none -- a plain shell)                                                         |
-| Custom Command  | the exact command you enter                                                     |
-
-Tool availability is checked at *launch* time (`dashboard/services/pane_commands.py`), not
-wizard time, so it always reflects what's actually installed. Every pane's shell starts in
-the project's directory regardless of which command (if any) runs in it. Falling back to a
-shell is always nonfatal: a short note is printed before the tmux session is attached.
-
-### Pane layout rules
-
-| Panes | Layout                                                              | tmux layout name |
-|-------|----------------------------------------------------------------------|------------------|
-| 1     | fills the window                                                     | (none)           |
-| 2     | equal, side by side (pane 1 left, pane 2 right)                      | `even-horizontal`|
-| 3     | pane 1 full-height left; panes 2/3 stacked upper-right/lower-right    | `main-vertical`  |
-| 4     | balanced 2x2 grid (upper-left, upper-right, lower-left, lower-right)  | `tiled`          |
-
-`dashboard/models/layout.py` is the single source of truth for these rules -- the Step 3
-preview, the Step 5 review, and the real tmux `select-layout` call all derive from it.
-
-## Open Project workflow
-
-"Open Project" on the home menu lists immediate subdirectories of `~/projects` (excluding
-`terminal-home` itself, hidden/dot directories, and anything inaccessible), each annotated
-with its git branch, whether it has a saved workspace, and whether its tmux session is
-currently running. The list is searchable (type to filter), arrow keys move through it,
-**F5** rescans everything (projects, saved workspaces, and tmux sessions) without
-restarting the dashboard, and Enter opens **Project Detail** for the highlighted project --
-nothing is ever launched directly from the list.
-
-Project Detail shows the project's full status and offers only the actions that are safe
-given that status:
-
-- **Running** -- a tmux session matching this project is currently up: **Resume Session**
-  attaches (or, if run from inside an existing tmux client, switches) to it. No panes or
-  windows are recreated, and no duplicate session is ever created.
-- **Saved Workspace** -- no session is running, but a `WorkspaceSpec` was saved previously:
-  **Recreate Workspace** rebuilds the exact saved session (windows, panes, layouts, startup
-  commands) via the same tmux orchestration the New Project wizard uses, then attaches.
-- **Not Configured** -- nothing saved yet: **Open Default Workspace** creates and saves a
-  simple one-window workspace (`code`: a Code Editor pane and a Blank Terminal pane, side by
-  side) and launches it; **Configure Workspace** opens the same window/pane builder the New
-  Project wizard uses (window naming, pane selection/ordering, layout preview, review), just
-  starting from window configuration instead of project naming, and never creating, renaming,
-  or deleting the project directory or running `git init` -- it only saves a `WorkspaceSpec`
-  for the directory that's already there.
-
-**Resume** and **Recreate** are actually the same request under the hood
-(`LaunchAction.ATTACH`): the tmux orchestration layer re-checks what's actually running right
-before acting, regardless of which button was shown. If a session disappears between opening
-Project Detail and pressing the button, it's safely recreated from the saved workspace instead
-of failing; if a session unexpectedly already exists where a fresh one was about to be
-created, the dashboard leaves it alone and reports a clear error rather than ever killing or
-overwriting it.
-
-For a project that already has a saved workspace, Project Detail also offers:
-
-- **Edit Workspace** -- reopens the same window/pane builder pre-filled with the saved
-  windows and panes. Saving replaces only that project's saved definition; it never touches a
-  currently running session for that project directly -- if one is running, a note explains
-  that the updated layout takes effect the next time the session is recreated, and Resume
-  Session for the live session keeps working exactly as before.
-- **Reset to Default Workspace** (confirmation required) -- replaces the saved definition
-  with the same simple `code` window described above, keeping the same session name. Doesn't
-  touch a running session.
-- **Forget Saved Workspace** (confirmation required) -- removes only terminal-home's own
-  saved metadata for that project's canonical path. Never touches the project directory, its
-  files, its git history, or any tmux session -- afterwards the project is simply treated as
-  "Not Configured" again.
-
-### Session identity
-
-Every workspace is keyed by its project's *canonical* (resolved) path, not just its folder
-name, since two different parents could otherwise contain identically-named folders. A saved
-workspace's tmux session name is decided once (via `dashboard.services.tmux.generate_session_name`'s
-collision rules) and then persisted -- it is never re-derived or fuzzy-matched later. A
-project with no saved workspace is only ever considered "running" if a session with its exact
-deterministic slug (`sanitize_session_name(project_name)`) exists; a similarly-named but
-unrelated session is never attached to by mistake.
-
-### After a WSL or tmux restart
-
-Saved workspaces live in the JSON store described below, independent of any tmux server, so
-after a restart every project that had a saved workspace still shows "Saved Workspace" and
-offers **Recreate Workspace** exactly as before -- nothing needs to be reconfigured.
-
-### Safety guarantees
-
-- Only `dashboard/services/workspace_launcher.py` ever runs a real tmux command, and only
-  after Textual has fully exited (`app.run()` returned) -- no screen calls tmux directly.
-- A tmux session is never killed or overwritten. Creating a new session always refuses if one
-  with that name already exists; attaching always re-checks first.
-- Reset and Forget only ever modify terminal-home's own JSON metadata store -- never the
-  project directory, its git data, or any tmux session.
-- Malformed or corrupt saved-workspace JSON, a saved project path that no longer exists, a
-  vanished project directory, missing tmux, or a pane's preferred tool (e.g. `nvim`) no longer
-  being installed are all handled with a friendly message or graceful fallback -- never a
-  Python traceback.
-
-## Workspace persistence
-
-Confirmed workspaces are saved as JSON under `$XDG_DATA_HOME/terminal-home/workspaces.json`
-(falling back to `~/.local/share/terminal-home/workspaces.json` when `XDG_DATA_HOME` isn't
-set) -- never inside the project directory itself. Entries are keyed by each project's
-canonical (resolved) path, so a workspace can be recreated after its tmux session disappears
-or WSL restarts. A missing, corrupt, or partially invalid store is handled without crashing;
-`dashboard.services.workspace_store.load_workspace_result` distinguishes "nothing saved" from
-"something was saved but it's corrupt" so Project Detail can offer a friendly warning and a
-way to forget the bad entry, rather than silently pretending nothing was ever configured.
-
-## Safety and validation behavior
-
-- The wizard never overwrites or merges into an existing directory, and never touches a
-  tmux session that already exists under the generated name.
-- Nothing is created until "Create and Open" is confirmed on the final review step;
-  cancelling at any point (Escape, or a Cancel button) leaves no trace on disk.
-- If project/git creation fails partway through, the error is shown inline (no Python
-  traceback), and whatever was already created (e.g. the directory, if `git init` then
-  failed) is reported rather than silently deleted.
-- tmux session/window/pane construction (`dashboard/services/tmux.py`) separates building
-  the exact list of tmux commands from running them, so it's unit tested without a real
-  tmux server. If a step fails partway through building a *new* session, only that
-  in-progress session is cleaned up -- pre-existing sessions and directories are never
-  touched.
-- The dashboard attaches to the new session with `tmux attach-session` when run outside
-  tmux, or `tmux switch-client` when already inside tmux -- and only after Textual has
-  fully exited, since Textual and tmux can't both own the terminal at once.
-
-## Project layout
+### Project layout
 
 ```
 dashboard/
@@ -235,25 +188,27 @@ dashboard/
     models/                     Plain dataclasses, no Textual imports, no subprocess calls
         workspace.py               PaneKind, PaneSpec, WindowSpec, WorkspaceSpec, LaunchAction, LaunchRequest
         layout.py                   Pane layout rules + ASCII preview rendering
+        settings.py                  AppSettings, LayoutMode
     services/                  Plain Python, no Textual imports -- easy to unit test
         projects.py                Scans ~/projects; ProjectStatus + primary/secondary action matrix
         git_info.py                  Cheap, tolerant git branch/repo lookups
         tmux.py                     Session listing + workspace command construction/execution
-        system_info.py              Hostname, OS, Python version, shell, disk usage
+        system_info.py               Hostname, OS, Python version, shell, disk usage
         slug.py                      Filesystem-safe slug generation
         project_creation.py          Validation, directory creation, git init (New Project only)
         pane_commands.py             Resolves each pane kind into a launch plan at launch time
         workspace_defaults.py         The simple default WorkspaceSpec (Open Default/Reset)
         workspace_store.py           JSON persistence under XDG_DATA_HOME; load/forget by canonical path
         workspace_launcher.py         Non-Textual orchestration: LaunchRequest -> running tmux
+        settings_store.py            JSON persistence under XDG_CONFIG_HOME
     screens/                    One module per screen
         home.py
-        projects.py                Open Project: searchable, status-annotated project list
+        projects.py                Continue Project: searchable, status-annotated project list
         project_detail.py           Resume/Recreate/Default/Configure/Edit/Reset/Forget
         confirm.py                   Reusable Yes/No modal for destructive metadata actions
         tmux_sessions.py            Resume tmux Session (read-only session list)
         system_info.py               System Information
-        settings.py                   Settings (placeholder)
+        settings.py                   Home screen presentation preferences
         new_project/                Shared window/pane configuration flow (WizardMode: NEW_PROJECT,
                                      EXISTING_CREATE, EXISTING_EDIT -- see state.py)
             state.py                    WizardState, WindowDraft, WizardMode, step-numbering/factories
@@ -263,30 +218,108 @@ dashboard/
             step_window_summary.py       Windows summary (entry point for EXISTING_EDIT)
             step_review.py               Review -- branches on WizardMode at the final save/launch step
 tests/                       Unit tests for models/ and services/, plus Pilot tests for screens/wizards
-    test_project_detail.py              Project Detail rendering + Resume/Recreate/Default/Edit/Reset/Forget
-    test_projects_screen.py             Open Project list: scan, search, refresh, navigation
-    test_confirm_screen.py               ConfirmScreen Pilot tests
-    test_git_info.py / test_workspace_defaults.py   New small services
-    wizard/test_new_project_wizard.py   Textual Pilot tests driving the New Project wizard
-    wizard/test_existing_project_wizard.py   Configure Workspace for an existing project
 ```
 
-## Tests and static checks
+### Pane types
 
-```bash
-.venv/bin/pytest
-.venv/bin/mypy dashboard
-.venv/bin/ruff check dashboard tests
-```
+| Pane            | Preferred command | Fallback                                   |
+|-----------------|--------------------|--------------------------------------------|
+| Code Editor     | `nvim .`           | interactive shell (Neovim not found)        |
+| Claude Code     | `claude`           | interactive shell (Claude Code not found)   |
+| Git             | `lazygit`          | `git status` then a shell; or, if the project isn't a git repo yet, a plain shell |
+| File Tree       | `tree -C .`        | `find`-based listing, then a shell          |
+| Test Terminal   | (none — a plain shell titled "tests")                                          |
+| Development Server | (none — a plain shell titled "server")                                     |
+| Blank Terminal  | (none — a plain shell)                                                         |
+| Custom Command  | the exact command you enter                                                     |
 
-Tests mock every filesystem-writing and subprocess-executing call -- no test creates a real
-tmux session, attaches to tmux, or touches the real `~/projects` or XDG data directory.
+Tool availability is checked at *launch* time
+(`dashboard/services/pane_commands.py`), not wizard time, so it always
+reflects what's actually installed. Every pane's shell starts in the
+project's directory regardless of which command (if any) runs in it.
+Falling back to a shell is always nonfatal: a short note is printed before
+the tmux session is attached.
 
-## Notes on this version's scope
+### New Project wizard
 
-- **Create New Project** (version 2) and **Open Project** (this version) are both full
-  flows now; see above for each.
-- **Resume tmux Session** (the home-menu item, distinct from Open Project) still only
-  *lists* sessions rather than attaching -- it's a general, project-independent tmux session
-  browser, and attaching from there is left for a later version.
-- **Settings** is still a placeholder screen.
+"Create New Project" opens a 5-step wizard. Nothing is written to disk, and
+no tmux session is created, until the final step is confirmed.
+
+1. **Project Info** — project display name, folder name (defaulted from the
+   project name via a filesystem-safe slug), and whether to `git init` the
+   new directory. Validation (empty names, path separators, an existing
+   directory at the destination, escaping `~/projects`) is reported inline.
+2. **Configure Window** — a window name, and a checkable list of 1-4 pane
+   types, with Move Up/Move Down controls to set their final order.
+   Choosing "Custom Command" reveals a name + command field.
+3. **Layout Preview** — a compact ASCII preview of the pane layout Step 2
+   will produce.
+4. **Windows** — a summary of every configured window so far, with Add
+   Another Window, Edit Selected Window, Remove Selected Window, Finish
+   Workspace, and Cancel.
+5. **Review** — full destination path, git-init choice, generated tmux
+   session name, every window with its ordered panes, and a layout preview
+   per window. "Create and Open" is the only action that touches the
+   filesystem, git, or tmux.
+
+### Continue Project workflow
+
+Lists immediate subdirectories of `~/projects` (excluding `terminal-home`
+itself, hidden/dot directories, and anything inaccessible), each annotated
+with its git branch, whether it has a saved workspace, and whether its tmux
+session is currently running. Enter opens **Project Detail**, which offers
+only the actions that are safe given that status:
+
+- **Running** — **Resume Session** attaches (or, from inside an existing
+  tmux client, switches) to the running session. No panes or windows are
+  recreated.
+- **Saved Workspace** — no session running, but a `WorkspaceSpec` was saved
+  previously: **Recreate Workspace** rebuilds the exact saved session, then
+  attaches.
+- **Not Configured** — **Open Default Workspace** creates and saves a simple
+  one-window workspace (Code Editor + Blank Terminal, side by side);
+  **Configure Workspace** opens the same window/pane builder the wizard
+  uses.
+
+For a project with a saved workspace, Project Detail also offers **Edit
+Workspace** (reopens the builder pre-filled with the saved layout), **Reset
+to Default Workspace**, and **Forget Saved Workspace** — all confirmation-
+gated where destructive, and none of them ever touch the project directory,
+its git history, or a currently running session.
+
+### Session identity
+
+Every workspace is keyed by its project's canonical (resolved) path, not
+just its folder name. A saved workspace's tmux session name is decided once
+(via `generate_session_name`'s collision rules) and then persisted — never
+re-derived or fuzzy-matched later. A project with no saved workspace is only
+considered "running" if a session with its exact deterministic slug exists.
+
+### Full safety guarantees
+
+- Only `dashboard/services/workspace_launcher.py` ever runs a real tmux
+  command, and only after Textual has fully exited (`app.run()` returned) —
+  no screen calls tmux directly.
+- A tmux session is never killed or overwritten. Creating a new session
+  always refuses if one with that name already exists; attaching always
+  re-checks first.
+- Reset and Forget only ever modify Terminal Home's own JSON metadata store
+  — never the project directory, its git data, or any tmux session.
+- Malformed or corrupt saved-workspace JSON, a saved project path that no
+  longer exists, missing tmux, or a pane's preferred tool no longer being
+  installed are all handled with a friendly message or graceful fallback —
+  never a Python traceback.
+- If a step fails partway through building a *new* session, only that
+  in-progress session is cleaned up — pre-existing sessions and directories
+  are never touched.
+
+### Workspace persistence
+
+Confirmed workspaces are saved as JSON under
+`$XDG_DATA_HOME/terminal-home/workspaces.json` (falling back to
+`~/.local/share/terminal-home/workspaces.json` when `XDG_DATA_HOME` isn't
+set) — never inside the project directory itself. A missing, corrupt, or
+partially invalid store is handled without crashing;
+`dashboard.services.workspace_store.load_workspace_result` distinguishes
+"nothing saved" from "something was saved but it's corrupt" so Project
+Detail can offer a friendly warning and a way to forget the bad entry.
