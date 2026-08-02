@@ -1,0 +1,113 @@
+/* Dark, bordered-panel theme shared by every screen in the dashboard. */
+
+Screen {
+    background: $surface;
+}
+
+/* Every screen centers a single fixed-width panel in the middle of the
+   terminal; .screen-root is the full-size aligner, .panel is the content
+   box itself. */
+.screen-root {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+}
+
+.panel {
+    width: 74;
+    height: auto;
+    max-height: 90%;
+    border: heavy $primary;
+    padding: 1 3;
+    background: $panel;
+}
+
+#screen-title {
+    text-style: bold;
+    text-align: center;
+    color: $text-accent;
+    padding: 0 0 1 0;
+}
+
+/* --- Home screen --- */
+
+#title {
+    text-align: center;
+    text-style: bold;
+    color: $text-accent;
+}
+
+#art {
+    text-align: center;
+    color: $primary-lighten-2;
+    padding: 1 0;
+}
+
+#clock {
+    text-align: center;
+    color: $text-muted;
+    padding: 0 0 1 0;
+}
+
+#welcome {
+    text-align: center;
+    padding: 0 0 1 0;
+}
+
+/* --- Shared list / input styling --- */
+
+OptionList {
+    height: auto;
+    max-height: 14;
+    margin: 1 0 0 0;
+    border: round $primary;
+    background: $panel-darken-1;
+}
+
+OptionList:focus {
+    border: round $accent;
+}
+
+Input {
+    margin: 1 0 0 0;
+    border: round $primary;
+}
+
+Input:focus {
+    border: round $accent;
+}
+
+/* --- Projects screen --- */
+
+#project-path {
+    padding: 1 0 0 0;
+    color: $text-muted;
+}
+
+/* --- tmux screen --- */
+
+#tmux-status {
+    padding: 0 0 1 0;
+    color: $text-muted;
+}
+
+/* --- System info screen --- */
+
+#info-rows {
+    height: auto;
+    border: round $primary;
+    background: $panel-darken-1;
+    padding: 1 2;
+}
+
+.info-row {
+    padding: 0 1;
+}
+
+/* --- Placeholder screens --- */
+
+#placeholder-body {
+    text-align: center;
+    padding: 1 0;
+    color: $text-muted;
+}

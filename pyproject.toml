@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terminal-home"
+version = "0.1.0"
+description = "Pablo's personal terminal development dashboard"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.60",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+dev = "dashboard.app:main"
+
+[tool.setuptools.packages.find]
+include = ["dashboard*"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
