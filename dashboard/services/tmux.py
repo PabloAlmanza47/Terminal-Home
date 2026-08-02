@@ -1,12 +1,13 @@
 """tmux session listing (version 1) plus workspace construction (version 2).
 
-Command *construction* is kept as pure, deterministic functions -- given a
-WorkspaceSpec and a map of pane launch plans, build_workspace_commands
-returns the exact argv list tmux will be asked to run, with no subprocess
-calls of its own. Command *execution* (create_workspace_session,
-run_tmux_command) is a thin, separately-mockable layer on top, so the
-construction logic can be unit tested without ever touching a real tmux
-server, and callers can swap in a fake runner.
+Command *construction* and *execution* are interleaved in
+create_workspace_session: each window/pane-creating command asks tmux to
+report back the stable id it just assigned (`-P -F`), and every later
+command in that workspace targets ids, never an assumed numeric window/pane
+index. The individual argv-builder functions (`_new_session_argv`, etc.) are
+pure and separately testable; create_workspace_session accepts an injectable
+*runner*, so the whole flow can be unit tested with a fake tmux without ever
+touching a real server.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
-from dashboard.models import WorkspaceSpec
+from dashboard.models import WindowSpec, WorkspaceSpec
 from dashboard.models.layout import tmux_layout_for_pane_count
 from dashboard.services.pane_commands import PaneLaunchPlan
 
@@ -118,17 +119,30 @@ def sanitize_session_name(name: str) -> str:
     return sanitized or "workspace"
 
 
-def session_exists(session_name: str) -> bool:
-    """Whether a tmux session named *session_name* is currently running."""
+def run_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Execute a single tmux argv command, capturing its output."""
+    return subprocess.run(
+        argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+    )
+
+
+def session_exists(
+    session_name: str,
+    *,
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] = run_tmux_command,
+) -> bool:
+    """Whether a tmux session named *session_name* is currently running.
+
+    Takes the same injectable *runner* as create_workspace_session so a
+    caller pointed at an alternate tmux socket (e.g. `-L terminal-home-test`)
+    checks that socket, not whatever server the bare `tmux` binary defaults
+    to -- callers that don't pass one still hit the real server via
+    run_tmux_command, unchanged.
+    """
     if not is_tmux_installed():
         return False
     try:
-        result = subprocess.run(
-            ["tmux", "has-session", "-t", session_name],
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        result = runner(["tmux", "has-session", "-t", session_name])
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
@@ -154,99 +168,147 @@ def generate_session_name(project_name: str, existing: Iterable[str] | None = No
     return f"{base}-{suffix}"
 
 
-def get_pane_base_index() -> int:
-    """The tmux `pane-base-index` global option (default 0), so panes we
-    create can be addressed correctly under a user's existing tmux.conf
-    without this dashboard ever needing to read or change that file.
-    """
-    if not is_tmux_installed():
-        return 0
-    try:
-        result = subprocess.run(
-            ["tmux", "show-options", "-g", "pane-base-index"],
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return 0
+# A window/pane's numeric *index* shifts with the user's `base-index` /
+# `pane-base-index` tmux.conf settings, so a target string built from an
+# assumed index (e.g. "session:window.0") can point at the wrong pane -- or
+# none at all -- depending on what the user's config says. Every command
+# below instead asks tmux to report back the stable id (`@N` / `%N`) it just
+# assigned via `-P -F`, and every later command targets that id directly, so
+# construction never has to know or guess any base-index value.
+_CREATE_CAPTURE_FORMAT = "#{window_id} #{pane_id}"
+_PANE_CAPTURE_FORMAT = "#{pane_id}"
+
+
+def _new_session_argv(session_name: str, window_name: str, project_dir: str) -> list[str]:
+    return [
+        "tmux",
+        "new-session",
+        "-d",
+        "-s",
+        session_name,
+        "-n",
+        window_name,
+        "-c",
+        project_dir,
+        "-P",
+        "-F",
+        _CREATE_CAPTURE_FORMAT,
+    ]
+
+
+def _new_window_argv(session_name: str, window_name: str, project_dir: str) -> list[str]:
+    return [
+        "tmux",
+        "new-window",
+        "-t",
+        session_name,
+        "-n",
+        window_name,
+        "-c",
+        project_dir,
+        "-P",
+        "-F",
+        _CREATE_CAPTURE_FORMAT,
+    ]
+
+
+def _split_window_argv(window_id: str, project_dir: str) -> list[str]:
+    return [
+        "tmux",
+        "split-window",
+        "-t",
+        window_id,
+        "-c",
+        project_dir,
+        "-P",
+        "-F",
+        _PANE_CAPTURE_FORMAT,
+    ]
+
+
+def _select_layout_argv(window_id: str, layout: str) -> list[str]:
+    return ["tmux", "select-layout", "-t", window_id, layout]
+
+
+def _select_pane_title_argv(pane_id: str, title: str) -> list[str]:
+    return ["tmux", "select-pane", "-t", pane_id, "-T", title]
+
+
+def _send_keys_argv(pane_id: str, command: str) -> list[str]:
+    return ["tmux", "send-keys", "-t", pane_id, command, "Enter"]
+
+
+def _select_window_argv(window_id: str) -> list[str]:
+    return ["tmux", "select-window", "-t", window_id]
+
+
+def _select_pane_argv(pane_id: str) -> list[str]:
+    return ["tmux", "select-pane", "-t", pane_id]
+
+
+def _run_step(
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]], argv: list[str]
+) -> subprocess.CompletedProcess[str]:
+    result = runner(argv)
     if result.returncode != 0:
-        return 0
-    parts = result.stdout.strip().split()
-    if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1])
-    return 0
+        raise TmuxCommandError(f"Command failed: {' '.join(argv)}\n{result.stderr.strip()}")
+    return result
 
 
-def build_workspace_commands(
-    workspace: WorkspaceSpec,
+def _parse_create_capture(
+    result: subprocess.CompletedProcess[str], argv: list[str]
+) -> tuple[str, str]:
+    parts = result.stdout.strip().split(" ", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise TmuxCommandError(
+            f"Command succeeded but did not report back a window/pane id: {' '.join(argv)}"
+        )
+    return parts[0], parts[1]
+
+
+def _parse_pane_capture(result: subprocess.CompletedProcess[str], argv: list[str]) -> str:
+    pane_id = result.stdout.strip()
+    if not pane_id:
+        raise TmuxCommandError(
+            f"Command succeeded but did not report back a pane id: {' '.join(argv)}"
+        )
+    return pane_id
+
+
+def _create_window_panes(
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    window: WindowSpec,
+    window_id: str,
+    first_pane_id: str,
+    project_dir: str,
     pane_plans: Mapping[tuple[str, int], PaneLaunchPlan],
-    *,
-    pane_base_index: int = 0,
-) -> list[list[str]]:
-    """Build the full, ordered list of tmux argv commands that create
-    *workspace* as a tmux session -- windows, panes, layouts, titles, and
-    startup commands -- with no side effects. *pane_plans* maps
-    (window_name, pane_index) to the PaneLaunchPlan for that pane.
+) -> list[str]:
+    """Split *window_id* out to its full pane count, apply its layout, then
+    apply each pane's title/startup command -- by the pane id tmux reported
+    back for it, in WorkspaceSpec pane order. Returns the pane ids in that
+    same order (index 0 is *first_pane_id*, the pane the window was created
+    with).
     """
-    commands: list[list[str]] = []
-    session = workspace.session_name
-    project_dir = str(workspace.project_path)
-    first_window = workspace.windows[0]
+    pane_ids = [first_pane_id]
+    for _ in range(len(window.panes) - 1):
+        argv = _split_window_argv(window_id, project_dir)
+        result = _run_step(runner, argv)
+        pane_ids.append(_parse_pane_capture(result, argv))
 
-    commands.append(
-        [
-            "tmux",
-            "new-session",
-            "-d",
-            "-s",
-            session,
-            "-n",
-            first_window.window_name,
-            "-c",
-            project_dir,
-        ]
-    )
+    layout = tmux_layout_for_pane_count(len(window.panes))
+    if layout is not None:
+        _run_step(runner, _select_layout_argv(window_id, layout))
 
-    for window_index, window in enumerate(workspace.windows):
-        window_target = f"{session}:{window.window_name}"
+    for pane_index, pane_id in enumerate(pane_ids):
+        plan = pane_plans.get((window.window_name, pane_index))
+        if plan is None:
+            continue
+        if plan.pane_title:
+            _run_step(runner, _select_pane_title_argv(pane_id, plan.pane_title))
+        if plan.startup_command:
+            _run_step(runner, _send_keys_argv(pane_id, plan.startup_command))
 
-        if window_index > 0:
-            commands.append(
-                ["tmux", "new-window", "-t", session, "-n", window.window_name, "-c", project_dir]
-            )
-
-        for _ in range(len(window.panes) - 1):
-            commands.append(["tmux", "split-window", "-t", window_target, "-c", project_dir])
-
-        layout = tmux_layout_for_pane_count(len(window.panes))
-        if layout is not None:
-            commands.append(["tmux", "select-layout", "-t", window_target, layout])
-
-        for pane_index, _pane in enumerate(window.panes):
-            plan = pane_plans.get((window.window_name, pane_index))
-            if plan is None:
-                continue
-            pane_target = f"{window_target}.{pane_base_index + pane_index}"
-            if plan.pane_title:
-                commands.append(["tmux", "select-pane", "-t", pane_target, "-T", plan.pane_title])
-            if plan.startup_command:
-                commands.append(
-                    ["tmux", "send-keys", "-t", pane_target, plan.startup_command, "Enter"]
-                )
-
-    first_window_target = f"{session}:{first_window.window_name}"
-    commands.append(["tmux", "select-window", "-t", first_window_target])
-    commands.append(["tmux", "select-pane", "-t", f"{first_window_target}.{pane_base_index}"])
-
-    return commands
-
-
-def run_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    """Execute a single tmux argv command, capturing its output."""
-    return subprocess.run(
-        argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS
-    )
+    return pane_ids
 
 
 def create_workspace_session(
@@ -255,34 +317,50 @@ def create_workspace_session(
     *,
     runner: Callable[[list[str]], subprocess.CompletedProcess[str]] = run_tmux_command,
 ) -> None:
-    """Create *workspace* as a real tmux session by running each build
+    """Create *workspace* as a real tmux session by running each tmux
     command in order via *runner*.
+
+    Every window and pane is targeted by the stable id (`@N` / `%N`) tmux
+    itself reports back via `-P -F` when it's created -- never by an
+    assumed numeric window/pane index -- so this is correct under any
+    base-index/pane-base-index the user's tmux.conf sets, and regardless of
+    whether a tmux server happens to already be running.
 
     Never touches a pre-existing session: raises immediately if one with
     this name is already running. If a later command fails partway
     through, the session this call just created is killed (never a
     pre-existing one) so a half-built workspace isn't left behind.
     """
-    if session_exists(workspace.session_name):
+    if session_exists(workspace.session_name, runner=runner):
         raise TmuxCommandError(f"A tmux session named '{workspace.session_name}' already exists.")
 
-    pane_base_index = get_pane_base_index()
-    commands = build_workspace_commands(workspace, pane_plans, pane_base_index=pane_base_index)
+    session = workspace.session_name
+    project_dir = str(workspace.project_path)
+    first_window = workspace.windows[0]
 
     session_created = False
     try:
-        for argv in commands:
-            result = runner(argv)
-            if result.returncode != 0:
-                raise TmuxCommandError(
-                    f"Command failed: {' '.join(argv)}\n{result.stderr.strip()}"
-                )
-            if argv[1] == "new-session":
-                session_created = True
+        argv = _new_session_argv(session, first_window.window_name, project_dir)
+        result = _run_step(runner, argv)
+        session_created = True
+        first_window_id, first_pane_id = _parse_create_capture(result, argv)
+
+        first_window_pane_ids = _create_window_panes(
+            runner, first_window, first_window_id, first_pane_id, project_dir, pane_plans
+        )
+
+        for window in workspace.windows[1:]:
+            argv = _new_window_argv(session, window.window_name, project_dir)
+            result = _run_step(runner, argv)
+            window_id, pane_id = _parse_create_capture(result, argv)
+            _create_window_panes(runner, window, window_id, pane_id, project_dir, pane_plans)
+
+        _run_step(runner, _select_window_argv(first_window_id))
+        _run_step(runner, _select_pane_argv(first_window_pane_ids[0]))
     except TmuxCommandError:
-        if session_created and session_exists(workspace.session_name):
+        if session_created and session_exists(session, runner=runner):
             with contextlib.suppress(Exception):
-                runner(["tmux", "kill-session", "-t", workspace.session_name])
+                runner(["tmux", "kill-session", "-t", session])
         raise
 
 
