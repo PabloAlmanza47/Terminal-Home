@@ -80,6 +80,26 @@ class ProjectStatus:
     last_modified: datetime | None
 
 
+def scan_all_projects(
+    root: Path | None = None,
+    store_path: Path | None = None,
+) -> list[ProjectStatus]:
+    """Discover every project under *root* and gather each one's status in
+    a single pass, sharing one `tmux list-sessions` call across all of
+    them instead of one `tmux has-session` per project.
+
+    This is the single scanning implementation shared by the Open Project
+    list screen and the home screen's recent-projects/active-sessions
+    panels -- neither should re-implement project discovery on its own.
+    """
+    projects = discover_projects(root)
+    running_sessions = {session.name for session in tmux.list_tmux_sessions()}
+    return [
+        gather_project_status(project, store_path=store_path, running_sessions=running_sessions)
+        for project in projects
+    ]
+
+
 def gather_project_status(
     project: Project,
     *,
@@ -158,6 +178,20 @@ class ProjectAction(str, Enum):
     EDIT = "edit"
     RESET = "reset"
     FORGET = "forget"
+
+
+def status_badge(status: ProjectStatus) -> str:
+    """A single, human-readable status word for *status*, using the same
+    priority order as primary_actions: a running session always wins,
+    then corrupt metadata, then a saved workspace, then "nothing yet".
+    """
+    if status.session_running:
+        return "Running"
+    if status.workspace_metadata_error:
+        return "Metadata Warning"
+    if status.saved_workspace is not None:
+        return "Saved Workspace"
+    return "Not Configured"
 
 
 def primary_actions(status: ProjectStatus) -> list[ProjectAction]:

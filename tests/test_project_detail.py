@@ -30,6 +30,7 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root.mkdir()
     monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     return projects_root
 
@@ -43,7 +44,7 @@ async def _open_project_detail(pilot, project_name: str) -> None:
     name (not just index, so multi-project scenarios stay unambiguous).
     """
     await pilot.pause()
-    await pilot.press("enter")  # Open Project is the first main-menu item
+    await pilot.press("enter")  # Continue Project is the first main-menu item
     await pilot.pause()
     await pilot.app.workers.wait_for_complete()
     await pilot.pause()

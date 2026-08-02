@@ -34,13 +34,14 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root.mkdir()
     monkeypatch.setattr(project_creation_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     return projects_root
 
 
 async def _open_new_project_wizard(pilot) -> None:
-    """From Home, select "Create New Project" (3rd item in the main menu)."""
+    """From Home, select "Create New Project" (2nd item in the main menu)."""
     await pilot.pause()
-    await pilot.press("down", "down", "enter")
+    await pilot.press("down", "enter")
     await pilot.pause()
 
 

@@ -17,13 +17,7 @@ from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
-from dashboard.services import tmux
-from dashboard.services.projects import (
-    Project,
-    ProjectStatus,
-    discover_projects,
-    gather_project_status,
-)
+from dashboard.services.projects import Project, ProjectStatus, scan_all_projects
 
 
 def _row_label(project: Project, status: ProjectStatus | None) -> str:
@@ -100,15 +94,12 @@ class ProjectsScreen(Screen[None]):
         self.run_worker(self._scan, thread=True, exclusive=True)
 
     def _scan(self) -> None:
-        """Runs in a worker thread: discover_projects and gather_project_status
-        both make blocking filesystem/subprocess calls.
+        """Runs in a worker thread: scan_all_projects makes blocking
+        filesystem/subprocess calls.
         """
-        projects = discover_projects()
-        running_sessions = {session.name for session in tmux.list_tmux_sessions()}
-        statuses = {
-            project.name: gather_project_status(project, running_sessions=running_sessions)
-            for project in projects
-        }
+        statuses_list = scan_all_projects()
+        projects = [status.project for status in statuses_list]
+        statuses = {status.project.name: status for status in statuses_list}
         self.app.call_from_thread(self._on_scan_complete, projects, statuses)
 
     def _on_scan_complete(

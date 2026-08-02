@@ -30,6 +30,7 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root.mkdir()
     monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -41,7 +42,7 @@ def _run(coro):
 
 
 async def _open_projects_screen(pilot) -> None:
-    """From Home, select "Open Project" (the first main-menu item), and
+    """From Home, select "Continue Project" (the first main-menu item), and
     wait for the background scan to complete.
     """
     await pilot.pause()

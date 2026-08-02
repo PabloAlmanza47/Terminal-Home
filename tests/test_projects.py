@@ -15,7 +15,9 @@ from dashboard.services.projects import (
     discover_projects,
     gather_project_status,
     primary_actions,
+    scan_all_projects,
     secondary_actions,
+    status_badge,
 )
 from dashboard.services.workspace_store import save_workspace
 
@@ -329,3 +331,73 @@ def test_secondary_actions_offers_forget_for_corrupt_metadata_with_running_sessi
         _status(session_running=True, workspace_metadata_error="bad data")
     )
     assert actions == [ProjectAction.FORGET]
+
+
+# --- status_badge ---------------------------------------------------------------
+
+
+def test_status_badge_running_wins_over_everything() -> None:
+    assert status_badge(_status(session_running=True, workspace_metadata_error="bad")) == "Running"
+
+
+def test_status_badge_metadata_warning() -> None:
+    assert status_badge(_status(workspace_metadata_error="bad data")) == "Metadata Warning"
+
+
+def test_status_badge_saved_workspace(tmp_path: Path) -> None:
+    assert status_badge(_status(saved_workspace=_workspace(tmp_path))) == "Saved Workspace"
+
+
+def test_status_badge_not_configured() -> None:
+    assert status_badge(_status()) == "Not Configured"
+
+
+# --- scan_all_projects -----------------------------------------------------------
+
+
+def test_scan_all_projects_returns_one_status_per_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(projects_module.tmux, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(projects_module.tmux, "list_tmux_sessions", lambda: [])
+    root = tmp_path / "projects"
+    root.mkdir()
+    (root / "alpha").mkdir()
+    (root / "beta").mkdir()
+    store_path = tmp_path / "workspaces.json"
+
+    statuses = scan_all_projects(root=root, store_path=store_path)
+
+    assert sorted(s.project.name for s in statuses) == ["alpha", "beta"]
+
+
+def test_scan_all_projects_shares_one_tmux_session_list_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(projects_module.tmux, "is_tmux_installed", lambda: True)
+    call_count = {"n": 0}
+
+    def fake_list_sessions():
+        call_count["n"] += 1
+        return []
+
+    monkeypatch.setattr(projects_module.tmux, "list_tmux_sessions", fake_list_sessions)
+    root = tmp_path / "projects"
+    root.mkdir()
+    for name in ("alpha", "beta", "gamma"):
+        (root / name).mkdir()
+
+    scan_all_projects(root=root, store_path=tmp_path / "workspaces.json")
+
+    assert call_count["n"] == 1
+
+
+def test_scan_all_projects_missing_root_returns_empty_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(projects_module.tmux, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(projects_module.tmux, "list_tmux_sessions", lambda: [])
+
+    statuses = scan_all_projects(root=tmp_path / "does-not-exist")
+
+    assert statuses == []
