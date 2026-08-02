@@ -7,6 +7,7 @@ resuming, and rebuilding project-specific tmux environments.
 
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
+[![CI](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Textual](https://img.shields.io/badge/UI-Textual-5A4FCF)
 ![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC)
