@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models import WorkspaceSpec
@@ -75,3 +76,57 @@ def load_workspace(project_path: Path, store_path: Path | None = None) -> Worksp
     """
     workspaces = load_all_workspaces(store_path)
     return workspaces.get(str(project_path.resolve()))
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceLoadResult:
+    """The outcome of looking up one project's saved workspace, keeping
+    "nothing saved" distinguishable from "something was saved but it's
+    corrupt" -- the Project Detail screen shows a friendly warning (and an
+    option to forget the bad entry) only in the latter case.
+    """
+
+    workspace: WorkspaceSpec | None
+    error: str | None = None
+
+
+def load_workspace_result(
+    project_path: Path, store_path: Path | None = None
+) -> WorkspaceLoadResult:
+    """Like load_workspace, but reports *why* nothing came back when the
+    store has an entry for *project_path* that failed to parse.
+    """
+    store_path = store_path if store_path is not None else default_store_path()
+    raw = _load_raw(store_path)
+    key = str(project_path.resolve())
+
+    if key not in raw:
+        return WorkspaceLoadResult(workspace=None, error=None)
+
+    value = raw[key]
+    if not isinstance(value, dict):
+        return WorkspaceLoadResult(
+            workspace=None, error="Saved workspace data is not in the expected format."
+        )
+    try:
+        return WorkspaceLoadResult(workspace=WorkspaceSpec.from_dict(value), error=None)
+    except (KeyError, TypeError, ValueError) as exc:
+        return WorkspaceLoadResult(workspace=None, error=f"Saved workspace data is invalid: {exc}")
+
+
+def forget_workspace(project_path: Path, store_path: Path | None = None) -> bool:
+    """Remove *project_path*'s saved workspace entry, if any.
+
+    Only ever touches terminal-home's own metadata store -- never the
+    project directory, its git data, or any tmux session. Returns whether
+    an entry was actually removed.
+    """
+    store_path = store_path if store_path is not None else default_store_path()
+    data = _load_raw(store_path)
+    key = str(project_path.resolve())
+    if key not in data:
+        return False
+    del data[key]
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text(json.dumps(data, indent=2))
+    return True

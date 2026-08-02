@@ -28,7 +28,7 @@ class WindowConfigScreen(Screen[None]):
 
     BINDINGS = [("escape", "back", "Back")]
 
-    def __init__(self, state: WizardState, back_target: str) -> None:
+    def __init__(self, state: WizardState, back_target: str | None) -> None:
         super().__init__()
         self.state = state
         self.back_target = back_target
@@ -44,9 +44,7 @@ class WindowConfigScreen(Screen[None]):
 
         with Container(classes="screen-root"):
             with VerticalScroll(classes="panel"):
-                yield Static(
-                    "Create New Project -- Step 2 of 5: Configure Window", id="screen-title"
-                )
+                yield Static(self.state.step_label(2, "Configure Window"), id="screen-title")
                 yield Static("Window name", classes="field-label")
                 yield Input(
                     value=self.state.pending_window.window_name,
@@ -226,7 +224,11 @@ class WindowConfigScreen(Screen[None]):
 
     def action_back(self) -> None:
         self._sync_pending_window()
-        if self.back_target == "project_info":
+        if self.back_target is None:
+            # Entered directly (Configure Workspace on an existing project)
+            # -- there's no earlier step to return to.
+            self.app.pop_screen()
+        elif self.back_target == "project_info":
             from dashboard.screens.new_project.step_project_info import NewProjectScreen
 
             self.app.switch_screen(NewProjectScreen(self.state))

@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from dashboard.models import LaunchRequest, WorkspaceSpec
+from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
 from dashboard.services import pane_commands, tmux
 
 
@@ -34,24 +34,15 @@ def build_pane_plans(
     }
 
 
-def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None) -> None:
-    """Build and start the tmux session for *request*, then attach or
-    switch to it.
-
-    Assumes the project directory, `git init`, and workspace persistence
-    have already happened -- the wizard's final step does that while
-    Textual is still running, before returning this request. This function
-    only builds the tmux session and hands over the terminal.
+def _build_create_and_attach(workspace: WorkspaceSpec, stream: TextIO) -> None:
+    """Create *workspace* as a brand-new tmux session and hand over the
+    terminal. Shared by LaunchAction.CREATE and by LaunchAction.ATTACH's
+    fallback when the session it hoped to attach to has disappeared.
     """
-    stream = out if out is not None else sys.stdout
-    workspace = request.workspace
-
-    if tmux.session_exists(workspace.session_name):
+    if not workspace.project_path.is_dir():
         raise LaunchError(
-            f"A tmux session named '{workspace.session_name}' already exists -- "
-            "leaving it untouched. Your project directory and saved workspace "
-            "are intact; attach to the existing session manually, or rename it "
-            "and run the dashboard again."
+            f"Project directory no longer exists: {workspace.project_path}. "
+            "Nothing was created; the saved workspace is untouched."
         )
 
     pane_plans = build_pane_plans(workspace)
@@ -64,3 +55,46 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
 
     argv = tmux.attach_or_switch_argv(workspace.session_name)
     tmux.exec_attach(argv)
+
+
+def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None) -> None:
+    """Build and start (or attach to) the tmux session for *request*.
+
+    Assumes the project directory, `git init`, and workspace persistence
+    have already happened -- the wizard's final step does that while
+    Textual is still running, before returning this request. This function
+    only ever builds/attaches the tmux session; it always re-checks the
+    session's actual current state rather than trusting whatever the
+    Textual screen last observed, since a session can appear or disappear
+    in the gap between scanning and launching.
+    """
+    stream = out if out is not None else sys.stdout
+
+    if not tmux.is_tmux_installed():
+        raise LaunchError("tmux is not installed -- install tmux to launch a workspace.")
+
+    session_name = request.resolved_session_name
+
+    if request.action is LaunchAction.ATTACH:
+        if tmux.session_exists(session_name):
+            tmux.exec_attach(tmux.attach_or_switch_argv(session_name))
+            return
+        if request.workspace is None:
+            raise LaunchError(
+                f"tmux session '{session_name}' is no longer running, and there is no "
+                "saved workspace to recreate it from -- use Configure Workspace instead."
+            )
+        _build_create_and_attach(request.workspace, stream)
+        return
+
+    # LaunchAction.CREATE: request.workspace is guaranteed non-None here
+    # (enforced by LaunchRequest.__post_init__).
+    assert request.workspace is not None
+    if tmux.session_exists(session_name):
+        raise LaunchError(
+            f"A tmux session named '{session_name}' already exists -- "
+            "leaving it untouched. Your project directory and saved workspace "
+            "are intact; attach to the existing session manually, or rename it "
+            "and run the dashboard again."
+        )
+    _build_create_and_attach(request.workspace, stream)

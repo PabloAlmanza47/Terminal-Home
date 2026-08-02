@@ -26,7 +26,7 @@ class WindowSummaryScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         with Container(classes="screen-root"):
             with VerticalScroll(classes="panel"):
-                yield Static("Create New Project -- Step 4 of 5: Windows", id="screen-title")
+                yield Static(self.state.step_label(4, "Windows"), id="screen-title")
                 yield OptionList(id="window-list")
                 yield Static("", id="wizard-error")
                 with Horizontal(classes="button-row"):

@@ -8,6 +8,7 @@ import pytest
 
 from dashboard.models import (
     MAX_PANES_PER_WINDOW,
+    LaunchAction,
     LaunchRequest,
     PaneKind,
     PaneSpec,
@@ -167,3 +168,33 @@ def test_launch_request_bundles_workspace_and_git_flag(tmp_path: Path) -> None:
     request = LaunchRequest(workspace=workspace, init_git=True)
     assert request.workspace is workspace
     assert request.init_git is True
+    assert request.action is LaunchAction.CREATE
+    assert request.resolved_session_name == "demo"
+
+
+def test_launch_request_create_requires_a_workspace() -> None:
+    with pytest.raises(WorkspaceValidationError):
+        LaunchRequest(workspace=None, init_git=False, action=LaunchAction.CREATE)
+
+
+def test_launch_request_attach_without_workspace_requires_session_name() -> None:
+    with pytest.raises(WorkspaceValidationError):
+        LaunchRequest(workspace=None, init_git=False, action=LaunchAction.ATTACH)
+
+
+def test_launch_request_attach_without_workspace_uses_given_session_name() -> None:
+    request = LaunchRequest(
+        workspace=None, init_git=False, action=LaunchAction.ATTACH, session_name="orphan"
+    )
+    assert request.resolved_session_name == "orphan"
+
+
+def test_launch_request_attach_with_workspace_resolves_its_session_name(tmp_path: Path) -> None:
+    workspace = WorkspaceSpec(
+        project_name="demo",
+        project_path=tmp_path,
+        session_name="demo",
+        windows=(WindowSpec(window_name="main", panes=(_pane(),)),),
+    )
+    request = LaunchRequest(workspace=workspace, init_git=False, action=LaunchAction.ATTACH)
+    assert request.resolved_session_name == "demo"

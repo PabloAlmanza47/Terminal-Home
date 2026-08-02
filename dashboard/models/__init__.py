@@ -11,6 +11,7 @@ from __future__ import annotations
 from dashboard.models.workspace import (
     MAX_PANES_PER_WINDOW,
     PANE_KIND_LABELS,
+    LaunchAction,
     LaunchRequest,
     PaneKind,
     PaneSpec,
@@ -20,6 +21,7 @@ from dashboard.models.workspace import (
 )
 
 __all__ = [
+    "LaunchAction",
     "LaunchRequest",
     "MAX_PANES_PER_WINDOW",
     "PANE_KIND_LABELS",

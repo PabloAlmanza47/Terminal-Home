@@ -18,7 +18,7 @@ class LayoutPreviewScreen(Screen[None]):
 
     BINDINGS = [("escape", "back", "Back")]
 
-    def __init__(self, state: WizardState, back_target: str) -> None:
+    def __init__(self, state: WizardState, back_target: str | None) -> None:
         super().__init__()
         self.state = state
         self.back_target = back_target
@@ -30,9 +30,7 @@ class LayoutPreviewScreen(Screen[None]):
 
         with Container(classes="screen-root"):
             with Vertical(classes="panel"):
-                yield Static(
-                    "Create New Project -- Step 3 of 5: Layout Preview", id="screen-title"
-                )
+                yield Static(self.state.step_label(3, "Layout Preview"), id="screen-title")
                 yield Static(f"Window: {window.window_name}", id="preview-window-name")
                 yield Static(
                     "\n".join(f"{i + 1}. {label}" for i, label in enumerate(labels)),

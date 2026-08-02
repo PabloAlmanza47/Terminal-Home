@@ -9,8 +9,10 @@ import pytest
 from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
 from dashboard.services.workspace_store import (
     default_store_path,
+    forget_workspace,
     load_all_workspaces,
     load_workspace,
+    load_workspace_result,
     save_workspace,
 )
 
@@ -131,3 +133,88 @@ def test_default_store_path_falls_back_to_local_share(
     monkeypatch.setenv("HOME", str(tmp_path))
     expected = tmp_path / ".local" / "share" / "terminal-home" / "workspaces.json"
     assert default_store_path() == expected
+
+
+# --- load_workspace_result: distinguishing "absent" from "malformed" -----------
+
+
+def test_load_workspace_result_absent_has_no_error(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    result = load_workspace_result(tmp_path / "nowhere", store_path=store_path)
+    assert result.workspace is None
+    assert result.error is None
+
+
+def test_load_workspace_result_returns_saved_workspace(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    project_path.mkdir()
+    workspace = _make_workspace(project_path)
+    save_workspace(workspace, store_path=store_path)
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace == workspace
+    assert result.error is None
+
+
+def test_load_workspace_result_reports_malformed_entry(tmp_path: Path) -> None:
+    import json
+
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    project_path.mkdir()
+    store_path.write_text(json.dumps({str(project_path.resolve()): {"project_name": "bad"}}))
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace is None
+    assert result.error is not None
+
+
+def test_load_workspace_result_reports_non_dict_entry(tmp_path: Path) -> None:
+    import json
+
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    project_path.mkdir()
+    store_path.write_text(json.dumps({str(project_path.resolve()): "not-a-dict"}))
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace is None
+    assert result.error is not None
+
+
+# --- forget_workspace -----------------------------------------------------------
+
+
+def test_forget_workspace_removes_only_that_entry(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    keep = _make_workspace(tmp_path / "keep", name="keep")
+    forget = _make_workspace(tmp_path / "forget", name="forget")
+    save_workspace(keep, store_path=store_path)
+    save_workspace(forget, store_path=store_path)
+
+    removed = forget_workspace(tmp_path / "forget", store_path=store_path)
+
+    assert removed is True
+    assert load_workspace(tmp_path / "forget", store_path=store_path) is None
+    assert load_workspace(tmp_path / "keep", store_path=store_path) == keep
+
+
+def test_forget_workspace_missing_entry_returns_false(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    assert forget_workspace(tmp_path / "nowhere", store_path=store_path) is False
+
+
+def test_forget_workspace_never_touches_project_directory(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    project_path.mkdir()
+    (project_path / "keep-me.txt").write_text("still here")
+    save_workspace(_make_workspace(project_path), store_path=store_path)
+
+    forget_workspace(project_path, store_path=store_path)
+
+    assert (project_path / "keep-me.txt").exists()

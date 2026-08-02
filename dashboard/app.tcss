@@ -172,3 +172,43 @@ SelectionList:focus {
     color: $text-muted;
     padding: 1 0 0 0;
 }
+
+/* --- Confirm dialog --- */
+
+ConfirmScreen {
+    align: center middle;
+}
+
+#confirm-panel {
+    width: 60;
+    height: auto;
+    border: heavy $error;
+    padding: 1 3;
+    background: $panel;
+}
+
+#confirm-message {
+    text-align: center;
+}
+
+/* --- Project Detail screen --- */
+
+#detail-path,
+#detail-git,
+#detail-workspace,
+#detail-session {
+    color: $text-muted;
+}
+
+#detail-error {
+    color: $error;
+    padding: 1 0 0 0;
+    text-align: center;
+}
+
+#detail-missing-dir,
+#detail-metadata-error,
+#detail-no-actions {
+    color: $warning;
+    padding: 1 0 0 0;
+}

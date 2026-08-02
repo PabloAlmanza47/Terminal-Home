@@ -164,11 +164,56 @@ class WorkspaceSpec:
         )
 
 
+class LaunchAction(str, Enum):
+    """What the tmux orchestration layer should do with a LaunchRequest.
+
+    ATTACH: attach/switch to `session_name` if it's already running; if not,
+    and `workspace` is present, safely recreate it first (this is how both
+    "Resume Session" and "Recreate Workspace" are expressed -- the
+    orchestrator re-checks the truth at launch time regardless of which one
+    the user picked, so a session that appeared or vanished between the
+    project list scan and launch is always handled safely). If `workspace`
+    is absent, there's nothing to recreate from, so a vanished session is a
+    launch error rather than a guess.
+    CREATE: always build fresh via the tmux launcher, refusing (rather than
+    overwriting) if a session with that name is already running.
+    """
+
+    ATTACH = "attach"
+    CREATE = "create"
+
+
 @dataclass(frozen=True, slots=True)
 class LaunchRequest:
     """The structured hand-off from the wizard (Textual) to the tmux
     orchestration layer (plain Python, runs after the Textual app exits).
+
+    `workspace` is None only for LaunchAction.ATTACH against a tmux session
+    that has no saved WorkspaceSpec behind it (e.g. right after "Forget
+    Saved Workspace" while the session is still running) -- in that case
+    `session_name` carries the target directly, and there is no spec to
+    fall back on if the session has since disappeared.
     """
 
-    workspace: WorkspaceSpec
+    workspace: WorkspaceSpec | None
     init_git: bool
+    action: LaunchAction = LaunchAction.CREATE
+    session_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action is LaunchAction.CREATE and self.workspace is None:
+            raise WorkspaceValidationError("LaunchAction.CREATE requires a workspace.")
+        if self.workspace is None and not (self.session_name or "").strip():
+            raise WorkspaceValidationError(
+                "A LaunchRequest with no workspace must specify session_name."
+            )
+
+    @property
+    def resolved_session_name(self) -> str:
+        """The tmux session name this request targets, regardless of
+        whether a full WorkspaceSpec is attached.
+        """
+        if self.workspace is not None:
+            return self.workspace.session_name
+        assert self.session_name is not None  # enforced by __post_init__
+        return self.session_name

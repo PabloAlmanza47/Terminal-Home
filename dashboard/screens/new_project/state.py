@@ -1,4 +1,8 @@
-"""Mutable, in-progress wizard state shared by every New Project step.
+"""Mutable, in-progress wizard state shared by every step of the window/pane
+configuration flow -- used both by the New Project wizard (which also
+creates the project directory and optionally runs `git init`) and by the
+Open Project flow's "Configure Workspace" / "Edit Workspace" actions for an
+already-existing project (which never touch the project directory).
 
 These are deliberately *not* part of dashboard.models: they're draft,
 UI-flow objects (a window mid-edit, pane kinds not yet finalized) rather
@@ -10,8 +14,36 @@ step is confirmed.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 
-from dashboard.models import PANE_KIND_LABELS, PaneKind, PaneSpec, WindowSpec
+from dashboard.models import PANE_KIND_LABELS, PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+
+
+class WizardMode(str, Enum):
+    """Which flow is driving the shared window/pane configuration screens.
+
+    NEW_PROJECT: the "Create New Project" wizard -- creates the project
+        directory, optionally runs `git init`, then launches.
+    EXISTING_CREATE: "Configure Workspace" for a project that has no saved
+        WorkspaceSpec yet -- never touches the project directory, saves
+        the new spec, and launches, just like NEW_PROJECT's final step.
+    EXISTING_EDIT: "Edit Workspace" for a project that already has a saved
+        WorkspaceSpec -- never touches the project directory, saves the
+        updated spec, and returns to Project Detail *without* launching,
+        since a live tmux session (if any) must never be disturbed here.
+    """
+
+    NEW_PROJECT = "new_project"
+    EXISTING_CREATE = "existing_create"
+    EXISTING_EDIT = "existing_edit"
+
+
+_STEP_PREFIXES: dict[WizardMode, str] = {
+    WizardMode.NEW_PROJECT: "Create New Project",
+    WizardMode.EXISTING_CREATE: "Configure Workspace",
+    WizardMode.EXISTING_EDIT: "Edit Workspace",
+}
 
 
 @dataclass(slots=True)
@@ -80,13 +112,16 @@ class WindowDraft:
 
 @dataclass(slots=True)
 class WizardState:
-    """Everything gathered across every step of the New Project wizard.
+    """Everything gathered across every step of the window/pane
+    configuration flow.
 
-    A single instance is created when the wizard is entered from Home and
+    A single instance is created when the flow is entered (from Home for
+    New Project, or from Project Detail for Configure/Edit Workspace) and
     threaded through every step screen by reference, so switching screens
     forward or backward never loses data.
     """
 
+    mode: WizardMode = WizardMode.NEW_PROJECT
     project_name: str = ""
     folder_name: str = ""
     folder_name_touched: bool = False
@@ -94,11 +129,69 @@ class WizardState:
     windows: list[WindowDraft] = field(default_factory=list)
     session_name: str = ""
 
+    # Set only in EXISTING_CREATE/EXISTING_EDIT mode: the already-resolved
+    # canonical path of the project being configured. NEW_PROJECT mode
+    # resolves its destination from folder_name instead (see
+    # dashboard.services.project_creation).
+    existing_project_path: Path | None = None
+
+    # True when a currently-running tmux session exists for this project as
+    # Edit Workspace was entered -- shown on the final review step as a
+    # reminder that the update applies next time the session is recreated,
+    # not immediately.
+    warn_session_running: bool = False
+
     # The window currently being added or edited via Steps 2-3, and which
     # index in `windows` it will replace when confirmed (None means it will
     # be appended as a brand-new window).
     pending_window: WindowDraft = field(default_factory=WindowDraft)
     editing_index: int | None = None
+
+    @classmethod
+    def for_configuring_existing_project(cls, project_name: str, project_path: Path) -> WizardState:
+        """A fresh state for "Configure Workspace" on a project with no
+        saved WorkspaceSpec yet -- starts with no windows, entering
+        directly into adding the first one.
+        """
+        state = cls(
+            mode=WizardMode.EXISTING_CREATE,
+            project_name=project_name,
+            existing_project_path=project_path,
+            init_git=False,
+        )
+        state.start_new_window()
+        return state
+
+    @classmethod
+    def for_editing_workspace(
+        cls, workspace: WorkspaceSpec, *, session_running: bool = False
+    ) -> WizardState:
+        """A state pre-populated from *workspace* for "Edit Workspace" --
+        preserves the existing session_name so editing never mints a new
+        tmux session identity for the project.
+        """
+        return cls(
+            mode=WizardMode.EXISTING_EDIT,
+            project_name=workspace.project_name,
+            existing_project_path=workspace.project_path,
+            init_git=False,
+            session_name=workspace.session_name,
+            windows=[WindowDraft.from_window_spec(window) for window in workspace.windows],
+            warn_session_running=session_running,
+        )
+
+    def step_label(self, new_project_step: int, step_name: str) -> str:
+        """The title shown at the top of a shared wizard step screen.
+
+        *new_project_step* is that step's number in the 5-step New Project
+        flow (2 for Configure Window, 3 for Layout Preview, 4 for Windows,
+        5 for Review) -- Existing Project modes skip Step 1, so they
+        renumber to a 4-step flow and shift every step down by one.
+        """
+        prefix = _STEP_PREFIXES[self.mode]
+        if self.mode is WizardMode.NEW_PROJECT:
+            return f"{prefix} -- Step {new_project_step} of 5: {step_name}"
+        return f"{prefix} -- Step {new_project_step - 1} of 4: {step_name}"
 
     def start_new_window(self) -> None:
         """Reset the pending-window draft for adding a brand-new window."""
