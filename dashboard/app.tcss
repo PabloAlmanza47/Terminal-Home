@@ -111,3 +111,64 @@ Input:focus {
     padding: 1 0;
     color: $text-muted;
 }
+
+/* --- New Project wizard --- */
+
+.field-label {
+    color: $text-muted;
+    padding: 1 0 0 0;
+}
+
+#wizard-error {
+    color: $error;
+    padding: 1 0 0 0;
+    text-align: center;
+}
+
+.wizard-hint {
+    color: $text-muted;
+    padding: 0 0 1 0;
+}
+
+.button-row {
+    height: auto;
+    padding: 1 0 0 0;
+    align: center middle;
+}
+
+.button-row Button {
+    margin: 0 1;
+}
+
+#custom-command-fields {
+    height: auto;
+    border: round $primary;
+    background: $panel-darken-1;
+    padding: 1 1 0 1;
+    margin: 1 0 0 0;
+}
+
+SelectionList {
+    height: auto;
+    max-height: 10;
+    margin: 1 0 0 0;
+    border: round $primary;
+    background: $panel-darken-1;
+}
+
+SelectionList:focus {
+    border: round $accent;
+}
+
+.preview-grid {
+    background: $panel-darken-1;
+    border: round $primary;
+    padding: 0 1;
+    margin: 1 0;
+    color: $text-accent;
+}
+
+#destination-preview {
+    color: $text-muted;
+    padding: 1 0 0 0;
+}
