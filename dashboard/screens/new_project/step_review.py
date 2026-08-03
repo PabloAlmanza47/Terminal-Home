@@ -29,7 +29,11 @@ from dashboard.services.project_creation import (
     resolve_destination,
     validate_new_project,
 )
-from dashboard.services.workspace_store import save_workspace
+from dashboard.services.workspace_store import (
+    WorkspaceStoreVersionError,
+    ensure_workspace_store_writable,
+    save_workspace,
+)
 
 
 class ReviewScreen(Screen[None]):
@@ -130,6 +134,12 @@ class ReviewScreen(Screen[None]):
             self._show_error(str(exc))
             return
 
+        try:
+            ensure_workspace_store_writable()
+        except WorkspaceStoreVersionError as exc:
+            self._show_error(str(exc))
+            return
+
         created_dir = False
         try:
             create_project_directory(destination)
@@ -137,7 +147,7 @@ class ReviewScreen(Screen[None]):
             if self.state.init_git:
                 init_git_repo(destination)
             save_workspace(workspace)
-        except ProjectCreationError as exc:
+        except (ProjectCreationError, WorkspaceStoreVersionError) as exc:
             detail = (
                 f" (the directory at {destination} was already created)" if created_dir else ""
             )
@@ -165,7 +175,11 @@ class ReviewScreen(Screen[None]):
             self._show_error(str(exc))
             return
 
-        save_workspace(workspace)
+        try:
+            save_workspace(workspace)
+        except WorkspaceStoreVersionError as exc:
+            self._show_error(str(exc))
+            return
 
         if self.state.mode is WizardMode.EXISTING_EDIT:
             # Never launches -- a currently running session (if any) for

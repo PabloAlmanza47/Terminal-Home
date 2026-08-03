@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, OptionList
+from textual.widgets import Button, OptionList, Static
 
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
@@ -21,7 +21,11 @@ from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.workspace_defaults import build_default_workspace
-from dashboard.services.workspace_store import load_workspace, save_workspace
+from dashboard.services.workspace_store import (
+    WORKSPACE_STORE_SCHEMA_VERSION,
+    load_workspace,
+    save_workspace,
+)
 
 _SIZE = (100, 100)
 
@@ -38,6 +42,29 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _future_version_store_path(tmp_path: Path) -> Path:
+    return tmp_path / "xdg-data" / "terminal-home" / "workspaces.json"
+
+
+def _write_future_version_store(tmp_path: Path, workspaces: dict[str, object] | None = None) -> str:
+    """Overwrite the store with a schema version one newer than this build
+    understands, simulating a newer Terminal Home having written (or
+    upgraded) it between this screen's initial scan and a button click
+    actually running -- the same "recheck reality at action time" race
+    every other action in this screen already has to tolerate. Returns the
+    exact text written, for later "was the file left untouched" checks.
+    """
+    store_path = _future_version_store_path(tmp_path)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    envelope = {
+        "schema_version": WORKSPACE_STORE_SCHEMA_VERSION + 1,
+        "workspaces": workspaces or {},
+    }
+    text = json.dumps(envelope, indent=2)
+    store_path.write_text(text)
+    return text
 
 
 async def _open_project_detail(pilot, project_name: str) -> None:
@@ -207,6 +234,41 @@ def test_open_default_workspace_saves_and_exits_with_create_launch_request(
     assert saved == result.workspace
 
 
+def test_open_default_workspace_against_future_version_store_does_not_save_or_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(tmux_module, "generate_session_name", lambda name, existing=None: "demo")
+
+    async def scenario() -> tuple[object, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            assert app.screen.query("#action-open_default").first(Button) is not None
+
+            future_text = _write_future_version_store(tmp_path)
+
+            await pilot.click("#action-open_default")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+            error_text = str(app.screen.query_one("#detail-error", Static).render())
+            screen_name = type(app.screen).__name__
+        return app.return_value, error_text, screen_name, future_text
+
+    return_value, error_text, screen_name, future_text = _run(scenario())
+
+    assert return_value is None  # never falsely reports success
+    assert screen_name == "ProjectDetailScreen"  # stays on a safe screen
+    assert "newer" in error_text.lower()
+    assert str(WORKSPACE_STORE_SCHEMA_VERSION + 1) in error_text
+    assert _future_version_store_path(tmp_path).read_text() == future_text
+
+
 def test_edit_workspace_saves_without_launching(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -297,6 +359,46 @@ def test_reset_to_default_requires_confirmation(
     assert reset.session_name == "demo"  # session identity preserved
 
 
+def test_reset_to_default_against_future_version_store_does_not_overwrite_or_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    save_workspace(workspace)
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def scenario() -> tuple[object, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            assert app.screen.query("#action-reset").first(Button) is not None
+
+            future_text = _write_future_version_store(
+                tmp_path, {str(project_path.resolve()): workspace.to_dict()}
+            )
+
+            await pilot.click("#action-reset")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await pilot.click("#confirm-button")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+            error_text = str(app.screen.query_one("#detail-error", Static).render())
+            screen_name = type(app.screen).__name__
+        return app.return_value, error_text, screen_name, future_text
+
+    return_value, error_text, screen_name, future_text = _run(scenario())
+
+    assert return_value is None
+    assert screen_name == "ProjectDetailScreen"
+    assert "newer" in error_text.lower()
+    assert _future_version_store_path(tmp_path).read_text() == future_text
+
+
 def test_forget_workspace_removes_metadata_not_project_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -347,6 +449,46 @@ def test_forget_workspace_cancelled_keeps_metadata(
         return load_workspace(project_path)
 
     assert _run(scenario()) == workspace
+
+
+def test_forget_workspace_against_future_version_store_does_not_overwrite_or_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    save_workspace(workspace)
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def scenario() -> tuple[object, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            assert app.screen.query("#action-forget").first(Button) is not None
+
+            future_text = _write_future_version_store(
+                tmp_path, {str(project_path.resolve()): workspace.to_dict()}
+            )
+
+            await pilot.click("#action-forget")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await pilot.click("#confirm-button")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+            error_text = str(app.screen.query_one("#detail-error", Static).render())
+            screen_name = type(app.screen).__name__
+        return app.return_value, error_text, screen_name, future_text
+
+    return_value, error_text, screen_name, future_text = _run(scenario())
+
+    assert return_value is None
+    assert screen_name == "ProjectDetailScreen"
+    assert "newer" in error_text.lower()
+    assert _future_version_store_path(tmp_path).read_text() == future_text
 
 
 def test_malformed_metadata_offers_forget_and_configure(

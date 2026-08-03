@@ -210,7 +210,10 @@ def test_status_normalizes_stale_project_path_in_saved_workspace(
     import json
 
     data = json.loads(store_path.read_text())
-    data[str(project_path.resolve())] = data.pop(str((tmp_path / "old-location").resolve()))
+    workspaces = data["workspaces"]
+    workspaces[str(project_path.resolve())] = workspaces.pop(
+        str((tmp_path / "old-location").resolve())
+    )
     store_path.write_text(json.dumps(data))
 
     project = Project(name="demo", path=project_path)

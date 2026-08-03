@@ -8,7 +8,10 @@ import pytest
 
 from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
 from dashboard.services.workspace_store import (
+    WORKSPACE_STORE_SCHEMA_VERSION,
+    WorkspaceStoreVersionError,
     default_store_path,
+    ensure_workspace_store_writable,
     forget_workspace,
     load_all_workspaces,
     load_workspace,
@@ -110,8 +113,8 @@ def test_load_all_workspaces_skips_malformed_entries(tmp_path: Path) -> None:
     import json
 
     data = json.loads(store_path.read_text())
-    data["/some/bad/path"] = {"project_name": "bad"}  # missing required fields
-    data["/another/bad/path"] = "not-a-dict-at-all"
+    data["workspaces"]["/some/bad/path"] = {"project_name": "bad"}  # missing required fields
+    data["workspaces"]["/another/bad/path"] = "not-a-dict-at-all"
     store_path.write_text(json.dumps(data))
 
     workspaces = load_all_workspaces(store_path=store_path)
@@ -218,3 +221,329 @@ def test_forget_workspace_never_touches_project_directory(tmp_path: Path) -> Non
     forget_workspace(project_path, store_path=store_path)
 
     assert (project_path / "keep-me.txt").exists()
+
+
+# --- versioned envelope: reading both formats -----------------------------------
+
+
+def _write_legacy_store(store_path: Path, entries: dict[str, WorkspaceSpec]) -> None:
+    """Write *entries* in the pre-versioning flat-dict format, with no
+    envelope at all -- exactly what terminal-home wrote before this slice.
+    """
+    import json
+
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    flat = {str(path): spec.to_dict() for path, spec in entries.items()}
+    store_path.write_text(json.dumps(flat, indent=2))
+
+
+def _write_versioned_store(
+    store_path: Path, entries: dict[str, WorkspaceSpec], *, schema_version: int
+) -> None:
+    import json
+
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    envelope = {
+        "schema_version": schema_version,
+        "workspaces": {str(path): spec.to_dict() for path, spec in entries.items()},
+    }
+    store_path.write_text(json.dumps(envelope, indent=2))
+
+
+def test_load_all_workspaces_reads_legacy_flat_store(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    workspace = _make_workspace(project_path)
+    _write_legacy_store(store_path, {project_path.resolve(): workspace})
+
+    assert load_all_workspaces(store_path=store_path) == {str(project_path.resolve()): workspace}
+
+
+def test_load_all_workspaces_reads_versioned_envelope(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    workspace = _make_workspace(project_path)
+    _write_versioned_store(
+        store_path,
+        {project_path.resolve(): workspace},
+        schema_version=WORKSPACE_STORE_SCHEMA_VERSION,
+    )
+
+    assert load_all_workspaces(store_path=store_path) == {str(project_path.resolve()): workspace}
+
+
+def test_load_all_workspaces_skips_malformed_entries_in_legacy_store(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    good = _make_workspace(tmp_path / "good", name="good")
+    _write_legacy_store(store_path, {(tmp_path / "good").resolve(): good})
+
+    import json
+
+    data = json.loads(store_path.read_text())
+    data["/some/bad/path"] = {"project_name": "bad"}
+    store_path.write_text(json.dumps(data))
+
+    workspaces = load_all_workspaces(store_path=store_path)
+    assert len(workspaces) == 1
+    assert load_workspace(tmp_path / "good", store_path=store_path) == good
+
+
+# --- versioned envelope: writing always produces the current version ------------
+
+
+def test_save_workspace_writes_versioned_envelope(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    workspace = _make_workspace(tmp_path / "demo")
+
+    save_workspace(workspace, store_path=store_path)
+
+    import json
+
+    on_disk = json.loads(store_path.read_text())
+    assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
+    assert set(on_disk["workspaces"]) == {str((tmp_path / "demo").resolve())}
+
+
+def test_loading_a_legacy_store_does_not_rewrite_it(tmp_path: Path) -> None:
+    """Migration must only ever happen as a side effect of a real save or
+    forget -- never merely because the store was read.
+    """
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    workspace = _make_workspace(project_path)
+    _write_legacy_store(store_path, {project_path.resolve(): workspace})
+    original_text = store_path.read_text()
+
+    load_all_workspaces(store_path=store_path)
+    load_workspace(project_path, store_path=store_path)
+    load_workspace_result(project_path, store_path=store_path)
+
+    assert store_path.read_text() == original_text
+
+
+def test_save_workspace_migrates_legacy_store_preserving_existing_entries(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    first = _make_workspace(tmp_path / "first", name="first")
+    second = _make_workspace(tmp_path / "second", name="second")
+    _write_legacy_store(
+        store_path, {(tmp_path / "first").resolve(): first, (tmp_path / "second").resolve(): second}
+    )
+
+    third = _make_workspace(tmp_path / "third", name="third")
+    save_workspace(third, store_path=store_path)
+
+    import json
+
+    on_disk = json.loads(store_path.read_text())
+    assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
+    assert set(on_disk["workspaces"]) == {
+        str((tmp_path / "first").resolve()),
+        str((tmp_path / "second").resolve()),
+        str((tmp_path / "third").resolve()),
+    }
+    assert load_workspace(tmp_path / "first", store_path=store_path) == first
+    assert load_workspace(tmp_path / "second", store_path=store_path) == second
+    assert load_workspace(tmp_path / "third", store_path=store_path) == third
+
+
+def test_forget_workspace_migrates_legacy_store_preserving_remaining_entries(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    keep = _make_workspace(tmp_path / "keep", name="keep")
+    forget = _make_workspace(tmp_path / "forget", name="forget")
+    _write_legacy_store(
+        store_path, {(tmp_path / "keep").resolve(): keep, (tmp_path / "forget").resolve(): forget}
+    )
+
+    removed = forget_workspace(tmp_path / "forget", store_path=store_path)
+
+    assert removed is True
+    import json
+
+    on_disk = json.loads(store_path.read_text())
+    assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
+    assert set(on_disk["workspaces"]) == {str((tmp_path / "keep").resolve())}
+    assert load_workspace(tmp_path / "keep", store_path=store_path) == keep
+    assert load_workspace(tmp_path / "forget", store_path=store_path) is None
+
+
+# --- load_workspace_result under both formats -------------------------------------
+
+
+def test_load_workspace_result_returns_saved_workspace_from_versioned_store(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    workspace = _make_workspace(project_path)
+    _write_versioned_store(
+        store_path,
+        {project_path.resolve(): workspace},
+        schema_version=WORKSPACE_STORE_SCHEMA_VERSION,
+    )
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace == workspace
+    assert result.error is None
+
+
+def test_load_workspace_result_reports_malformed_entry_in_versioned_store(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    _write_versioned_store(store_path, {}, schema_version=WORKSPACE_STORE_SCHEMA_VERSION)
+
+    import json
+
+    data = json.loads(store_path.read_text())
+    data["workspaces"][str(project_path.resolve())] = {"project_name": "bad"}
+    store_path.write_text(json.dumps(data))
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace is None
+    assert result.error is not None
+
+
+# --- unsupported (newer) schema versions ------------------------------------------
+
+
+def test_load_workspace_result_unsupported_schema_version_returns_controlled_error(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    future_version = WORKSPACE_STORE_SCHEMA_VERSION + 1
+    _write_versioned_store(store_path, {}, schema_version=future_version)
+
+    result = load_workspace_result(project_path, store_path=store_path)
+
+    assert result.workspace is None
+    assert result.error is not None
+    assert str(future_version) in result.error
+    assert "newer" in result.error.lower()
+
+
+def test_load_all_workspaces_unsupported_schema_version_is_not_silently_treated_as_current(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "demo"
+    workspace = _make_workspace(project_path)
+    future_version = WORKSPACE_STORE_SCHEMA_VERSION + 1
+    _write_versioned_store(
+        store_path, {project_path.resolve(): workspace}, schema_version=future_version
+    )
+
+    # A perfectly valid-looking entry must NOT come back just because its
+    # shape happens to match -- an unsupported version is refused outright,
+    # never silently reinterpreted as the current one.
+    assert load_all_workspaces(store_path=store_path) == {}
+    assert load_workspace(project_path, store_path=store_path) is None
+
+
+def test_save_workspace_refuses_to_silently_overwrite_unsupported_schema_version(
+    tmp_path: Path,
+) -> None:
+    """Saving must not blindly rewrite (and thereby destroy) a store from a
+    newer version of Terminal Home it can't interpret.
+    """
+    store_path = tmp_path / "workspaces.json"
+    future_version = WORKSPACE_STORE_SCHEMA_VERSION + 1
+    _write_versioned_store(store_path, {}, schema_version=future_version)
+    original_text = store_path.read_text()
+
+    with pytest.raises(WorkspaceStoreVersionError):
+        save_workspace(_make_workspace(tmp_path / "demo"), store_path=store_path)
+
+    assert store_path.read_text() == original_text
+
+
+# --- malformed envelopes fail safely -----------------------------------------------
+
+
+def test_load_all_workspaces_handles_envelope_missing_workspaces_key(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    store_path.write_text('{"schema_version": 1}')
+
+    assert load_all_workspaces(store_path=store_path) == {}
+
+
+def test_load_all_workspaces_handles_envelope_with_non_int_schema_version(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    store_path.write_text('{"schema_version": "not-a-number", "workspaces": {}}')
+
+    assert load_all_workspaces(store_path=store_path) == {}
+
+
+# --- ensure_workspace_store_writable: read-only compatibility preflight ---------
+
+
+def test_ensure_workspace_store_writable_succeeds_for_missing_file(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+
+    ensure_workspace_store_writable(store_path=store_path)  # must not raise
+
+    assert not store_path.exists()  # and must not create one either
+
+
+def test_ensure_workspace_store_writable_succeeds_for_legacy_store(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    workspace = _make_workspace(tmp_path / "demo")
+    _write_legacy_store(store_path, {(tmp_path / "demo").resolve(): workspace})
+    original_text = store_path.read_text()
+
+    ensure_workspace_store_writable(store_path=store_path)  # must not raise
+
+    assert store_path.read_text() == original_text  # and must not rewrite/migrate it
+
+
+def test_ensure_workspace_store_writable_succeeds_for_current_version_store(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    workspace = _make_workspace(tmp_path / "demo")
+    _write_versioned_store(
+        store_path,
+        {(tmp_path / "demo").resolve(): workspace},
+        schema_version=WORKSPACE_STORE_SCHEMA_VERSION,
+    )
+    original_text = store_path.read_text()
+
+    ensure_workspace_store_writable(store_path=store_path)  # must not raise
+
+    assert store_path.read_text() == original_text
+
+
+def test_ensure_workspace_store_writable_raises_for_unsupported_future_version(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    future_version = WORKSPACE_STORE_SCHEMA_VERSION + 1
+    _write_versioned_store(store_path, {}, schema_version=future_version)
+    original_text = store_path.read_text()
+
+    with pytest.raises(WorkspaceStoreVersionError) as exc_info:
+        ensure_workspace_store_writable(store_path=store_path)
+
+    assert str(future_version) in str(exc_info.value)
+    assert "newer" in str(exc_info.value).lower()
+    assert store_path.read_text() == original_text  # never writes, even when raising
+
+
+def test_ensure_workspace_store_writable_uses_default_store_path_when_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    future_version = WORKSPACE_STORE_SCHEMA_VERSION + 1
+    _write_versioned_store(default_store_path(), {}, schema_version=future_version)
+
+    with pytest.raises(WorkspaceStoreVersionError):
+        ensure_workspace_store_writable()

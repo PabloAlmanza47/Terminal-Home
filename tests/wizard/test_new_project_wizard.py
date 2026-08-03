@@ -15,6 +15,7 @@ Textual's own examples use for ad-hoc scripts.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -22,8 +23,9 @@ from textual.widgets import Input, OptionList, SelectionList, Static
 
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchRequest, PaneKind
+from dashboard.screens.new_project import step_review as step_review_module
 from dashboard.services import project_creation as project_creation_module
-from dashboard.services.workspace_store import load_workspace
+from dashboard.services.workspace_store import WORKSPACE_STORE_SCHEMA_VERSION, load_workspace
 
 _SIZE = (100, 100)
 
@@ -58,6 +60,20 @@ async def _click(pilot, button_id: str) -> None:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _future_version_store_path(tmp_path: Path) -> Path:
+    return tmp_path / "xdg-data" / "terminal-home" / "workspaces.json"
+
+
+def _write_future_version_store(tmp_path: Path) -> str:
+    """A store one schema version newer than this build understands.
+    Returns the exact text written."""
+    store_path = _future_version_store_path(tmp_path)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps({"schema_version": WORKSPACE_STORE_SCHEMA_VERSION + 1, "workspaces": {}})
+    store_path.write_text(text)
+    return text
 
 
 # --- Happy path -------------------------------------------------------------
@@ -113,6 +129,63 @@ def test_wizard_happy_path_produces_expected_launch_request(
 
     saved = load_workspace(workspace.project_path)
     assert saved == workspace
+
+
+@pytest.mark.parametrize("init_git", [True, False], ids=["git-init-enabled", "git-init-disabled"])
+def test_create_new_project_against_future_version_store_touches_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, init_git: bool
+) -> None:
+    """A store-writability preflight runs before the project directory is
+    created or `git init` is run, so a future-version store must leave no
+    trace at all -- not even the directory -- regardless of whether git
+    init was requested. save_workspace's own version check remains a
+    second safeguard for the (unlikely) case the store changes again
+    between this preflight and the save.
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    git_init_calls: list[Path] = []
+    monkeypatch.setattr(
+        step_review_module, "init_git_repo", lambda path: git_init_calls.append(path)
+    )
+
+    async def scenario() -> tuple[object, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_new_project_wizard(pilot)
+            await _fill_step1(pilot, "Demo Project")
+            if not init_git:
+                await pilot.click("#git-init-checkbox")
+                await pilot.pause()
+            await _click(pilot, "#next-button")
+
+            selection_list = app.screen.query_one("#pane-selection-list", SelectionList)
+            selection_list.toggle(PaneKind.CODE_EDITOR)
+            await pilot.pause()
+
+            await _click(pilot, "#next-button")
+            await _click(pilot, "#continue-button")
+            await _click(pilot, "#finish-button")
+            assert type(app.screen).__name__ == "ReviewScreen"
+
+            # Simulate a newer Terminal Home having written the store
+            # before this flow's final "Create and Open" click.
+            future_text = _write_future_version_store(tmp_path)
+
+            await _click(pilot, "#create-button")
+
+            error_text = str(app.screen.query_one("#wizard-error", Static).render())
+            screen_name = type(app.screen).__name__
+        return app.return_value, error_text, screen_name, future_text
+
+    return_value, error_text, screen_name, future_text = _run(scenario())
+
+    assert return_value is None  # no LaunchRequest was produced
+    assert screen_name == "ReviewScreen"  # stays on the Review screen
+    assert "newer" in error_text.lower()
+    assert not (projects_root / "demo-project").exists()  # directory was never created
+    assert git_init_calls == []  # git init was never invoked
+    assert _future_version_store_path(tmp_path).read_text() == future_text  # store untouched
+    assert load_workspace(projects_root / "demo-project") is None
 
 
 # --- Max 4 pane selections ---------------------------------------------------

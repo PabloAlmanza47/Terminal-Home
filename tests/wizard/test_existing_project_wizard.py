@@ -11,6 +11,7 @@ attached to.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest, PaneKind
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
-from dashboard.services.workspace_store import load_workspace
+from dashboard.services.workspace_store import WORKSPACE_STORE_SCHEMA_VERSION, load_workspace
 
 _SIZE = (100, 100)
 
@@ -65,6 +66,21 @@ async def _open_project_detail(pilot, project_name: str) -> None:
 async def _click(pilot, button_id: str) -> None:
     await pilot.click(button_id)
     await pilot.pause()
+
+
+def _future_version_store_path(tmp_path: Path) -> Path:
+    return tmp_path / "xdg-data" / "terminal-home" / "workspaces.json"
+
+
+def _write_future_version_store(tmp_path: Path) -> str:
+    """A store one schema version newer than this build understands --
+    simulating a newer Terminal Home having written it since this project
+    was last scanned. Returns the exact text written."""
+    store_path = _future_version_store_path(tmp_path)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps({"schema_version": WORKSPACE_STORE_SCHEMA_VERSION + 1, "workspaces": {}})
+    store_path.write_text(text)
+    return text
 
 
 def test_configure_workspace_never_creates_or_renames_the_directory(
@@ -120,6 +136,51 @@ def test_configure_workspace_never_creates_or_renames_the_directory(
 
     saved = load_workspace(project_path)
     assert saved == result.workspace
+
+
+def test_configure_workspace_save_against_future_version_store_does_not_overwrite_or_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+
+    async def scenario() -> tuple[object, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            await _click(pilot, "#action-configure")
+            assert type(app.screen).__name__ == "WindowConfigScreen"
+
+            app.screen.query_one("#window-name-input", Input).value = "main"
+            app.screen.query_one("#pane-selection-list", SelectionList).toggle(
+                PaneKind.CODE_EDITOR
+            )
+            await pilot.pause()
+            await _click(pilot, "#next-button")
+            await _click(pilot, "#continue-button")
+            await _click(pilot, "#finish-button")
+            assert type(app.screen).__name__ == "ReviewScreen"
+
+            # Simulate a newer Terminal Home writing the store between this
+            # flow starting and the final save actually running.
+            future_text = _write_future_version_store(tmp_path)
+
+            await _click(pilot, "#create-button")
+
+            error_text = str(app.screen.query_one("#wizard-error", Static).render())
+            screen_name = type(app.screen).__name__
+        return app.return_value, error_text, screen_name, future_text
+
+    return_value, error_text, screen_name, future_text = _run(scenario())
+
+    assert return_value is None  # never falsely reports success
+    assert screen_name == "ReviewScreen"  # stays on a safe screen
+    assert "newer" in error_text.lower()
+    assert _future_version_store_path(tmp_path).read_text() == future_text
+    # The project directory itself is never touched by this flow either way.
+    assert project_path.is_dir()
+    assert load_workspace(project_path) is None
 
 
 def test_configure_workspace_review_hides_git_and_destination_validation(

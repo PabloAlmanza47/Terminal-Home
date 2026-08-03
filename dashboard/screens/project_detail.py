@@ -35,7 +35,11 @@ from dashboard.services.projects import (
     secondary_actions,
 )
 from dashboard.services.workspace_defaults import build_default_workspace
-from dashboard.services.workspace_store import forget_workspace, save_workspace
+from dashboard.services.workspace_store import (
+    WorkspaceStoreVersionError,
+    forget_workspace,
+    save_workspace,
+)
 
 _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.RESUME: "Resume Session",
@@ -195,7 +199,11 @@ class ProjectDetailScreen(Screen[None]):
         workspace = build_default_workspace(
             status.project.name, status.canonical_path, session_name
         )
-        save_workspace(workspace)
+        try:
+            save_workspace(workspace)
+        except WorkspaceStoreVersionError as exc:
+            self._show_error(str(exc))
+            return
         self.app.exit(
             LaunchRequest(workspace=workspace, init_git=False, action=LaunchAction.CREATE)
         )
@@ -232,7 +240,16 @@ class ProjectDetailScreen(Screen[None]):
         workspace = build_default_workspace(
             status.project.name, status.canonical_path, status.saved_workspace.session_name
         )
-        save_workspace(workspace)
+        try:
+            save_workspace(workspace)
+        except WorkspaceStoreVersionError as exc:
+            # Dismissing the confirm screen above already triggers
+            # on_screen_resume's own refresh -- refresh again explicitly
+            # and show the error last, so it's never clobbered by that
+            # refresh racing with this one.
+            await self._refresh_status()
+            self._show_error(str(exc))
+            return
         await self._refresh_status()
 
     async def _forget_workspace(self) -> None:
@@ -246,5 +263,13 @@ class ProjectDetailScreen(Screen[None]):
         )
         if not confirmed:
             return
-        forget_workspace(status.canonical_path)
+        try:
+            forget_workspace(status.canonical_path)
+        except WorkspaceStoreVersionError as exc:
+            # See _reset_to_default: refresh explicitly, then show the
+            # error last, so it isn't clobbered by on_screen_resume's own
+            # refresh (triggered by dismissing the confirm screen above).
+            await self._refresh_status()
+            self._show_error(str(exc))
+            return
         await self._refresh_status()
