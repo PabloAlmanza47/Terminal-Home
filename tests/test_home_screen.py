@@ -21,6 +21,7 @@ from dashboard.app import DevDashboardApp
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
+from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
@@ -244,11 +245,21 @@ def test_matched_session_selection_produces_attach_request_with_workspace(
     assert isinstance(result, LaunchRequest)
     assert result.action is LaunchAction.ATTACH
     assert result.workspace == workspace
+    # Same request the shared service function would build for this project's status.
+    status = gather_project_status(
+        Project(name="demo", path=project_path), running_sessions={"demo"}
+    )
+    assert result == build_launch_request(status)
 
 
 def test_unmatched_session_selection_produces_orphan_attach_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The one Active Sessions case that does *not* go through
+    build_launch_request: there is no ProjectStatus at all for a running
+    session unmatched to any known project, so the request is built
+    directly from the session name tmux itself reported.
+    """
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setattr(
         tmux_module,

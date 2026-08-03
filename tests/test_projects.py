@@ -6,12 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+from dashboard.models import (
+    LaunchAction,
+    LaunchRequest,
+    PaneKind,
+    PaneSpec,
+    WindowSpec,
+    WorkspaceSpec,
+)
 from dashboard.services import projects as projects_module
 from dashboard.services.projects import (
     Project,
     ProjectAction,
     ProjectStatus,
+    build_launch_request,
     discover_projects,
     gather_project_status,
     primary_actions,
@@ -331,6 +339,66 @@ def test_secondary_actions_offers_forget_for_corrupt_metadata_with_running_sessi
         _status(session_running=True, workspace_metadata_error="bad data")
     )
     assert actions == [ProjectAction.FORGET]
+
+
+# --- build_launch_request ---------------------------------------------------------
+
+
+def test_build_launch_request_with_saved_workspace_attaches_with_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    request = build_launch_request(_status(saved_workspace=workspace))
+    assert request == LaunchRequest(
+        workspace=workspace, init_git=False, action=LaunchAction.ATTACH
+    )
+
+
+def test_build_launch_request_without_saved_workspace_attaches_by_session_name() -> None:
+    request = build_launch_request(_status())
+    assert request == LaunchRequest(
+        workspace=None, init_git=False, action=LaunchAction.ATTACH, session_name="demo"
+    )
+
+
+def test_build_launch_request_is_the_same_whether_or_not_the_session_is_running(
+    tmp_path: Path,
+) -> None:
+    """Resume and Recreate must produce the identical request either way --
+    the orchestration layer re-checks whether the session is actually
+    running at launch time, regardless of what ProjectStatus saw.
+    """
+    workspace = _workspace(tmp_path)
+    running = build_launch_request(_status(saved_workspace=workspace, session_running=True))
+    not_running = build_launch_request(
+        _status(saved_workspace=workspace, session_running=False)
+    )
+    assert running == not_running
+
+
+def test_build_launch_request_with_corrupt_metadata_falls_back_to_session_name() -> None:
+    request = build_launch_request(_status(workspace_metadata_error="bad data"))
+    assert request.workspace is None
+    assert request.session_name == "demo"
+    assert request.action is LaunchAction.ATTACH
+
+
+def test_build_launch_request_missing_project_directory_still_targets_session_name() -> None:
+    request = build_launch_request(_status(project_dir_exists=False))
+    assert request.action is LaunchAction.ATTACH
+    assert request.workspace is None
+    assert request.session_name == "demo"
+
+
+def test_build_launch_request_never_sets_create_action(tmp_path: Path) -> None:
+    """build_launch_request only ever expresses Resume/Recreate -- Open
+    Default Workspace's LaunchAction.CREATE request is built separately,
+    since it also creates and saves a brand-new workspace.
+    """
+    with_saved = build_launch_request(_status(saved_workspace=_workspace(tmp_path)))
+    without_saved = build_launch_request(_status())
+    assert with_saved.action is LaunchAction.ATTACH
+    assert without_saved.action is LaunchAction.ATTACH
 
 
 # --- status_badge ---------------------------------------------------------------

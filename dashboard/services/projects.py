@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from dashboard.models import WorkspaceSpec
+from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
 from dashboard.services import tmux
 from dashboard.services.git_info import gather_git_info
 from dashboard.services.workspace_store import load_workspace_result
@@ -225,3 +225,28 @@ def secondary_actions(status: ProjectStatus) -> list[ProjectAction]:
     if status.workspace_metadata_error and status.session_running:
         return [ProjectAction.FORGET]
     return []
+
+
+def build_launch_request(status: ProjectStatus) -> LaunchRequest:
+    """The LaunchRequest for a Resume/Recreate-style action on *status* --
+    shared by every screen that offers one (Project Detail's Resume/Recreate
+    buttons, Home's Active Sessions selection).
+
+    Always LaunchAction.ATTACH: the orchestration layer re-checks whether
+    the session is actually running at launch time regardless of what
+    *status* saw, so "resume" and "recreate" are the same request -- only
+    the button label the caller showed differs. When there's no saved
+    workspace to recreate from, the request carries the expected session
+    name directly instead, so attaching to a session that's running but was
+    never configured through Terminal Home still works.
+    """
+    if status.saved_workspace is not None:
+        return LaunchRequest(
+            workspace=status.saved_workspace, init_git=False, action=LaunchAction.ATTACH
+        )
+    return LaunchRequest(
+        workspace=None,
+        init_git=False,
+        action=LaunchAction.ATTACH,
+        session_name=status.expected_session_name,
+    )

@@ -32,7 +32,13 @@ from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.services import tmux
 from dashboard.services.formatting import format_relative_time, greeting_for
-from dashboard.services.projects import Project, ProjectStatus, scan_all_projects, status_badge
+from dashboard.services.projects import (
+    Project,
+    ProjectStatus,
+    build_launch_request,
+    scan_all_projects,
+    status_badge,
+)
 from dashboard.services.settings_store import load_settings
 from dashboard.services.system_info import SystemInfo, gather_system_info
 from dashboard.services.tmux import TmuxSession
@@ -343,13 +349,13 @@ class HomeScreen(Screen[None]):
         if option_id is None:
             return
         matched = self._session_lookup.get(option_id)
-        if matched is not None and matched.saved_workspace is not None:
-            self.app.exit(
-                LaunchRequest(
-                    workspace=matched.saved_workspace, init_git=False, action=LaunchAction.ATTACH
-                )
-            )
+        if matched is not None:
+            self.app.exit(build_launch_request(matched))
         else:
+            # No ProjectStatus at all for this session (it isn't tied to any
+            # known project) -- build_launch_request needs a ProjectStatus,
+            # so this orphan case is constructed directly from the session
+            # name tmux itself reported.
             self.app.exit(
                 LaunchRequest(
                     workspace=None,

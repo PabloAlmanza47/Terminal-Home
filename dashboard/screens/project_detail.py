@@ -29,6 +29,7 @@ from dashboard.services.projects import (
     Project,
     ProjectAction,
     ProjectStatus,
+    build_launch_request,
     gather_project_status,
     primary_actions,
     secondary_actions,
@@ -184,26 +185,9 @@ class ProjectDetailScreen(Screen[None]):
 
     def _resume_or_recreate(self) -> None:
         """Both Resume Session and Recreate Workspace produce the exact
-        same ATTACH request -- the orchestration layer re-checks whether
-        the session is actually running at launch time regardless of
-        which label the user saw here.
+        same ATTACH request -- see build_launch_request.
         """
-        status = self.status
-        if status.saved_workspace is not None:
-            self.app.exit(
-                LaunchRequest(
-                    workspace=status.saved_workspace, init_git=False, action=LaunchAction.ATTACH
-                )
-            )
-        else:
-            self.app.exit(
-                LaunchRequest(
-                    workspace=None,
-                    init_git=False,
-                    action=LaunchAction.ATTACH,
-                    session_name=status.expected_session_name,
-                )
-            )
+        self.app.exit(build_launch_request(self.status))
 
     def _open_default_workspace(self) -> None:
         status = self.status

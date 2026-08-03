@@ -19,6 +19,7 @@ from dashboard.app import DevDashboardApp
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
+from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import load_workspace, save_workspace
 
@@ -145,6 +146,9 @@ def test_resume_exits_with_attach_launch_request(
     assert isinstance(result, LaunchRequest)
     assert result.action is LaunchAction.ATTACH
     assert result.workspace == workspace
+    # Same request the shared service function would build for this project's status.
+    status = gather_project_status(Project(name="demo", path=project_path))
+    assert result == build_launch_request(status)
 
 
 def test_recreate_exits_with_attach_launch_request(
@@ -170,6 +174,9 @@ def test_recreate_exits_with_attach_launch_request(
     assert isinstance(result, LaunchRequest)
     assert result.action is LaunchAction.ATTACH
     assert result.workspace == workspace
+    # Same request the shared service function would build for this project's status.
+    status = gather_project_status(Project(name="demo", path=project_path))
+    assert result == build_launch_request(status)
 
 
 def test_open_default_workspace_saves_and_exits_with_create_launch_request(
