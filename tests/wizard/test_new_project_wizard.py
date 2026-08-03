@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, OptionList, SelectionList, Static
 
-from dashboard.app import DevDashboardApp
+from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchRequest, PaneKind
 from dashboard.services import project_creation as project_creation_module
 from dashboard.services.workspace_store import load_workspace
@@ -69,7 +69,7 @@ def test_wizard_happy_path_produces_expected_launch_request(
     projects_root = _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             assert type(app.screen).__name__ == "NewProjectScreen"
@@ -124,7 +124,7 @@ def test_wizard_prevents_more_than_four_pane_selections(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Demo Project")
@@ -158,7 +158,7 @@ def test_going_back_to_step1_preserves_window_config(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Original Name")
@@ -194,7 +194,7 @@ def test_wizard_rejects_duplicate_window_name(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Demo Project")
@@ -233,7 +233,7 @@ def test_add_edit_and_remove_windows(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Demo Project")
@@ -294,7 +294,7 @@ def test_cancelling_the_wizard_creates_no_project_directory(
     projects_root = _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Abandoned Project")
@@ -317,7 +317,7 @@ def test_cancelling_from_review_creates_no_project_directory(
     projects_root = _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Abandoned Project")
@@ -351,7 +351,7 @@ def test_custom_command_pane_requires_name_and_command(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_new_project_wizard(pilot)
             await _fill_step1(pilot, "Demo Project")

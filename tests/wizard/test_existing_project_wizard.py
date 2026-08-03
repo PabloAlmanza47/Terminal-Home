@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, OptionList, SelectionList, Static
 
-from dashboard.app import DevDashboardApp
+from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest, PaneKind
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
@@ -77,7 +77,7 @@ def test_configure_workspace_never_creates_or_renames_the_directory(
     marker.write_text("already here")
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await _click(pilot, "#action-configure")
@@ -129,7 +129,7 @@ def test_configure_workspace_review_hides_git_and_destination_validation(
     (projects_root / "demo").mkdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await _click(pilot, "#action-configure")
@@ -161,7 +161,7 @@ def test_configure_workspace_rejects_duplicate_window_names(
     (projects_root / "demo").mkdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await _click(pilot, "#action-configure")
@@ -196,7 +196,7 @@ def test_cancelling_configure_workspace_returns_to_detail_without_saving(
     (projects_root / "demo").mkdir()
 
     async def scenario() -> tuple[str, object]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await _click(pilot, "#action-configure")

@@ -124,7 +124,9 @@ all derive from it.
   settings are handled correctly.
 
 See [Reference](#reference) below for the full project layout and deeper
-per-screen behavior.
+per-screen behavior, and [docs/SEMANTICS.md](docs/SEMANTICS.md) for the
+authoritative rules governing running sessions, saved workspaces, and
+resume/recreate behavior.
 
 ## Testing
 
@@ -150,7 +152,9 @@ creates a real tmux session, attaches to tmux, or touches your real
 - Missing tools (tmux itself, or a pane's preferred command) degrade to a
   plain shell instead of crashing.
 
-Full detail in [Reference](#reference).
+These follow from a small set of rules governing exactly what Terminal Home
+will and won't do to a running session or a saved workspace — see
+[docs/SEMANTICS.md](docs/SEMANTICS.md) for the authoritative statement.
 
 ## Keyboard controls
 
@@ -298,21 +302,12 @@ considered "running" if a session with its exact deterministic slug exists.
 
 ### Full safety guarantees
 
-- Only `dashboard/services/workspace_launcher.py` ever runs a real tmux
-  command, and only after Textual has fully exited (`app.run()` returned) —
-  no screen calls tmux directly.
-- A tmux session is never killed or overwritten. Creating a new session
-  always refuses if one with that name already exists; attaching always
-  re-checks first.
-- Reset and Forget only ever modify Terminal Home's own JSON metadata store
-  — never the project directory, its git data, or any tmux session.
-- Malformed or corrupt saved-workspace JSON, a saved project path that no
-  longer exists, missing tmux, or a pane's preferred tool no longer being
-  installed are all handled with a friendly message or graceful fallback —
-  never a Python traceback.
-- If a step fails partway through building a *new* session, only that
-  in-progress session is cleaned up — pre-existing sessions and directories
-  are never touched.
+The authoritative statement of what running sessions and saved workspaces
+each get to decide — including what counts as "resuming" versus
+"recreating," and why a live session and its saved configuration are
+allowed to differ without either being treated as corrupt — lives in
+[docs/SEMANTICS.md](docs/SEMANTICS.md), not here, to avoid two copies of
+the same rules drifting apart.
 
 ### Workspace persistence
 

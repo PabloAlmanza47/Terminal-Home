@@ -1,3 +1,3 @@
-"""Pablo's personal terminal development dashboard."""
+"""Terminal Home: a declarative tmux workspace manager for terminal-based development."""
 
 __version__ = "0.1.0"

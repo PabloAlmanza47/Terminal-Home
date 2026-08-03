@@ -18,11 +18,11 @@ from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
 
 
-class DevDashboardApp(App[LaunchRequest | None]):
-    """Pablo's personal terminal development dashboard."""
+class TerminalHomeApp(App[LaunchRequest | None]):
+    """Terminal Home: a declarative tmux workspace manager."""
 
     CSS_PATH = "app.tcss"
-    TITLE = "Pablo's Workspace"
+    TITLE = "Terminal Home"
 
     def on_mount(self) -> None:
         self.push_screen(HomeScreen())
@@ -30,7 +30,7 @@ class DevDashboardApp(App[LaunchRequest | None]):
 
 def main() -> None:
     """Entry point used by `python -m dashboard` and the `dev` console script."""
-    app = DevDashboardApp()
+    app = TerminalHomeApp()
     launch_request = app.run()
 
     if launch_request is None:

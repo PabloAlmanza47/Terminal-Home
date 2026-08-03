@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from textual.widgets import Button, OptionList
 
-from dashboard.app import DevDashboardApp
+from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
@@ -73,7 +73,7 @@ def test_shows_resume_when_session_is_running(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == "demo")
 
     async def scenario() -> bool:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             assert type(app.screen).__name__ == "ProjectDetailScreen"
@@ -93,7 +93,7 @@ def test_shows_recreate_when_saved_workspace_not_running(
     save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
 
     async def scenario() -> bool:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             return app.screen.query("#action-recreate").first(Button) is not None
@@ -110,7 +110,7 @@ def test_shows_default_and_configure_when_nothing_saved(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> tuple[bool, bool]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             screen = app.screen
@@ -135,7 +135,7 @@ def test_resume_exits_with_attach_launch_request(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == "demo")
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-resume")
@@ -163,7 +163,7 @@ def test_recreate_exits_with_attach_launch_request(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-recreate")
@@ -190,7 +190,7 @@ def test_open_default_workspace_saves_and_exits_with_create_launch_request(
     monkeypatch.setattr(tmux_module, "generate_session_name", lambda name, existing=None: "demo")
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-open_default")
@@ -218,7 +218,7 @@ def test_edit_workspace_saves_without_launching(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> tuple[str, object]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-edit")
@@ -266,7 +266,7 @@ def test_reset_to_default_requires_confirmation(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario_cancel() -> object:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-reset")
@@ -281,7 +281,7 @@ def test_reset_to_default_requires_confirmation(
     assert unchanged == custom  # cancelling leaves the saved workspace untouched
 
     async def scenario_confirm() -> object:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-reset")
@@ -309,7 +309,7 @@ def test_forget_workspace_removes_metadata_not_project_files(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> object:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-forget")
@@ -336,7 +336,7 @@ def test_forget_workspace_cancelled_keeps_metadata(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> object:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#action-forget")
@@ -363,7 +363,7 @@ def test_malformed_metadata_offers_forget_and_configure(
     store_path.write_text(json.dumps({str(project_path.resolve()): {"project_name": "bad"}}))
 
     async def scenario() -> tuple[bool, bool, str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             screen = app.screen
@@ -384,7 +384,7 @@ def test_escape_returns_to_project_list(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.press("escape")
@@ -406,7 +406,7 @@ def test_back_to_list_button_makes_no_metadata_changes(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
     async def scenario() -> tuple[str, object]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             await pilot.click("#back-to-list-button")

@@ -145,7 +145,7 @@ class HomeScreen(Screen[None]):
             with Vertical(id="home-shell"):
                 with Vertical(id="home-header"):
                     yield Static(ASCII_ART, id="home-logo")
-                    yield Static("PABLO'S WORKSPACE", id="home-title")
+                    yield Static("TERMINAL HOME", id="home-title")
                     yield Static(id="home-subtitle")
                 with Container(id="home-dashboard"):
                     with Vertical(id="panel-actions", classes="home-panel"):
@@ -213,7 +213,7 @@ class HomeScreen(Screen[None]):
 
     def _update_clock(self) -> None:
         now = datetime.now()
-        parts = [now.strftime("%a %b %d %Y  ·  %H:%M:%S"), f"{greeting_for(now)}, Pablo!"]
+        parts = [now.strftime("%a %b %d %Y  ·  %H:%M:%S"), f"{greeting_for(now)}!"]
         if self._wsl_distro:
             parts.append(f"WSL: {self._wsl_distro}")
         self.query_one("#home-subtitle", Static).update("   ·   ".join(parts))

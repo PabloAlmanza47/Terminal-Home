@@ -17,7 +17,7 @@ import pytest
 from textual.widgets import OptionList
 
 import dashboard.screens.home as home_module
-from dashboard.app import DevDashboardApp
+from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
@@ -68,7 +68,7 @@ def test_default_focus_is_continue_project(tmp_path: Path, monkeypatch: pytest.M
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> tuple[int | None, bool]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             menu = app.screen.query_one("#main-menu", OptionList)
@@ -89,7 +89,7 @@ def test_recent_project_selection_opens_project_detail(
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             recent = app.screen.query_one("#recent-projects-list", OptionList)
@@ -110,7 +110,7 @@ def test_view_all_projects_opens_projects_screen(
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             recent = app.screen.query_one("#recent-projects-list", OptionList)
@@ -131,7 +131,7 @@ def test_missing_projects_directory_shows_actionable_empty_state(
     projects_root.rmdir()
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             return _option_labels(app.screen.query_one("#recent-projects-list", OptionList))
@@ -148,7 +148,7 @@ def test_empty_state_create_project_option_opens_new_project_wizard(
     projects_root.rmdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             recent = app.screen.query_one("#recent-projects-list", OptionList)
@@ -173,7 +173,7 @@ def test_malformed_workspace_metadata_shows_warning_badge(
     store_path.write_text(json.dumps({str(project_path.resolve()): {"project_name": "bad"}}))
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             return _option_labels(app.screen.query_one("#recent-projects-list", OptionList))
@@ -190,7 +190,7 @@ def test_missing_tmux_shows_friendly_state(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: False)
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             return _option_labels(app.screen.query_one("#active-sessions-list", OptionList))
@@ -205,7 +205,7 @@ def test_no_sessions_running_shows_friendly_state(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             return _option_labels(app.screen.query_one("#active-sessions-list", OptionList))
@@ -230,7 +230,7 @@ def test_matched_session_selection_produces_attach_request_with_workspace(
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == "demo")
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             sessions = app.screen.query_one("#active-sessions-list", OptionList)
@@ -268,7 +268,7 @@ def test_unmatched_session_selection_produces_orphan_attach_request(
     )
 
     async def scenario() -> LaunchRequest:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             sessions = app.screen.query_one("#active-sessions-list", OptionList)
@@ -296,7 +296,7 @@ def test_f5_refresh_rescans_projects(tmp_path: Path, monkeypatch: pytest.MonkeyP
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> list[str | None]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             (projects_root / "beta").mkdir()
@@ -324,7 +324,7 @@ def test_clock_tick_updates_display_without_rescanning(
     monkeypatch.setattr(home_module, "scan_all_projects", counting_scan_all)
 
     async def scenario() -> tuple[int, int, str, str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             calls_after_scan = scan_calls["n"]
@@ -355,7 +355,7 @@ def test_layout_class_matches_terminal_width_and_nothing_overflows(
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> tuple[set[str], bool]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=size) as pilot:
             await _wait_for_scan(pilot)
             dashboard = app.screen.query_one("#home-dashboard")
@@ -381,7 +381,7 @@ def test_artwork_hidden_on_short_terminal_even_when_setting_enabled(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> bool:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_NARROW) as pilot:  # 24 rows: below the art threshold
             await _wait_for_scan(pilot)
             return bool(app.screen.query_one("#home-logo").display)
@@ -396,7 +396,7 @@ def test_q_quits_the_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> LaunchRequest | None:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             await pilot.press("q")
@@ -412,7 +412,7 @@ def test_escape_does_not_crash_or_navigate_away(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             await pilot.press("escape")
@@ -432,7 +432,7 @@ def test_tab_cycles_focus_through_panels_without_crashing(
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> list[str | None]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             focused_ids: list[str | None] = []
@@ -450,7 +450,7 @@ def test_digit_shortcut_opens_settings(tmp_path: Path, monkeypatch: pytest.Monke
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             await pilot.press("5")
@@ -469,7 +469,7 @@ def test_disabling_artwork_in_settings_hides_it_immediately_on_return(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> tuple[bool, bool]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_WIDE) as pilot:  # roomy enough for art to normally show
             await _wait_for_scan(pilot)
             logo_before = bool(app.screen.query_one("#home-logo").display)
@@ -499,7 +499,7 @@ def test_disabling_clock_in_settings_hides_it_immediately_on_return(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> tuple[bool, bool]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             subtitle_before = bool(app.screen.query_one("#home-subtitle").display)
@@ -528,7 +528,7 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
     save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
 
     async def scenario() -> tuple[bool, list[str], list[str]]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             labels_expanded = _option_labels(

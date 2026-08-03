@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, OptionList
 
-from dashboard.app import DevDashboardApp
+from dashboard.app import TerminalHomeApp
 from dashboard.services import projects as projects_module
 from dashboard.services import tmux as tmux_module
 
@@ -63,7 +63,7 @@ def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     (projects_root / "beta").mkdir()
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             assert type(app.screen).__name__ == "ProjectsScreen"
@@ -81,7 +81,7 @@ def test_excludes_terminal_home_and_hidden_dirs(
     (projects_root / ".config").mkdir()
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             return _option_ids(pilot)
@@ -95,7 +95,7 @@ def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     (projects_root / "beta").mkdir()
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             app.screen.query_one("#project-filter", Input).value = "al"
@@ -109,7 +109,7 @@ def test_escape_returns_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             await pilot.press("escape")
@@ -124,7 +124,7 @@ def test_enter_opens_project_detail(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> str:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             option_list = app.screen.query_one("#project-list", OptionList)
@@ -143,7 +143,7 @@ def test_refresh_rescans_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     (projects_root / "alpha").mkdir()
 
     async def scenario() -> list[str]:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             (projects_root / "beta").mkdir()
@@ -164,7 +164,7 @@ def test_no_projects_found_shows_placeholder(
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> int:
-        app = DevDashboardApp()
+        app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             option_list = app.screen.query_one("#project-list", OptionList)
