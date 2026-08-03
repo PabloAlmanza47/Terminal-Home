@@ -62,7 +62,11 @@ class TerminalHomeApp(App[LaunchRequest | None]):
 
 
 def main() -> None:
-    """Entry point used by `python -m dashboard` and the `dev` console script."""
+    """Shared entry point for every supported launch method: the
+    `terminal-home` and `th` console scripts, the retained `dev` compatibility
+    alias, and `python -m dashboard` -- all four resolve to this same
+    function, so there is exactly one startup path to keep correct.
+    """
     app = TerminalHomeApp()
     launch_request = app.run()
 

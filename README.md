@@ -43,7 +43,7 @@ dashboard.
 ## Demo workflow
 
 ```
-dev
+terminal-home
   -> Continue Project
     -> SHPE-Connect
       -> Resume Session   (or Recreate Workspace, if nothing's running)
@@ -65,8 +65,10 @@ pip install -e ".[dev]"
 
 tmux -V   # confirm tmux is installed and on PATH
 
-dev       # launch the dashboard
+terminal-home   # launch the dashboard (or the shorter `th`)
 ```
+
+`dev` remains available too, for compatibility with earlier installs.
 
 **Required:** Python 3.10+, `tmux`.
 **Optional** (each pane type falls back to a plain shell if missing): `nvim`,
