@@ -47,8 +47,17 @@ def test_entrypoint_module_and_function_are_importable_and_callable() -> None:
     assert callable(func)
 
 
-def test_python_dash_m_dashboard_targets_the_same_main() -> None:
+def test_python_dash_m_dashboard_targets_the_same_dispatcher() -> None:
     from dashboard.__main__ import main as module_main
-    from dashboard.app import main as app_main
+    from dashboard.cli import main as cli_main
 
-    assert module_main is app_main
+    assert module_main is cli_main
+
+
+def test_entrypoint_is_the_cli_dispatcher_not_the_tui_launcher() -> None:
+    """The console scripts must go through the dispatcher (which decides
+    TUI vs subcommand), not straight into the TUI-only launcher -- this is
+    the behavior that changed when `list`/`plan`/`doctor` were added.
+    """
+    scripts = _scripts()
+    assert scripts["terminal-home"] == "dashboard.cli:main"

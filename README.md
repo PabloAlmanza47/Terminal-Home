@@ -74,6 +74,23 @@ terminal-home   # launch the dashboard (or the shorter `th`)
 **Optional** (each pane type falls back to a plain shell if missing): `nvim`,
 `claude` (Claude Code), `lazygit`, `tree`, `git`.
 
+## Command-line interface
+
+Plain `th` (or `terminal-home` / `dev`) opens the dashboard described below.
+A few read-only subcommands are also available, without launching the TUI:
+
+```bash
+th              # open the dashboard
+th list         # list discovered projects and their status
+th plan <project>  # show what `th up <project>` would do, once it exists
+th doctor       # check tmux, config paths, and project roots
+```
+
+`list`, `plan`, and `doctor` never create, attach to, or modify a tmux
+session, and `plan` never saves a workspace or touches the filesystem — it
+only reports what a future launch would do. `th up` (the command that would
+actually perform a launch) is not implemented yet.
+
 ## Usage
 
 - **Create New Project** — a short wizard: project name and folder, optional

@@ -62,10 +62,12 @@ class TerminalHomeApp(App[LaunchRequest | None]):
 
 
 def main() -> None:
-    """Shared entry point for every supported launch method: the
-    `terminal-home` and `th` console scripts, the retained `dev` compatibility
-    alias, and `python -m dashboard` -- all four resolve to this same
-    function, so there is exactly one startup path to keep correct.
+    """The TUI-only application launcher. Every console script
+    (`terminal-home`, `th`, `dev`) and `python -m dashboard` go through
+    dashboard.cli:main first, which calls this function only when no
+    read-only subcommand (`list`, `plan`, `doctor`) was given -- this stays
+    the one place that knows how to run Textual to completion and hand off
+    to tmux, regardless of which command name launched the process.
     """
     app = TerminalHomeApp()
     launch_request = app.run()

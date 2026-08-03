@@ -20,9 +20,9 @@ dev = [
 ]
 
 [project.scripts]
-terminal-home = "dashboard.app:main"
-th = "dashboard.app:main"
-dev = "dashboard.app:main"
+terminal-home = "dashboard.cli:main"
+th = "dashboard.cli:main"
+dev = "dashboard.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["dashboard*"]
