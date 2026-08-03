@@ -148,16 +148,26 @@ class WizardState:
     editing_index: int | None = None
 
     @classmethod
-    def for_configuring_existing_project(cls, project_name: str, project_path: Path) -> WizardState:
+    def for_configuring_existing_project(
+        cls, project_name: str, project_path: Path, *, session_name: str = ""
+    ) -> WizardState:
         """A fresh state for "Configure Workspace" on a project with no
         saved WorkspaceSpec yet -- starts with no windows, entering
         directly into adding the first one.
+
+        *session_name*, when given, should be the project's already
+        collision-aware expected_session_name (dashboard.services.projects
+        .gather_single_project_status) -- pre-filling it here means
+        WindowSummaryScreen._finish() never needs to mint one of its own
+        (and risk a same-named sibling project's session colliding with
+        it), matching how Open Default Workspace already reuses it.
         """
         state = cls(
             mode=WizardMode.EXISTING_CREATE,
             project_name=project_name,
             existing_project_path=project_path,
             init_git=False,
+            session_name=session_name,
         )
         state.start_new_window()
         return state

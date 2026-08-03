@@ -16,8 +16,9 @@ import pytest
 from textual.widgets import Input, OptionList
 
 from dashboard.app import TerminalHomeApp
-from dashboard.services import projects as projects_module
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
+from dashboard.services.projects_config_store import save_projects_config
 
 _SIZE = (100, 100)
 
@@ -28,9 +29,9 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
-    monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    save_projects_config(ProjectsConfig(roots=(projects_root,)))
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -57,6 +58,14 @@ def _option_ids(pilot) -> list[str]:
     return [str(option_list.get_option_at_index(i).id) for i in range(option_list.option_count)]
 
 
+def _project_id(path: Path) -> str:
+    """The stable option id a discovered project at *path* gets --
+    canonical-path-derived, matching dashboard.services.projects.
+    project_option_id, not project.name.
+    """
+    return str(path.resolve())
+
+
 def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     projects_root = _isolate(monkeypatch, tmp_path)
     (projects_root / "alpha").mkdir()
@@ -69,7 +78,8 @@ def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPat
             assert type(app.screen).__name__ == "ProjectsScreen"
             return _option_ids(pilot)
 
-    assert _run(scenario()) == ["alpha", "beta"]
+    expected = [_project_id(projects_root / "alpha"), _project_id(projects_root / "beta")]
+    assert _run(scenario()) == expected
 
 
 def test_excludes_terminal_home_and_hidden_dirs(
@@ -86,7 +96,7 @@ def test_excludes_terminal_home_and_hidden_dirs(
             await _open_projects_screen(pilot)
             return _option_ids(pilot)
 
-    assert _run(scenario()) == ["alpha"]
+    assert _run(scenario()) == [_project_id(projects_root / "alpha")]
 
 
 def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,7 +112,7 @@ def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
             await pilot.pause()
             return _option_ids(pilot)
 
-    assert _run(scenario()) == ["alpha"]
+    assert _run(scenario()) == [_project_id(projects_root / "alpha")]
 
 
 def test_escape_returns_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,7 +165,8 @@ def test_refresh_rescans_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
             return _option_ids(pilot)
 
-    assert _run(scenario()) == ["alpha", "beta"]
+    expected = [_project_id(projects_root / "alpha"), _project_id(projects_root / "beta")]
+    assert _run(scenario()) == expected
 
 
 def test_no_projects_found_shows_placeholder(
@@ -171,3 +182,129 @@ def test_no_projects_found_shows_placeholder(
             return option_list.option_count
 
     assert _run(scenario()) == 1  # the disabled "No projects found" placeholder
+
+
+def test_continue_project_scans_every_configured_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Continue Project must consume the same configured discovery result
+    as Home -- neither screen loads or interprets configuration on its own.
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    second_root = tmp_path / "second-root"
+    second_root.mkdir()
+    (second_root / "beta").mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, second_root)))
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            return _option_ids(pilot)
+
+    assert _run(scenario()) == [_project_id(second_root / "beta")]
+
+
+def test_scan_warning_is_shown_and_nonfatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    missing_root = tmp_path / "does-not-exist"
+    save_projects_config(ProjectsConfig(roots=(projects_root, missing_root)))
+
+    async def scenario() -> tuple[str, int, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            warning = str(app.screen.query_one("#scan-warning").render())
+            option_count = app.screen.query_one("#project-list", OptionList).option_count
+            screen_name = type(app.screen).__name__
+        return warning, option_count, screen_name
+
+    warning, option_count, screen_name = _run(scenario())
+    assert str(missing_root) in warning
+    assert option_count == 1  # the (empty) good root still scans fine -- just a placeholder
+    assert screen_name == "ProjectsScreen"  # a bad root never crashes the screen
+
+
+# --- same-basename projects under different roots ---------------------------------
+
+
+def _setup_duplicate_named_projects(tmp_path: Path, projects_root: Path) -> tuple[Path, Path]:
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    (school_root / "example").mkdir()
+    (work_root / "example").mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
+    return school_root / "example", work_root / "example"
+
+
+def test_same_named_projects_under_different_roots_both_appear_distinguishably(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_example, work_example = _setup_duplicate_named_projects(tmp_path, projects_root)
+
+    async def scenario() -> tuple[list[str], list[str]]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            option_list = app.screen.query_one("#project-list", OptionList)
+            ids = _option_ids(pilot)
+            labels = [
+                str(option_list.get_option_at_index(i).prompt)
+                for i in range(option_list.option_count)
+            ]
+        return ids, labels
+
+    ids, labels = _run(scenario())
+    school_id = _project_id(school_example)
+    work_id = _project_id(work_example)
+
+    # Requirement 1: both appear, and neither overwrote the other.
+    assert school_id in ids
+    assert work_id in ids
+    assert school_id != work_id
+
+    # Requirement 5: distinguishable, concise labels -- not identical, and
+    # each names the root that makes it distinct.
+    school_label = labels[ids.index(school_id)]
+    work_label = labels[ids.index(work_id)]
+    assert school_label != work_label
+    assert "school" in school_label
+    assert "work" in work_label
+    assert school_label.startswith("example")  # requirement 6: friendly name kept, not a bare path
+    assert work_label.startswith("example")
+
+
+def test_selecting_either_same_named_project_opens_its_own_canonical_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_example, work_example = _setup_duplicate_named_projects(tmp_path, projects_root)
+
+    async def select(target_id: str) -> Path:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            option_list = app.screen.query_one("#project-list", OptionList)
+            ids = _option_ids(pilot)
+            option_list.highlighted = ids.index(target_id)
+            option_list.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ProjectDetailScreen"
+            return app.screen.project.path
+
+    school_id = _project_id(school_example)
+    work_id = _project_id(work_example)
+
+    opened_school = _run(select(school_id))
+    assert opened_school == school_example
+
+    opened_work = _run(select(work_id))
+    assert opened_work == work_example
+    assert opened_work != opened_school

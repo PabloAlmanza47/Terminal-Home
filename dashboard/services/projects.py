@@ -1,63 +1,223 @@
-"""Discovers project directories under ~/projects for the Open Project
-screen, and gathers each one's status (git, saved workspace, running tmux
-session) for the project list and detail screens.
+"""Discovers project directories for the Open Project screen (per a
+configurable dashboard.models.projects_config.ProjectsConfig), and
+gathers each one's status (git, saved workspace, running tmux session)
+for the project list and detail screens.
 """
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
 from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux
 from dashboard.services.git_info import gather_git_info
+from dashboard.services.projects_config_store import load_projects_config
 from dashboard.services.workspace_store import load_workspace_result
 
-# The default projects root and the one directory we never want to list:
-# this dashboard's own repo.
-DEFAULT_PROJECTS_ROOT = Path.home() / "projects"
-DEFAULT_EXCLUDE = {"terminal-home"}
+# Hex characters of a canonical path's SHA-256 kept for a collision-
+# disambiguating session-name suffix -- short enough to stay readable
+# (e.g. "example-a1b2c3d4"), long enough that two different real project
+# paths never plausibly produce the same suffix.
+_SESSION_SUFFIX_LENGTH = 8
 
 
 @dataclass(frozen=True, slots=True)
 class Project:
-    """An immediate child directory of the projects root."""
+    """One discovered (or manually registered) project directory."""
 
     name: str
     path: Path
 
 
-def discover_projects(
-    root: Path | None = None,
-    exclude: set[str] | None = None,
-) -> list[Project]:
-    """Return the immediate subdirectories of *root*, alphabetically sorted.
-
-    Names in *exclude*, and any hidden (dot-prefixed) directory, are
-    skipped. A missing, unreadable, or otherwise inaccessible root yields
-    an empty list rather than raising, since this is used directly to
-    populate UI that must never crash the app.
+@dataclass(frozen=True, slots=True)
+class ProjectDiscoveryResult:
+    """The outcome of one discover_projects() pass: the projects found (in
+    deterministic, alphabetical-by-name order), plus whether the hard
+    directory-processing limit was hit -- in which case *projects* is a
+    safe, non-empty partial list, never silently presented as complete --
+    and any other nonfatal warnings (e.g. a configured root that couldn't
+    be read at all).
     """
-    root = root if root is not None else DEFAULT_PROJECTS_ROOT
-    exclude = exclude if exclude is not None else DEFAULT_EXCLUDE
 
+    projects: tuple[Project, ...]
+    truncated: bool
+    warnings: tuple[str, ...]
+
+
+class _ScanBudget:
+    """A directories-examined counter shared across one discover_projects
+    call, so exceeding ProjectsConfig.max_directories anywhere in the walk
+    stops it safely rather than letting an accidentally broad root crawl
+    an entire filesystem. Only real, non-excluded, non-hidden directories
+    consume the budget -- files and skipped names are free, so listing an
+    expensive directory name in excluded_names (e.g. node_modules) truly
+    costs nothing, even once the budget has otherwise run out.
+
+    truncated becomes True only when a real directory is actually passed
+    over for lack of budget -- exactly using up the last unit of budget on
+    the final directory examined is not truncation, since nothing was
+    left unexamined.
+    """
+
+    __slots__ = ("remaining", "truncated")
+
+    def __init__(self, max_directories: int) -> None:
+        self.remaining = max_directories
+        self.truncated = False
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining <= 0
+
+    def consume(self) -> None:
+        self.remaining -= 1
+
+
+def _should_skip(name: str, excluded_names: frozenset[str]) -> bool:
+    return name.startswith(".") or name in excluded_names
+
+
+def _register(entry: Path, seen_canonical: dict[Path, Project]) -> None:
+    """Record *entry* as a project, unless its canonical (symlink-resolved)
+    location has already been claimed by an earlier-encountered path --
+    the first path discover_projects reaches for a given real location
+    always wins, so display name/path stay deterministic across runs.
+    """
+    try:
+        canonical = entry.resolve()
+    except OSError:
+        return
+    if canonical in seen_canonical:
+        return
+    seen_canonical[canonical] = Project(name=entry.name, path=entry)
+
+
+def _scan_entries(
+    entries: list[Path],
+    excluded_names: frozenset[str],
+    max_depth: int,
+    depth: int,
+    budget: _ScanBudget,
+    seen_canonical: dict[Path, Project],
+) -> None:
+    for entry in entries:
+        # Excluded/hidden names are free -- checked, and skipped, before
+        # ever consulting the budget, so listing an expensive directory
+        # name in excluded_names truly costs nothing, even once the
+        # budget has otherwise run out.
+        if _should_skip(entry.name, excluded_names):
+            continue
+        try:
+            is_dir = entry.is_dir()
+        except OSError:
+            continue
+        if not is_dir:
+            continue
+
+        if budget.exhausted:
+            # There genuinely was another real directory to examine, but
+            # no budget left for it -- this, and only this, is truncation.
+            budget.truncated = True
+            return
+        budget.consume()
+        _register(entry, seen_canonical)
+
+        # Never recurse into a symlinked directory -- the simplest way to
+        # guarantee no cycle regardless of max_depth. It's still listed as
+        # a project above; only walking *through* it is skipped.
+        if depth < max_depth and not entry.is_symlink():
+            try:
+                child_entries = sorted(entry.iterdir(), key=lambda e: e.name.lower())
+            except OSError:
+                continue
+            _scan_entries(
+                child_entries, excluded_names, max_depth, depth + 1, budget, seen_canonical
+            )
+
+
+def _scan_root(
+    root: Path,
+    excluded_names: frozenset[str],
+    max_depth: int,
+    budget: _ScanBudget,
+    seen_canonical: dict[Path, Project],
+) -> str | None:
+    """Scan one configured root's children (and, up to max_depth,
+    grandchildren, ...). Returns a warning message if *root* itself
+    couldn't be listed at all (missing, not a directory, or unreadable),
+    else None -- a problem with one root never stops the others.
+    """
+    root = root.expanduser()
+    if budget.exhausted:
+        return None
     try:
         entries = sorted(root.iterdir(), key=lambda entry: entry.name.lower())
     except OSError:
-        return []
+        return f"Projects root is missing or unreadable: {root}"
+    _scan_entries(entries, excluded_names, max_depth, 1, budget, seen_canonical)
+    return None
 
-    projects: list[Project] = []
-    for entry in entries:
-        if entry.name in exclude or entry.name.startswith("."):
-            continue
-        try:
-            if entry.is_dir():
-                projects.append(Project(name=entry.name, path=entry))
-        except OSError:
-            continue
-    return projects
+
+def _consider_manual_project(manual_path: Path, seen_canonical: dict[Path, Project]) -> None:
+    """Register *manual_path* if it's an existing, accessible directory --
+    silently skipped otherwise (missing, inaccessible, or not a
+    directory), since a manually registered project that has since
+    vanished is not an error, just nothing to show. Never subject to the
+    directory-processing budget: registering an explicit path is O(1),
+    no recursion involved.
+    """
+    expanded = manual_path.expanduser()
+    try:
+        is_dir = expanded.is_dir()
+    except OSError:
+        return
+    if not is_dir:
+        return
+    _register(expanded, seen_canonical)
+
+
+def discover_projects(config: ProjectsConfig | None = None) -> ProjectDiscoveryResult:
+    """Discover every project reachable from *config*'s roots (down to
+    max_depth levels below each) plus its manually registered projects.
+
+    A project reachable more than once -- through two roots, through both
+    a root and the manual list, or through a symlink and its real path --
+    appears exactly once: root-scanned entries are considered strictly
+    before manual ones, roots are scanned in *config*'s order, and within
+    a root, entries are visited depth-first in alphabetical order -- the
+    first path to reach a given canonical (resolved) location wins and
+    supplies the returned Project's display name/path, so a scanned entry
+    always wins over a manual registration of the same underlying project.
+
+    Never raises: a missing/unreadable root is recorded as a warning and
+    skipped, never blocking the other roots; a missing/inaccessible manual
+    project is silently skipped. See ProjectDiscoveryResult for how a
+    scan that hit max_directories is reported.
+    """
+    config = config if config is not None else ProjectsConfig()
+
+    seen_canonical: dict[Path, Project] = {}
+    warnings: list[str] = []
+    budget = _ScanBudget(config.max_directories)
+
+    for root in config.roots:
+        warning = _scan_root(root, config.excluded_names, config.max_depth, budget, seen_canonical)
+        if warning is not None:
+            warnings.append(warning)
+
+    for manual_path in config.manual_projects:
+        _consider_manual_project(manual_path, seen_canonical)
+
+    projects = tuple(sorted(seen_canonical.values(), key=lambda project: project.name.lower()))
+    return ProjectDiscoveryResult(
+        projects=projects, truncated=budget.truncated, warnings=tuple(warnings)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,24 +240,172 @@ class ProjectStatus:
     last_modified: datetime | None
 
 
-def scan_all_projects(
-    root: Path | None = None,
-    store_path: Path | None = None,
-) -> list[ProjectStatus]:
-    """Discover every project under *root* and gather each one's status in
-    a single pass, sharing one `tmux list-sessions` call across all of
-    them instead of one `tmux has-session` per project.
-
-    This is the single scanning implementation shared by the Open Project
-    list screen and the home screen's recent-projects/active-sessions
-    panels -- neither should re-implement project discovery on its own.
+@dataclass(frozen=True, slots=True)
+class ProjectScanResult:
+    """Every project's live status from one scan_all_projects() pass, plus
+    the underlying discovery outcome -- the single shape both the Home
+    screen and the Continue Project screen consume, so neither
+    independently loads project-discovery configuration or re-implements
+    discovery on its own.
     """
-    projects = discover_projects(root)
+
+    statuses: tuple[ProjectStatus, ...]
+    truncated: bool
+    warnings: tuple[str, ...]
+
+
+def scan_all_projects(
+    config: ProjectsConfig | None = None,
+    store_path: Path | None = None,
+) -> ProjectScanResult:
+    """Discover every configured project and gather each one's status in a
+    single pass, sharing one `tmux list-sessions` call across all of them
+    instead of one `tmux has-session` per project.
+
+    *config* defaults to the saved project-discovery configuration
+    (dashboard.services.projects_config_store.load_projects_config) --
+    this is the one place that configuration is loaded and interpreted,
+    so the Open Project list screen and the home screen's recent-projects/
+    active-sessions panels both consume the same result rather than each
+    loading or interpreting configuration on its own.
+    """
+    config = config if config is not None else load_projects_config()
+    discovery = discover_projects(config)
     running_sessions = {session.name for session in tmux.list_tmux_sessions()}
-    return [
-        gather_project_status(project, store_path=store_path, running_sessions=running_sessions)
-        for project in projects
-    ]
+    base_session_name_counts = _base_session_name_counts(discovery.projects)
+    statuses = tuple(
+        gather_project_status(
+            project,
+            store_path=store_path,
+            running_sessions=running_sessions,
+            base_session_name_counts=base_session_name_counts,
+        )
+        for project in discovery.projects
+    )
+    return ProjectScanResult(
+        statuses=statuses, truncated=discovery.truncated, warnings=discovery.warnings
+    )
+
+
+def format_scan_warnings(result: ProjectDiscoveryResult | ProjectScanResult) -> str:
+    """A single, concise, user-facing string for *result*'s warnings and
+    truncation state -- shared by every screen that surfaces them, so
+    none of them independently decides how to phrase this.
+
+    Returns an empty string when there's nothing to report.
+    """
+    parts = list(result.warnings)
+    if result.truncated:
+        parts.append(
+            "Project scan stopped early after reaching its directory limit -- "
+            "some projects may be missing."
+        )
+    return "  ".join(parts)
+
+
+def _base_session_name_counts(projects: Iterable[Project]) -> dict[str, int]:
+    """How many of *projects* sanitize to each base tmux session name.
+
+    The one place session-name collisions are detected -- computed once
+    per scan_all_projects() pass, or once per gather_single_project_status()
+    call, and handed to gather_project_status so a project's
+    expected_session_name is decided identically regardless of which of
+    those two paths asked for it.
+    """
+    counts: dict[str, int] = {}
+    for project in projects:
+        base = tmux.sanitize_session_name(project.name)
+        counts[base] = counts.get(base, 0) + 1
+    return counts
+
+
+def _canonical_path_suffix(canonical_path: Path) -> str:
+    """A short, deterministic suffix derived from *canonical_path*, used
+    only to disambiguate two projects that would otherwise expect the
+    same tmux session name.
+
+    A SHA-256 hash, not Python's randomized hash() -- the same canonical
+    path always produces the same suffix, on any machine, in any process,
+    regardless of the order configured roots happen to be scanned in.
+    """
+    digest = hashlib.sha256(str(canonical_path).encode("utf-8")).hexdigest()
+    return digest[:_SESSION_SUFFIX_LENGTH]
+
+
+def _expected_new_session_name(
+    project: Project,
+    canonical_path: Path,
+    base_session_name_counts: dict[str, int] | None,
+) -> str:
+    """The tmux session name a brand-new (never-saved) workspace for
+    *project* would use.
+
+    Plain sanitized project name -- the legacy, readable behavior --
+    unless *base_session_name_counts* shows another project in the same
+    batch sanitizes to that same base name, in which case a short
+    canonical-path-derived suffix is appended so the two can never
+    collide. base_session_name_counts is None for callers that never
+    supply sibling-project context (existing single-project tests, etc.):
+    they keep the plain name, exactly as before this collision check
+    existed.
+    """
+    base = tmux.sanitize_session_name(project.name)
+    if base_session_name_counts is None or base_session_name_counts.get(base, 1) <= 1:
+        return base
+    return f"{base}-{_canonical_path_suffix(canonical_path)}"
+
+
+def project_option_id(status: ProjectStatus) -> str:
+    """A stable identifier for *status*'s project, safe to use as an
+    OptionList option id or a lookup-dict key.
+
+    Derived from the canonical path rather than project.name: two
+    different projects reachable through different configured roots (or a
+    manually registered project) may legitimately share a directory
+    basename, e.g. ~/school/example and ~/work/example. A name-keyed id
+    would let one silently overwrite the other in a lookup dict, or
+    resolve a selection to the wrong project entirely. Deterministic --
+    never Python's randomized hash().
+    """
+    return str(status.canonical_path)
+
+
+def _home_relative_path(path: Path) -> str:
+    """path, with the user's home directory contracted to '~', for a
+    concise disambiguating label -- falls back to the full path when it
+    isn't under the home directory at all. Always rendered with forward
+    slashes (this app targets Linux/WSL only), regardless of what
+    separator str(Path) would otherwise use.
+    """
+    try:
+        return f"~/{path.relative_to(Path.home()).as_posix()}"
+    except ValueError:
+        return str(path)
+
+
+def disambiguated_display_names(statuses: list[ProjectStatus]) -> list[str]:
+    """The display name for each status in *statuses*, in the same order.
+
+    Ordinarily just project.name. When two or more statuses in the same
+    batch share a name (e.g. two projects named "example" under different
+    configured roots), each of those -- and only those -- gets a concise
+    '<name> — <~-relative path>' suffix instead, so they stay visually
+    distinguishable without cluttering every uniquely-named project with
+    a path nobody needs to disambiguate.
+    """
+    name_counts: dict[str, int] = {}
+    for status in statuses:
+        name = status.project.name
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    display_names: list[str] = []
+    for status in statuses:
+        name = status.project.name
+        if name_counts[name] > 1:
+            display_names.append(f"{name} — {_home_relative_path(status.canonical_path)}")
+        else:
+            display_names.append(name)
+    return display_names
 
 
 def gather_project_status(
@@ -105,6 +413,7 @@ def gather_project_status(
     *,
     store_path: Path | None = None,
     running_sessions: set[str] | None = None,
+    base_session_name_counts: dict[str, int] | None = None,
 ) -> ProjectStatus:
     """Gather *project*'s full status.
 
@@ -114,6 +423,15 @@ def gather_project_status(
     call instead of one `tmux has-session` per project. Left as None, this
     checks the one session it cares about directly (cheap for a single
     project, e.g. the detail screen).
+
+    *base_session_name_counts*, when given, makes expected_session_name
+    collision-aware -- see _expected_new_session_name. Left as None (the
+    default), a project with no saved workspace just gets its plain
+    sanitized name, as before this collision check existed; callers that
+    know or can cheaply compute the full discovered project set
+    (scan_all_projects, gather_single_project_status) should always pass
+    it, so two same-named projects never end up expecting the same
+    session.
     """
     canonical_path = project.path.resolve()
     project_dir_exists = project.path.is_dir()
@@ -132,7 +450,7 @@ def gather_project_status(
     expected_session_name = (
         saved_workspace.session_name
         if saved_workspace is not None
-        else tmux.sanitize_session_name(project.name)
+        else _expected_new_session_name(project, canonical_path, base_session_name_counts)
     )
 
     tmux_available = tmux.is_tmux_installed()
@@ -160,6 +478,36 @@ def gather_project_status(
         tmux_available=tmux_available,
         session_running=session_running,
         last_modified=last_modified,
+    )
+
+
+def gather_single_project_status(
+    project: Project,
+    *,
+    store_path: Path | None = None,
+    config: ProjectsConfig | None = None,
+) -> ProjectStatus:
+    """Like gather_project_status, but for a caller (Project Detail) that
+    only has one project in hand rather than a full scan_all_projects
+    batch -- still collision-aware.
+
+    A fresh, cheap (filesystem-listing only -- no git, workspace-store, or
+    tmux calls for any project but this one) discover_projects() call
+    over *config* (defaulting to the saved project-discovery
+    configuration, same default scan_all_projects uses) supplies the
+    sibling project set needed to decide whether *project*'s session name
+    needs a collision suffix. Since that set is recomputed fresh from the
+    current on-disk project layout every time, this always agrees with
+    what the original scan_all_projects assigned -- including on a later
+    independent refresh (Project Detail's F5 / on_screen_resume), which
+    never has access to that original scan's in-memory result and must
+    not "forget" the collision it found.
+    """
+    config = config if config is not None else load_projects_config()
+    discovery = discover_projects(config)
+    base_session_name_counts = _base_session_name_counts(discovery.projects)
+    return gather_project_status(
+        project, store_path=store_path, base_session_name_counts=base_session_name_counts
     )
 
 

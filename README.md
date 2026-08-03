@@ -77,9 +77,9 @@ dev       # launch the dashboard
 - **Create New Project** — a short wizard: project name and folder, optional
   `git init`, then window/pane configuration. Nothing touches disk or tmux
   until you confirm the final review step.
-- **Continue Project** — lists existing projects under `~/projects` with git
-  branch, saved-workspace, and running-session status; opens **Project
-  Detail** for whichever one you pick.
+- **Continue Project** — lists projects discovered under your configured
+  project roots, each with git branch, saved-workspace, and running-session
+  status; opens **Project Detail** for whichever one you pick.
 - **Configure Workspace** — the same window/pane builder used by the new
   project wizard, for a project that doesn't have a saved layout yet (or to
   edit one that does).
@@ -269,11 +269,22 @@ no tmux session is created, until the final step is confirmed.
 
 ### Continue Project workflow
 
-Lists immediate subdirectories of `~/projects` (excluding `terminal-home`
-itself, hidden/dot directories, and anything inaccessible), each annotated
-with its git branch, whether it has a saved workspace, and whether its tmux
-session is currently running. Enter opens **Project Detail**, which offers
-only the actions that are safe given that status:
+Project discovery is configurable from Settings → Project Discovery:
+multiple project roots, a max scan depth (immediate children by default, or
+deeper), excluded directory names (hidden directories and a few common,
+expensive ones like `node_modules` are excluded by default), and
+individually registered manual projects that live outside any root. A
+project reachable more than once — through two roots, or through both a
+root and a manual registration — is only ever listed once, deduplicated by
+its canonical (resolved) path; two different projects that happen to share
+a directory name are both listed, distinguished with a short path suffix.
+Scanning is bounded by a hard directory-count limit, so an accidentally
+broad root can't be made to walk an entire filesystem; if that limit is
+hit, or a configured root can't be read, a nonfatal warning is shown rather
+than silently returning an incomplete list. Each listed project is
+annotated with its git branch, whether it has a saved workspace, and
+whether its tmux session is currently running. Enter opens **Project
+Detail**, which offers only the actions that are safe given that status:
 
 - **Running** — **Resume Session** attaches (or, from inside an existing
   tmux client, switches) to the running session. No panes or windows are
@@ -297,8 +308,20 @@ its git history, or a currently running session.
 Every workspace is keyed by its project's canonical (resolved) path, not
 just its folder name. A saved workspace's tmux session name is decided once
 (via `generate_session_name`'s collision rules) and then persisted — never
-re-derived or fuzzy-matched later. A project with no saved workspace is only
-considered "running" if a session with its exact deterministic slug exists.
+re-derived or fuzzy-matched later.
+
+A project with no saved workspace expects its plain sanitized project name
+as its session name (e.g. `shpe-connect`) — unless another currently
+discovered project sanitizes to that same name, which multiple project
+roots make possible (e.g. `~/school/example` and `~/work/example`). In that
+case each colliding project instead gets a short suffix deterministically
+derived from its own canonical path (e.g. `example-a1b2c3d4`), so the two
+never share an expected session and neither can be mistaken for the other
+in status or resume actions. This suffix decision is remade fresh from the
+current project layout every time (a full scan, or Project Detail
+refreshing on its own), so it never depends on scan order or in-memory
+state, and a project with no saved workspace is only ever considered
+"running" if a session matching its own current expected name exists.
 
 ### Full safety guarantees
 

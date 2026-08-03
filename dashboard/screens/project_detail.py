@@ -24,13 +24,12 @@ from dashboard.screens.confirm import ConfirmScreen
 from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_config import WindowConfigScreen
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
-from dashboard.services import tmux
 from dashboard.services.projects import (
     Project,
     ProjectAction,
     ProjectStatus,
     build_launch_request,
-    gather_project_status,
+    gather_single_project_status,
     primary_actions,
     secondary_actions,
 )
@@ -92,7 +91,7 @@ class ProjectDetailScreen(Screen[None]):
     def __init__(self, project: Project) -> None:
         super().__init__()
         self.project = project
-        self.status: ProjectStatus = gather_project_status(project)
+        self.status: ProjectStatus = gather_single_project_status(project)
 
     def compose(self) -> ComposeResult:
         status = self.status
@@ -163,7 +162,7 @@ class ProjectDetailScreen(Screen[None]):
         self.app.pop_screen()
 
     async def _refresh_status(self) -> None:
-        self.status = gather_project_status(self.project)
+        self.status = gather_single_project_status(self.project)
         await self.recompose()
 
     def _show_error(self, message: str) -> None:
@@ -195,9 +194,14 @@ class ProjectDetailScreen(Screen[None]):
 
     def _open_default_workspace(self) -> None:
         status = self.status
-        session_name = tmux.generate_session_name(status.project.name)
+        # status.expected_session_name is already the deterministic,
+        # collision-aware name gather_single_project_status assigned this
+        # project -- reusing it (rather than re-deriving one here) keeps
+        # the workspace actually created in sync with what was displayed,
+        # and this action is only ever offered when that name isn't
+        # currently running (see primary_actions), so it's always safe.
         workspace = build_default_workspace(
-            status.project.name, status.canonical_path, session_name
+            status.project.name, status.canonical_path, status.expected_session_name
         )
         try:
             save_workspace(workspace)
@@ -211,7 +215,7 @@ class ProjectDetailScreen(Screen[None]):
     def _configure_workspace(self) -> None:
         status = self.status
         state = WizardState.for_configuring_existing_project(
-            status.project.name, status.canonical_path
+            status.project.name, status.canonical_path, session_name=status.expected_session_name
         )
         self.app.push_screen(WindowConfigScreen(state, back_target=None))
 

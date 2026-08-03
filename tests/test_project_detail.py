@@ -17,9 +17,10 @@ from textual.widgets import Button, OptionList, Static
 
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
-from dashboard.services import projects as projects_module
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
+from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import (
     WORKSPACE_STORE_SCHEMA_VERSION,
@@ -33,9 +34,9 @@ _SIZE = (100, 100)
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
-    monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    save_projects_config(ProjectsConfig(roots=(projects_root,)))
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     return projects_root
 
@@ -69,7 +70,10 @@ def _write_future_version_store(tmp_path: Path, workspaces: dict[str, object] | 
 
 async def _open_project_detail(pilot, project_name: str) -> None:
     """From Home: Open Project -> wait for scan -> select *project_name* by
-    name (not just index, so multi-project scenarios stay unambiguous).
+    display name (not just index, so multi-project scenarios stay
+    unambiguous). Matched via the option's displayed label rather than its
+    id: the id is now derived from the project's canonical path (so two
+    same-named projects under different roots never collide), not its name.
     """
     await pilot.pause()
     await pilot.press("enter")  # Continue Project is the first main-menu item
@@ -81,7 +85,40 @@ async def _open_project_detail(pilot, project_name: str) -> None:
     index = next(
         i
         for i in range(option_list.option_count)
-        if option_list.get_option_at_index(i).id == project_name
+        if str(option_list.get_option_at_index(i).prompt).startswith(project_name)
+    )
+    option_list.highlighted = index
+    option_list.focus()
+    await pilot.pause()
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+def _project_id(path: Path) -> str:
+    """The stable option id a discovered project at *path* gets --
+    canonical-path-derived, matching dashboard.services.projects.
+    project_option_id, not project.name.
+    """
+    return str(path.resolve())
+
+
+async def _open_project_detail_by_path(pilot, project_path: Path) -> None:
+    """Like _open_project_detail, but selects unambiguously by canonical
+    path -- needed when two projects share a display name, so matching by
+    name prefix (as _open_project_detail does) would be ambiguous.
+    """
+    await pilot.pause()
+    await pilot.press("enter")  # Continue Project is the first main-menu item
+    await pilot.pause()
+    await pilot.app.workers.wait_for_complete()
+    await pilot.pause()
+
+    option_list = pilot.app.screen.query_one("#project-list", OptionList)
+    target_id = _project_id(project_path)
+    index = next(
+        i
+        for i in range(option_list.option_count)
+        if option_list.get_option_at_index(i).id == target_id
     )
     option_list.highlighted = index
     option_list.focus()
@@ -267,6 +304,103 @@ def test_open_default_workspace_against_future_version_store_does_not_save_or_cr
     assert "newer" in error_text.lower()
     assert str(WORKSPACE_STORE_SCHEMA_VERSION + 1) in error_text
     assert _future_version_store_path(tmp_path).read_text() == future_text
+
+
+def test_open_default_workspace_for_same_named_projects_uses_distinct_session_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two projects named "example" under different roots must each get a
+    default workspace with its own, distinct tmux session name -- never
+    both resolving to plain "example".
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    school_path = school_root / "example"
+    school_path.mkdir()
+    work_path = work_root / "example"
+    work_path.mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def open_default(project_path: Path) -> LaunchRequest:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail_by_path(pilot, project_path)
+            await pilot.click("#action-open_default")
+            await pilot.pause()
+        return app.return_value
+
+    school_result = _run(open_default(school_path))
+    work_result = _run(open_default(work_path))
+
+    assert isinstance(school_result, LaunchRequest)
+    assert isinstance(work_result, LaunchRequest)
+    assert school_result.workspace is not None
+    assert work_result.workspace is not None
+    assert school_result.workspace.session_name != work_result.workspace.session_name
+    assert school_result.workspace.session_name.startswith("example-")
+    assert work_result.workspace.session_name.startswith("example-")
+
+
+def test_selecting_same_named_project_never_resumes_the_others_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Safety requirement: opening one of two same-named projects must
+    never attach to the other's tmux session -- school has a saved,
+    running session; work is unsaved and unrelated to it.
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    school_path = school_root / "example"
+    school_path.mkdir()
+    work_path = work_root / "example"
+    work_path.mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
+
+    school_workspace = build_default_workspace("example", school_path.resolve(), "school-session")
+    save_workspace(school_workspace)
+
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == "school-session")
+
+    async def take_primary_action(project_path: Path) -> LaunchRequest:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail_by_path(pilot, project_path)
+            button_id = next(
+                candidate
+                for candidate in ("#action-resume", "#action-recreate", "#action-open_default")
+                if list(app.screen.query(candidate))
+            )
+            await pilot.click(button_id)
+            await pilot.pause()
+        return app.return_value
+
+    school_result = _run(take_primary_action(school_path))
+    work_result = _run(take_primary_action(work_path))
+
+    # school's own action correctly targets its own running session.
+    assert isinstance(school_result, LaunchRequest)
+    assert school_result.action is LaunchAction.ATTACH
+    assert school_result.workspace == school_workspace
+
+    # work is unrelated and unsaved -- it must never attach to school's
+    # session, whatever action its own (distinct, unsaved) status offers.
+    assert isinstance(work_result, LaunchRequest)
+    work_session_name = (
+        work_result.session_name
+        if work_result.workspace is None
+        else work_result.workspace.session_name
+    )
+    assert work_session_name != "school-session"
+    assert work_session_name.startswith("example-")
 
 
 def test_edit_workspace_saves_without_launching(

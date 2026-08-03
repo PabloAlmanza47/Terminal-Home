@@ -34,8 +34,12 @@ from dashboard.services import tmux
 from dashboard.services.formatting import format_relative_time, greeting_for
 from dashboard.services.projects import (
     Project,
+    ProjectScanResult,
     ProjectStatus,
     build_launch_request,
+    disambiguated_display_names,
+    format_scan_warnings,
+    project_option_id,
     scan_all_projects,
     status_badge,
 )
@@ -74,11 +78,11 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
 ]
 
 
-def _recent_project_label(status: ProjectStatus, *, compact: bool) -> str:
+def _recent_project_label(status: ProjectStatus, display_name: str, *, compact: bool) -> str:
     badge = status_badge(status)
     if compact:
-        return f"{status.project.name}  [{badge}]"
-    parts = [f"{status.project.name}  [{badge}]"]
+        return f"{display_name}  [{badge}]"
+    parts = [f"{display_name}  [{badge}]"]
     if status.git_branch:
         parts.append(f"({status.git_branch})")
     if status.last_modified is not None:
@@ -138,6 +142,7 @@ class HomeScreen(Screen[None]):
         self._session_lookup: dict[str, ProjectStatus] = {}
         self._last_statuses: list[ProjectStatus] = []
         self._last_sessions: list[TmuxSession] = []
+        self._last_scan_warning: str = ""
         self._wsl_distro: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -241,23 +246,24 @@ class HomeScreen(Screen[None]):
         listing, and system info gathering all make blocking
         filesystem/subprocess calls.
         """
-        statuses = scan_all_projects()
+        scan_result = scan_all_projects()
         sessions = tmux.list_tmux_sessions() if tmux.is_tmux_installed() else []
         system_info = gather_system_info()
-        self.app.call_from_thread(self._on_scan_complete, statuses, sessions, system_info)
+        self.app.call_from_thread(self._on_scan_complete, scan_result, sessions, system_info)
 
     def _on_scan_complete(
         self,
-        statuses: list[ProjectStatus],
+        scan_result: ProjectScanResult,
         sessions: list[TmuxSession],
         system_info: SystemInfo,
     ) -> None:
         self._scanning = False
-        self._last_statuses = statuses
+        self._last_statuses = list(scan_result.statuses)
         self._last_sessions = sessions
+        self._last_scan_warning = format_scan_warnings(scan_result)
         self._wsl_distro = system_info.wsl_distro
-        self._populate_recent_projects(statuses)
-        self._populate_active_sessions(statuses, sessions)
+        self._populate_recent_projects(self._last_statuses)
+        self._populate_active_sessions(self._last_statuses, sessions)
         self.query_one("#system-status-body", Static).update(format_system_status(system_info))
 
     # --- Panel population ----------------------------------------------------
@@ -265,20 +271,32 @@ class HomeScreen(Screen[None]):
     def _populate_recent_projects(self, statuses: list[ProjectStatus]) -> None:
         option_list = self.query_one("#recent-projects-list", OptionList)
         option_list.clear_options()
-        self._project_lookup = {status.project.name: status.project for status in statuses}
+        self._project_lookup = {project_option_id(status): status.project for status in statuses}
+
+        if self._last_scan_warning:
+            option_list.add_option(Option(f"Warning: {self._last_scan_warning}", disabled=True))
 
         if not statuses:
             option_list.add_option(
-                Option("No projects yet in ~/projects", disabled=True)
+                Option("No projects yet in the configured project roots", disabled=True)
             )
             option_list.add_option(Option("Create New Project", id=_CREATE_PROJECT_FROM_EMPTY))
             return
 
         compact = self.settings.layout_mode is LayoutMode.COMPACT
         recent = sorted(statuses, key=lambda s: s.last_modified or datetime.min, reverse=True)
-        for status in recent[:_MAX_RECENT_PROJECTS]:
+        visible = recent[:_MAX_RECENT_PROJECTS]
+        # Disambiguated against only what's actually shown together -- two
+        # same-named projects both landing in the visible top N get a path
+        # suffix; a uniquely-named project never does, even if some other
+        # project sharing its name exists elsewhere but didn't make the cut.
+        display_names = disambiguated_display_names(visible)
+        for status, display_name in zip(visible, display_names):
             option_list.add_option(
-                Option(_recent_project_label(status, compact=compact), id=status.project.name)
+                Option(
+                    _recent_project_label(status, display_name, compact=compact),
+                    id=project_option_id(status),
+                )
             )
         option_list.add_option(Option("View All Projects", id=_VIEW_ALL_PROJECTS))
 

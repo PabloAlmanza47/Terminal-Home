@@ -19,8 +19,9 @@ from textual.widgets import Input, OptionList, SelectionList, Static
 
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest, PaneKind
-from dashboard.services import projects as projects_module
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
+from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.workspace_store import WORKSPACE_STORE_SCHEMA_VERSION, load_workspace
 
 _SIZE = (100, 100)
@@ -29,9 +30,9 @@ _SIZE = (100, 100)
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
-    monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    save_projects_config(ProjectsConfig(roots=(projects_root,)))
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -44,6 +45,10 @@ def _run(coro):
 
 
 async def _open_project_detail(pilot, project_name: str) -> None:
+    """Matched via the option's displayed label rather than its id: the id
+    is now derived from the project's canonical path (so two same-named
+    projects under different roots never collide), not its name.
+    """
     await pilot.pause()
     await pilot.press("enter")  # Continue Project is the first main-menu item
     await pilot.pause()
@@ -54,7 +59,7 @@ async def _open_project_detail(pilot, project_name: str) -> None:
     index = next(
         i
         for i in range(option_list.option_count)
-        if option_list.get_option_at_index(i).id == project_name
+        if str(option_list.get_option_at_index(i).prompt).startswith(project_name)
     )
     option_list.highlighted = index
     option_list.focus()

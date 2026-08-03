@@ -165,3 +165,19 @@ def test_escape_returns_to_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             return type(app.screen).__name__
 
     assert _run(scenario()) == "_Host"
+
+
+def test_project_discovery_button_opens_project_discovery_screen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+
+    async def scenario() -> str:
+        app = _HostApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            await pilot.click("#project-discovery-button")
+            await pilot.pause()
+            return type(app.screen).__name__
+
+    assert _run(scenario()) == "ProjectDiscoveryScreen"

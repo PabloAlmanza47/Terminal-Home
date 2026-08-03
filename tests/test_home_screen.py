@@ -19,9 +19,15 @@ from textual.widgets import OptionList
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
-from dashboard.services import projects as projects_module
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
-from dashboard.services.projects import Project, build_launch_request, gather_project_status
+from dashboard.services.projects import (
+    Project,
+    build_launch_request,
+    gather_project_status,
+    gather_single_project_status,
+)
+from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
@@ -34,9 +40,9 @@ _WIDE = (140, 40)
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
-    monkeypatch.setattr(projects_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    save_projects_config(ProjectsConfig(roots=(projects_root,)))
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -59,6 +65,14 @@ def _option_labels(option_list: OptionList) -> list[str]:
 
 def _option_ids(option_list: OptionList) -> list[str | None]:
     return [option_list.get_option_at_index(i).id for i in range(option_list.option_count)]
+
+
+def _project_id(path: Path) -> str:
+    """The stable option id a discovered project at *path* gets --
+    canonical-path-derived, matching dashboard.services.projects.
+    project_option_id, not project.name.
+    """
+    return str(path.resolve())
 
 
 # --- Default focus -----------------------------------------------------------
@@ -103,6 +117,124 @@ def test_recent_project_selection_opens_project_detail(
     assert _run(scenario()) == "ProjectDetailScreen"
 
 
+def test_home_shows_same_named_projects_distinguishably_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two projects sharing a basename under different configured roots
+    must both appear in Recent Projects (never one silently overwriting
+    the other in the id-keyed lookup), with distinguishable labels.
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    (school_root / "example").mkdir()
+    (work_root / "example").mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
+
+    async def scenario() -> tuple[list[str | None], list[str]]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            return _option_ids(recent), _option_labels(recent)
+
+    ids, labels = _run(scenario())
+    school_id = _project_id(school_root / "example")
+    work_id = _project_id(work_root / "example")
+
+    assert school_id in ids
+    assert work_id in ids
+    assert labels[ids.index(school_id)] != labels[ids.index(work_id)]
+
+
+def test_home_selection_of_either_same_named_project_resolves_its_own_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    (school_root / "example").mkdir()
+    (work_root / "example").mkdir()
+    save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
+
+    async def select(target_id: str) -> Path:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            ids = _option_ids(recent)
+            recent.highlighted = ids.index(target_id)
+            recent.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ProjectDetailScreen"
+            return app.screen.project.path
+
+    school_path = school_root / "example"
+    work_path = work_root / "example"
+
+    opened_school = _run(select(_project_id(school_path)))
+    assert opened_school == school_path
+
+    opened_work = _run(select(_project_id(work_path)))
+    assert opened_work == work_path
+    assert opened_work != opened_school
+
+
+def test_home_active_session_matches_only_the_correct_same_named_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A running session for one of two same-named projects must mark
+    only that project as running -- never the other, and Active Sessions
+    must resolve the running session back to the correct canonical path.
+    """
+    projects_root = _isolate(monkeypatch, tmp_path)
+    school_root = tmp_path / "school"
+    school_root.mkdir()
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+    school_path = school_root / "example"
+    school_path.mkdir()
+    work_path = work_root / "example"
+    work_path.mkdir()
+    config = ProjectsConfig(roots=(projects_root, school_root, work_root))
+    save_projects_config(config)
+
+    school_session_name = gather_single_project_status(
+        Project(name="example", path=school_path), config=config
+    ).expected_session_name
+
+    monkeypatch.setattr(
+        tmux_module,
+        "list_tmux_sessions",
+        lambda: [TmuxSession(name=school_session_name, windows=1, created="now", attached=False)],
+    )
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == school_session_name)
+
+    async def scenario() -> tuple[Path | None, bool, bool]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            matched = app.screen._session_lookup.get(school_session_name)
+            matched_path = matched.canonical_path if matched is not None else None
+
+            statuses_by_path = {s.canonical_path: s for s in app.screen._last_statuses}
+            school_running = statuses_by_path[school_path.resolve()].session_running
+            work_running = statuses_by_path[work_path.resolve()].session_running
+        return matched_path, school_running, work_running
+
+    matched_path, school_running, work_running = _run(scenario())
+
+    assert matched_path == school_path.resolve()
+    assert school_running is True
+    assert work_running is False
+
+
 def test_view_all_projects_opens_projects_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -139,6 +271,8 @@ def test_missing_projects_directory_shows_actionable_empty_state(
     labels = _run(scenario())
     assert any("No projects" in label for label in labels)
     assert any("Create New Project" in label for label in labels)
+    # The missing root itself is reported too -- nonfatal, never a crash.
+    assert any("Warning:" in label and str(projects_root) in label for label in labels)
 
 
 def test_empty_state_create_project_option_opens_new_project_wizard(
@@ -307,7 +441,41 @@ def test_f5_refresh_rescans_projects(tmp_path: Path, monkeypatch: pytest.MonkeyP
             return _option_ids(app.screen.query_one("#recent-projects-list", OptionList))
 
     ids = _run(scenario())
-    assert "beta" in ids
+    assert _project_id(projects_root / "beta") in ids
+
+
+def test_changing_configured_roots_affects_the_next_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Home never loads or interprets project-discovery configuration
+    itself -- it just rescans via scan_all_projects(), so a root change
+    made through Settings/Project Discovery takes effect on the very next
+    scan, exactly like any other change to the saved configuration.
+    """
+    original_root = _isolate(monkeypatch, tmp_path)
+    (original_root / "alpha").mkdir()
+    new_root = tmp_path / "elsewhere"
+    (new_root / "beta").mkdir(parents=True)
+
+    async def scenario() -> tuple[list[str | None], list[str | None]]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            before = _option_ids(app.screen.query_one("#recent-projects-list", OptionList))
+
+            save_projects_config(ProjectsConfig(roots=(new_root,)))
+            await pilot.press("f5")
+            await _wait_for_scan(pilot)
+            after = _option_ids(app.screen.query_one("#recent-projects-list", OptionList))
+        return before, after
+
+    before, after = _run(scenario())
+    alpha_id = _project_id(original_root / "alpha")
+    beta_id = _project_id(new_root / "beta")
+    assert alpha_id in before
+    assert beta_id not in before
+    assert beta_id in after
+    assert alpha_id not in after
 
 
 def test_clock_tick_updates_display_without_rescanning(
