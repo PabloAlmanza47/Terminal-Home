@@ -114,6 +114,7 @@ all derive from it.
   orchestration itself. No Textual imports here either.
 - **Persistence** — confirmed workspaces are saved as JSON under
   `$XDG_DATA_HOME/terminal-home/workspaces.json`; presentation preferences
+  (including the chosen Textual theme, changed via the command palette)
   under `$XDG_CONFIG_HOME/terminal-home/settings.json`. Never inside the
   project directory.
 - **tmux orchestration** — runs strictly *after* Textual exits

@@ -66,6 +66,63 @@ def test_load_settings_handles_invalid_layout_mode_value(tmp_path: Path) -> None
     assert load_settings(settings_path) == AppSettings()
 
 
+def test_theme_round_trips_through_the_store(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings = AppSettings(theme="nord")
+
+    save_settings(settings, settings_path)
+
+    assert load_settings(settings_path) == settings
+
+
+def test_load_settings_handles_legacy_file_without_theme_key(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        '{"artwork_enabled": true, "layout_mode": "expanded", "clock_visible": true}'
+    )
+
+    assert load_settings(settings_path) == AppSettings()
+
+
+def test_load_settings_malformed_theme_preserves_other_fields(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        '{"artwork_enabled": false, "layout_mode": "compact", '
+        '"clock_visible": false, "theme": 123}'
+    )
+
+    loaded = load_settings(settings_path)
+
+    assert loaded.artwork_enabled is False
+    assert loaded.layout_mode is LayoutMode.COMPACT
+    assert loaded.clock_visible is False
+    assert loaded.theme is None
+
+
+def test_saving_one_setting_preserves_all_others(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    settings_path = tmp_path / "settings.json"
+    save_settings(
+        AppSettings(
+            artwork_enabled=False,
+            layout_mode=LayoutMode.COMPACT,
+            clock_visible=False,
+            theme="nord",
+        ),
+        settings_path,
+    )
+
+    updated = replace(load_settings(settings_path), theme="dracula")
+    save_settings(updated, settings_path)
+
+    reloaded = load_settings(settings_path)
+    assert reloaded.theme == "dracula"
+    assert reloaded.artwork_enabled is False
+    assert reloaded.layout_mode is LayoutMode.COMPACT
+    assert reloaded.clock_visible is False
+
+
 def test_default_settings_path_uses_xdg_config_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

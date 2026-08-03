@@ -54,8 +54,10 @@ class SettingsScreen(Screen[None]):
                 with Horizontal(classes="button-row"):
                     yield Button("Project Discovery...", id="project-discovery-button")
                 yield Static(
-                    "Theme choices and shortcut remapping are planned for a\n"
-                    "future version.\n\n"
+                    "Theme: open the command palette (ctrl+p) and search\n"
+                    "\"theme\" -- your choice is applied immediately and\n"
+                    "persists across launches.\n\n"
+                    "Shortcut remapping is planned for a future version.\n\n"
                     "Press Escape to go back.",
                     id="placeholder-body",
                 )

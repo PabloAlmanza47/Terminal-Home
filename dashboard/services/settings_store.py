@@ -29,8 +29,11 @@ def default_settings_path() -> Path:
 
 def load_settings(settings_path: Path | None = None) -> AppSettings:
     """Load saved settings, falling back to defaults for a missing file,
-    invalid JSON, or any recognized field being malformed -- a broken
-    settings file must never crash the dashboard or block it from starting.
+    invalid JSON, or a non-object payload -- a broken settings file must
+    never crash the dashboard or block it from starting. Individual
+    malformed fields (e.g. an unrecognized theme) are handled per-field by
+    AppSettings.from_dict, which never discards the rest of the file for one
+    bad field.
     """
     settings_path = settings_path if settings_path is not None else default_settings_path()
     if not settings_path.exists():
@@ -41,10 +44,7 @@ def load_settings(settings_path: Path | None = None) -> AppSettings:
         return AppSettings()
     if not isinstance(data, dict):
         return AppSettings()
-    try:
-        return AppSettings.from_dict(data)
-    except (KeyError, TypeError, ValueError):
-        return AppSettings()
+    return AppSettings.from_dict(data)
 
 
 def save_settings(settings: AppSettings, settings_path: Path | None = None) -> None:

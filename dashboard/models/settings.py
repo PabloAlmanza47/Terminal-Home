@@ -27,23 +27,57 @@ class LayoutMode(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class AppSettings:
-    """Home screen presentation preferences."""
+    """Home screen presentation preferences.
+
+    `theme` stores the *name* of a registered Textual theme (never a Theme
+    object -- those aren't JSON-safe and aren't guaranteed to still exist the
+    next time the app starts). `None` means "use the default theme".
+    """
 
     artwork_enabled: bool = True
     layout_mode: LayoutMode = LayoutMode.EXPANDED
     clock_visible: bool = True
+    theme: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "artwork_enabled": self.artwork_enabled,
             "layout_mode": self.layout_mode.value,
             "clock_visible": self.clock_visible,
+            "theme": self.theme,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppSettings:
+        """Load settings field-by-field, so one malformed optional field
+        (e.g. a saved theme that no longer exists) falls back to that
+        field's default instead of discarding the whole file.
+        """
+        defaults = cls()
+
+        artwork_enabled = data.get("artwork_enabled", defaults.artwork_enabled)
+        if not isinstance(artwork_enabled, bool):
+            artwork_enabled = defaults.artwork_enabled
+
+        layout_mode = defaults.layout_mode
+        raw_layout_mode = data.get("layout_mode")
+        if isinstance(raw_layout_mode, str):
+            try:
+                layout_mode = LayoutMode(raw_layout_mode)
+            except ValueError:
+                layout_mode = defaults.layout_mode
+
+        clock_visible = data.get("clock_visible", defaults.clock_visible)
+        if not isinstance(clock_visible, bool):
+            clock_visible = defaults.clock_visible
+
+        theme = data.get("theme", defaults.theme)
+        if theme is not None and not isinstance(theme, str):
+            theme = defaults.theme
+
         return cls(
-            artwork_enabled=bool(data["artwork_enabled"]),
-            layout_mode=LayoutMode(data["layout_mode"]),
-            clock_visible=bool(data["clock_visible"]),
+            artwork_enabled=artwork_enabled,
+            layout_mode=layout_mode,
+            clock_visible=clock_visible,
+            theme=theme,
         )
