@@ -9,7 +9,10 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
