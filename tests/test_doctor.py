@@ -13,9 +13,13 @@ from pathlib import Path
 
 import pytest
 
+from dashboard.models import RemoteProjectRegistration, SshHost
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import doctor as doctor_module
 from dashboard.services.doctor import DiagnosticLevel, exit_code_for, run_diagnostics
+from dashboard.services.remote_project_inspection import RemoteProjectInspectionResult
+from dashboard.services.remote_project_store import create_remote_project
+from dashboard.services.ssh_host_store import create_ssh_host
 
 
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -227,3 +231,115 @@ def test_backup_recovery_is_warn_and_read_only(
     assert str(settings_path) in settings.detail
     assert str(backup) in settings.detail
     assert (settings_path.read_bytes(), backup.read_bytes()) == before
+
+
+def test_default_doctor_checks_remote_metadata_without_ssh_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _assume_tmux_ok(monkeypatch)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_ssh_host(SshHost(host_id, "builder", "builder"))
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66d559df977", host_id, "api", "/srv/api"
+        )
+    )
+    monkeypatch.setattr(
+        doctor_module,
+        "inspect_registered_remote_project",
+        lambda project: pytest.fail("default doctor must not inspect remote projects"),
+    )
+
+    diagnostics = run_diagnostics()
+
+    assert _by_label(diagnostics, "remote_project_orphans")[0].level is DiagnosticLevel.PASS
+
+
+def test_missing_ssh_executable_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(doctor_module.shutil, "which", lambda name: None)
+
+    diagnostics = run_diagnostics()
+
+    assert _by_label(diagnostics, "ssh_binary")[0].level is DiagnosticLevel.FAIL
+
+
+def test_remote_store_future_schema_and_orphan_are_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _assume_tmux_ok(monkeypatch)
+    remote_store = doctor_module.default_remote_project_store_path()
+    remote_store.parent.mkdir(parents=True)
+    remote_store.write_text(json.dumps({"schema_version": 999, "projects": []}))
+    orphan_store = doctor_module.default_ssh_host_store_path()
+    orphan_store.write_text(json.dumps({"schema_version": 1, "hosts": []}))
+
+    diagnostics = run_diagnostics()
+
+    assert _by_label(diagnostics, "remote_project_store")[0].level is DiagnosticLevel.FAIL
+    assert _by_label(diagnostics, "remote_project_orphans")[0].level is DiagnosticLevel.PASS
+
+
+def test_remote_doctor_continues_after_mixed_registration_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _assume_tmux_ok(monkeypatch)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_ssh_host(SshHost(host_id, "builder", "builder"))
+    projects = (
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66d559df977", host_id, "ok", "/srv/ok"
+        ),
+        RemoteProjectRegistration(
+            "f38d8c78-9f4a-5e85-d5be-988f77f3bb19", host_id, "bad", "/srv/bad"
+        ),
+    )
+    for project in projects:
+        create_remote_project(project)
+
+    def fake_inspection(project: RemoteProjectRegistration) -> RemoteProjectInspectionResult:
+        if project.name == "ok":
+            return RemoteProjectInspectionResult(
+                "inspected",
+                project,
+                SshHost(host_id, "builder", "builder"),
+                True,
+                True,
+                True,
+                True,
+                "",
+                "",
+                0,
+            )
+        return RemoteProjectInspectionResult(
+            "authentication-failure",
+            project,
+            SshHost(host_id, "builder", "builder"),
+            None,
+            None,
+            None,
+            None,
+            "",
+            "Permission denied",
+            255,
+            "authentication failed",
+        )
+
+    monkeypatch.setattr(doctor_module, "inspect_registered_remote_project", fake_inspection)
+
+    diagnostics = run_diagnostics(remote=True)
+
+    results = {
+        diagnostic.label: diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.label.startswith("remote_project:")
+    }
+    assert results, [diagnostic.label for diagnostic in diagnostics]
+    assert results[f"remote_project:{projects[0].id}"].level is DiagnosticLevel.PASS
+    assert results[f"remote_project:{projects[1].id}"].level is DiagnosticLevel.FAIL
+    assert "Permission denied" in results[f"remote_project:{projects[1].id}"].detail

@@ -71,6 +71,12 @@ terminal-home   # launch the dashboard (or the shorter `th`)
 
 `dev` remains available too, for compatibility with earlier installs.
 
+For contributor installation, create the virtual environment above and install
+the editable development extras with `pip install -e ".[dev]"`; the focused
+tests, Ruff, and Mypy commands are then available from `.venv/bin`. Terminal
+Home currently targets Linux and WSL; native Windows and macOS workflows are
+not supported.
+
 **Required:** Python 3.10+, `tmux`.
 **Optional:** `nvim`, `claude` (Claude Code), `lazygit`, `tree`, `git`, and
 the package manager selected by a project's lockfile (`npm`, `pnpm`, `yarn`,
@@ -87,7 +93,8 @@ th              # open the dashboard
 th list         # list discovered projects and their status
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
-th doctor       # check tmux, config paths, and project roots
+th doctor       # check local tools, stores, config paths, and project roots
+th doctor --remote  # additionally inspect registered remote projects
 th completion bash  # print Bash completion setup
 th completion zsh   # print Zsh completion setup
 ```
@@ -99,17 +106,87 @@ is already running, recreates and attaches when a saved workspace is stopped,
 and otherwise persists the existing default workspace before creating and
 attaching. Terminal Home never overwrites a running tmux session.
 
-Project selectors may be a unique discovered name or an exact existing path.
-Duplicate names require an exact path. An explicit path outside configured
-roots works, but is not automatically registered in `projects.json` and will
-not appear in `th list` unless separately configured for discovery.
+Project selectors may be a unique discovered name, an exact existing path, a
+unique registered remote name, or an exact remote selector. Remote selectors
+have the form `ssh:<host-id>:<remote-path>`. Duplicate names require an exact
+path or remote selector. An explicit local path outside configured roots works,
+but is not automatically registered in `projects.json`.
+
+## SSH hosts and remote projects
+
+Terminal Home uses the system OpenSSH `ssh` executable for remote workspaces.
+It stores only host metadata (an ID, display name, and destination operand) and
+remote-project metadata (a name, host ID, and remote POSIX path). It does not
+store passwords, private keys, passphrases, or other credentials, and it does
+not edit SSH configuration. Authentication, agent, key, and host-policy
+behavior remain the responsibility of OpenSSH and the user's existing setup.
+
+Host and remote-project registration is local and offline:
+
+```text
+th host add --name build --destination builder
+th remote add --name api --host-id <host-id> --remote-path /srv/api
+th host list
+th remote list
+th remote edit <registration-id> --name api --remote-path /srv/api
+```
+
+The Textual Settings screen provides **SSH Hosts** and **Remote Projects**
+management screens with keyboard-first add, edit, and confirmed delete flows.
+Registration does not test connectivity. A registration whose host was removed
+is retained as an orphan, shown with a missing-host warning, and can still be
+edited. A host referenced by a remote project cannot be deleted until those
+registrations are removed or changed.
+
+An end-to-end remote workflow is:
+
+```text
+register host
+register remote project
+th list
+th plan <remote>
+th up <remote>
+```
+
+`th list` displays registered remote projects alongside local projects.
+`th plan <remote>` previews create, recreate, or attach without saving or
+changing a workspace. `th up <remote>` uses the same workspace launcher as a
+local project, executing tmux through SSH and attaching through OpenSSH when
+the remote workspace is ready. Remote paths remain strings throughout this
+flow and are never treated as local `Path` objects.
+
+Terminal Home never automatically discovers projects on remote machines,
+creates remote directories or repositories, initializes Git remotely, installs
+packages, or modifies a remote target.
+
+## Remote diagnostics
+
+`th doctor` is offline by default. It checks the local `ssh` executable,
+versioned SSH-host and remote-project stores, their backup paths, parser and
+future-schema errors, and registrations that reference missing hosts. It does
+not connect to SSH hosts, inspect remote filesystems, or check remote tmux in
+the default mode. Store diagnostics are read-only and do not migrate or rewrite
+files merely by being opened.
+
+Use `th doctor --remote` for explicit connectivity diagnostics. It inspects
+only manually registered remote projects and continues after failures. Results
+distinguish available projects, connection failures, authentication failures,
+timeouts, missing remote paths, paths that are not directories, and unavailable
+remote tmux. Output is bounded and no credentials are stored or requested.
+
+For common failures, verify the OpenSSH destination and agent/key setup for
+authentication errors, network reachability and host policy for connection
+errors, the remote path for missing/non-directory errors, and tmux installation
+on the target for missing tmux. Terminal Home does not configure SSH or install
+remote dependencies.
 
 ## Shell completion
 
-Terminal Home provides dynamic completion for commands and projects discovered
-from your configured roots and manual-project list. Unique projects are offered
-by short name; projects with duplicate names are offered by exact path. The
-completion path is read-only and does not inspect Git status or tmux sessions.
+Terminal Home provides dynamic Bash and Zsh completion for commands, local
+projects, and registered remote projects. Unique projects are offered by short
+name; duplicate names use exact local paths or `ssh:<host-id>:<remote-path>`
+selectors. The completion path is read-only and does not inspect Git status,
+SSH hosts, or tmux sessions.
 
 For Bash, enable completion in the current session with:
 

@@ -26,7 +26,20 @@ from dashboard.services.projects_config_store import (
     load_projects_config,
     load_projects_config_result,
 )
+from dashboard.services.remote_project_inspection import (
+    RemoteProjectInspectionResult,
+    inspect_registered_remote_project,
+)
+from dashboard.services.remote_project_store import (
+    default_remote_project_store_path,
+    load_remote_projects_result,
+)
+from dashboard.services.remote_registry import inspect_remote_registry_integrity
 from dashboard.services.settings_store import default_settings_path, load_settings_result
+from dashboard.services.ssh_host_store import (
+    default_ssh_host_store_path,
+    load_ssh_hosts_result,
+)
 from dashboard.services.workspace_store import (
     WorkspaceStoreVersionError,
     default_store_path,
@@ -151,11 +164,115 @@ def _check_manual_project(path: Path) -> Diagnostic:
     return Diagnostic(DiagnosticLevel.PASS, "manual_project", f"manual project: {expanded}")
 
 
-def run_diagnostics() -> tuple[Diagnostic, ...]:
+def _check_store_path(path: Path, label: str, display_name: str, error: str | None) -> Diagnostic:
+    if error:
+        return Diagnostic(DiagnosticLevel.FAIL, label, f"{display_name}: {path} -- {error}")
+    if not path.exists():
+        return Diagnostic(
+            DiagnosticLevel.PASS, label, f"{display_name}: {path} (not created yet)"
+        )
+    if not path.is_file() or not os.access(path, os.R_OK):
+        return Diagnostic(
+            DiagnosticLevel.FAIL, label, f"{display_name}: {path} (not readable)"
+        )
+    return Diagnostic(DiagnosticLevel.PASS, label, f"{display_name}: {path}")
+
+
+def _check_backup_path(path: Path, label: str, display_name: str) -> Diagnostic:
+    backup = backup_path_for(path)
+    if not path.exists() and not backup.exists():
+        return Diagnostic(
+            DiagnosticLevel.PASS,
+            label,
+            f"{display_name} backup: {backup} (not created yet)",
+        )
+    if backup.exists() and (not backup.is_file() or not os.access(backup, os.R_OK)):
+        return Diagnostic(
+            DiagnosticLevel.WARN,
+            label,
+            f"{display_name} backup not readable: {backup}",
+        )
+    return Diagnostic(DiagnosticLevel.PASS, label, f"{display_name} backup: {backup}")
+
+
+def _bounded_detail(value: str, limit: int = 240) -> str:
+    compact = " ".join(value.split())
+    return compact if len(compact) <= limit else f"{compact[: limit - 3]}..."
+
+
+def _format_remote_result(result: RemoteProjectInspectionResult) -> Diagnostic:
+    project = result.project
+    label = f"remote_project:{project.id}"
+    if result.status == "inspected":
+        if result.path_exists is False:
+            return Diagnostic(
+                DiagnosticLevel.FAIL,
+                label,
+                f"{project.name}: missing remote directory {project.remote_path}",
+            )
+        if result.path_is_directory is False:
+            return Diagnostic(
+                DiagnosticLevel.FAIL,
+                label,
+                f"{project.name}: remote path is not a directory {project.remote_path}",
+            )
+        if result.tmux_available is False:
+            return Diagnostic(
+                DiagnosticLevel.FAIL,
+                label,
+                f"{project.name}: tmux is unavailable on the remote host",
+            )
+        return Diagnostic(
+            DiagnosticLevel.PASS,
+            label,
+            f"{project.name}: available ({project.remote_path})",
+        )
+    level = DiagnosticLevel.WARN if result.status == "missing-host" else DiagnosticLevel.FAIL
+    detail = result.diagnostic or result.status
+    output = _bounded_detail(result.stderr or result.stdout)
+    if output:
+        detail = f"{detail}; diagnostic: {output}"
+    return Diagnostic(level, label, f"{project.name}: {detail}")
+
+
+def _remote_diagnostics(integrity=None) -> list[Diagnostic]:
+    if integrity is None:
+        integrity = inspect_remote_registry_integrity()
+    diagnostics: list[Diagnostic] = []
+    for project in integrity.projects:
+        try:
+            result = inspect_registered_remote_project(project)
+        except Exception as exc:  # defensive boundary: one target must not stop doctor
+            result = RemoteProjectInspectionResult(
+                status="inspection-failure",
+                project=project,
+                host=None,
+                path_exists=None,
+                path_is_directory=None,
+                posix_compatible=None,
+                tmux_available=None,
+                stdout="",
+                stderr="",
+                returncode=None,
+                diagnostic=_bounded_detail(str(exc)),
+            )
+        diagnostics.append(_format_remote_result(result))
+    return diagnostics
+
+
+def run_diagnostics(*, remote: bool = False) -> tuple[Diagnostic, ...]:
     """Every doctor check, in display order. Never raises, never mutates
     anything -- reads only.
     """
     diagnostics: list[Diagnostic] = [_check_python(), _check_tmux_binary()]
+    ssh_binary = shutil.which("ssh")
+    diagnostics.append(
+        Diagnostic(
+            DiagnosticLevel.PASS if ssh_binary else DiagnosticLevel.FAIL,
+            "ssh_binary",
+            f"ssh found: {ssh_binary}" if ssh_binary else "ssh not found on PATH",
+        )
+    )
 
     if diagnostics[-1].level is not DiagnosticLevel.FAIL:
         diagnostics.append(_check_tmux_version())
@@ -189,6 +306,60 @@ def run_diagnostics() -> tuple[Diagnostic, ...]:
         diagnostics.append(
             _check_json_file(projects_path, "projects_config", "project configuration")
         )
+
+    host_path = default_ssh_host_store_path()
+    host_result = load_ssh_hosts_result(host_path)
+    project_path = default_remote_project_store_path()
+    project_result = load_remote_projects_result(project_path)
+    diagnostics.append(
+        _check_store_path(host_path, "ssh_host_store", "SSH host store", host_result.error)
+    )
+    diagnostics.append(_check_backup_path(host_path, "ssh_host_backup", "SSH host store"))
+    diagnostics.append(
+        _check_store_path(
+            project_path,
+            "remote_project_store",
+            "remote-project store",
+            project_result.error,
+        )
+    )
+    diagnostics.append(
+        _check_backup_path(project_path, "remote_project_backup", "remote-project store")
+    )
+    if host_result.warning:
+        diagnostics.append(
+            Diagnostic(DiagnosticLevel.WARN, "ssh_host_metadata", host_result.warning)
+        )
+    if project_result.warning:
+        diagnostics.append(
+            Diagnostic(
+                DiagnosticLevel.WARN,
+                "remote_project_metadata",
+                project_result.warning,
+            )
+        )
+    integrity = inspect_remote_registry_integrity(
+        host_store_path=host_path, project_store_path=project_path
+    )
+    if integrity.orphaned_project_ids:
+        diagnostics.append(
+            Diagnostic(
+                DiagnosticLevel.WARN,
+                "remote_project_orphans",
+                f"{len(integrity.orphaned_project_ids)} remote registration(s) "
+                "reference missing SSH hosts",
+            )
+        )
+    else:
+        diagnostics.append(
+            Diagnostic(
+                DiagnosticLevel.PASS,
+                "remote_project_orphans",
+                "remote registrations reference registered SSH hosts",
+            )
+        )
+    if remote:
+        diagnostics.extend(_remote_diagnostics(integrity))
 
     # Keep this convenience API as the injection seam used by doctor callers/tests;
     # both reads are mutation-free and recovery is reported by the result above.

@@ -108,6 +108,11 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser(
         "doctor", help="Check the local environment (read-only)."
     )
+    doctor_parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="Also inspect manually registered remote projects over SSH.",
+    )
     doctor_parser.set_defaults(handler=_run_doctor)
 
     completion_parser = subparsers.add_parser(
@@ -389,7 +394,7 @@ def _run_up(args: argparse.Namespace) -> int:
 def _run_doctor(args: argparse.Namespace) -> int:
     print("Terminal Home doctor")
     print()
-    diagnostics = run_diagnostics()
+    diagnostics = run_diagnostics(remote=args.remote)
     for diagnostic in diagnostics:
         print(format_diagnostic(diagnostic))
 
