@@ -10,17 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from textual.widgets import Button, OptionList, Static
 
+import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.projects_config_store import save_projects_config
+from dashboard.services.system_info import SystemInfo
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import (
     WORKSPACE_STORE_SCHEMA_VERSION,
@@ -38,11 +41,37 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     save_projects_config(ProjectsConfig(roots=(projects_root,)))
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(
+        home_module,
+        "gather_system_info",
+        lambda: SystemInfo(
+            hostname="test-host",
+            operating_system="test-os",
+            python_version="3.12",
+            shell="/bin/test-shell",
+            tmux_version="tmux test",
+            disk_usage=None,
+            memory_usage=None,
+            wsl_distro=None,
+        ),
+    )
     return projects_root
 
 
 def _run(coro):
-    return asyncio.run(coro)
+    async def run_with_owned_executor():
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(thread_name_prefix="project-detail-test")
+        loop.set_default_executor(executor)
+        try:
+            return await coro
+        finally:
+            # Textual's thread workers use the loop's default executor. Own
+            # and close it here rather than racing Python 3.12's implicit
+            # asyncio.run() executor shutdown after run_test() exits.
+            executor.shutdown(wait=True)
+
+    return asyncio.run(run_with_owned_executor())
 
 
 def _future_version_store_path(tmp_path: Path) -> Path:
