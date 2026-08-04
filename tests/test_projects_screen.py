@@ -10,15 +10,18 @@ created, or attached to.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from textual.widgets import Input, OptionList
 
+import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects_config_store import save_projects_config
+from dashboard.services.system_info import SystemInfo
 
 _SIZE = (100, 100)
 
@@ -35,11 +38,37 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        home_module,
+        "gather_system_info",
+        lambda: SystemInfo(
+            hostname="test-host",
+            operating_system="test-os",
+            python_version="3.12",
+            shell="/bin/test-shell",
+            tmux_version="tmux test",
+            disk_usage=None,
+            memory_usage=None,
+            wsl_distro=None,
+        ),
+    )
     return projects_root
 
 
 def _run(coro):
-    return asyncio.run(coro)
+    async def run_with_owned_executor():
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(thread_name_prefix="projects-screen-test")
+        loop.set_default_executor(executor)
+        try:
+            return await coro
+        finally:
+            # Textual's thread workers use the loop's default executor. Own
+            # and close it here rather than racing Python 3.12's implicit
+            # asyncio.run() executor shutdown after run_test() exits.
+            executor.shutdown(wait=True)
+
+    return asyncio.run(run_with_owned_executor())
 
 
 async def _open_projects_screen(pilot) -> None:
