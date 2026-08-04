@@ -79,6 +79,19 @@ def test_read_only_commands_never_call_the_tui(
     assert calls == []
 
 
+def test_doctor_remote_flag_is_forwarded(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    calls = []
+    monkeypatch.setattr(
+        cli_module,
+        "run_diagnostics",
+        lambda *, remote: calls.append(remote) or (),
+    )
+
+    assert cli_module.run(["doctor", "--remote"]) == 0
+    assert calls == [True]
+    assert "Terminal Home doctor" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("command", ["plan", "up"])
 def test_project_commands_never_call_the_tui(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
