@@ -233,6 +233,7 @@ def update_remote_project(
     *,
     name: str,
     remote_path: str,
+    host_id: str | None = None,
     store_path: Path | None = None,
 ) -> RemoteProjectRegistration | None:
     path = store_path or default_remote_project_store_path()
@@ -240,7 +241,9 @@ def update_remote_project(
     target = next((item for item in projects if item.id == registration_id), None)
     if target is None:
         return None
-    replacement = RemoteProjectRegistration(target.id, target.host_id, name, remote_path)
+    replacement = RemoteProjectRegistration(
+        target.id, target.host_id if host_id is None else host_id, name, remote_path
+    )
     if any(
         item.id != target.id
         and (item.host_id, item.remote_path) == (replacement.host_id, replacement.remote_path)

@@ -20,7 +20,9 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
+from uuid import uuid4
 
+from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
 from dashboard.services.completion import (
     SHELLS,
     discover_project_selector_candidates,
@@ -32,7 +34,6 @@ from dashboard.services.project_launch import (
     launch_status_line,
     prepare_project_launch_for_selector,
     resolve_project_plan,
-    resolve_project_status,
 )
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
@@ -44,7 +45,23 @@ from dashboard.services.projects import (
     scan_all_projects,
     status_badge,
 )
-from dashboard.services.ssh_host_store import load_all_ssh_hosts
+from dashboard.services.remote_project_store import (
+    RemoteProjectStoreError,
+)
+from dashboard.services.remote_registry import (
+    RemoteRegistryError,
+    inspect_remote_registry_integrity,
+    register_remote_project,
+    remove_registered_remote_project,
+    remove_ssh_host,
+    update_registered_remote_project,
+)
+from dashboard.services.ssh_host_store import (
+    SshHostStoreError,
+    create_ssh_host,
+    load_all_ssh_hosts,
+    update_ssh_host,
+)
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
 from dashboard.services.workspace_plan import format_plan
@@ -99,7 +116,167 @@ def _build_parser() -> argparse.ArgumentParser:
     completion_parser.add_argument("shell", choices=SHELLS, help="Shell to generate for.")
     completion_parser.set_defaults(handler=_run_completion)
 
+    host_parser = subparsers.add_parser("host", help="Manage registered SSH hosts.")
+    host_subparsers = host_parser.add_subparsers(dest="host_command", required=True)
+    host_list_parser = host_subparsers.add_parser("list", help="List SSH hosts.")
+    host_list_parser.set_defaults(handler=_run_host_list)
+    host_add_parser = host_subparsers.add_parser("add", help="Register an SSH host.")
+    _add_host_fields(host_add_parser, include_id=True)
+    host_add_parser.set_defaults(handler=_run_host_add)
+    host_edit_parser = host_subparsers.add_parser("edit", help="Edit an SSH host.")
+    host_edit_parser.add_argument("id", help="SSH host ID.")
+    _add_host_fields(host_edit_parser, include_id=False)
+    host_edit_parser.set_defaults(handler=_run_host_edit)
+    host_remove_parser = host_subparsers.add_parser("remove", help="Remove an SSH host.")
+    host_remove_parser.add_argument("id", help="SSH host ID.")
+    host_remove_parser.set_defaults(handler=_run_host_remove)
+
+    remote_parser = subparsers.add_parser("remote", help="Manage remote projects.")
+    remote_subparsers = remote_parser.add_subparsers(dest="remote_command", required=True)
+    remote_list_parser = remote_subparsers.add_parser("list", help="List remote projects.")
+    remote_list_parser.set_defaults(handler=_run_remote_list)
+    remote_add_parser = remote_subparsers.add_parser("add", help="Register a remote project.")
+    _add_remote_fields(remote_add_parser, include_id=True, host_required=True)
+    remote_add_parser.set_defaults(handler=_run_remote_add)
+    remote_edit_parser = remote_subparsers.add_parser("edit", help="Edit a remote project.")
+    remote_edit_parser.add_argument("id", help="Remote project registration ID.")
+    _add_remote_fields(remote_edit_parser, include_id=False, host_required=False)
+    remote_edit_parser.set_defaults(handler=_run_remote_edit)
+    remote_remove_parser = remote_subparsers.add_parser("remove", help="Remove a remote project.")
+    remote_remove_parser.add_argument("id", help="Remote project registration ID.")
+    remote_remove_parser.set_defaults(handler=_run_remote_remove)
+
     return parser
+
+
+def _add_host_fields(parser: argparse.ArgumentParser, *, include_id: bool) -> None:
+    if include_id:
+        parser.add_argument("--id", default=None, help="Stable host UUID (generated if omitted).")
+    parser.add_argument("--name", required=True, help="Display name.")
+    parser.add_argument("--destination", required=True, help="OpenSSH destination operand.")
+
+
+def _add_remote_fields(
+    parser: argparse.ArgumentParser, *, include_id: bool, host_required: bool
+) -> None:
+    if include_id:
+        parser.add_argument("--id", default=None, help="Stable registration UUID.")
+    parser.add_argument("--name", required=True, help="Project name.")
+    parser.add_argument("--host-id", required=host_required, default=None, help="SSH host ID.")
+    parser.add_argument("--remote-path", required=True, help="Absolute remote project path.")
+
+
+def _management_error(exc: BaseException | str) -> int:
+    print(f"error: {exc}", file=sys.stderr)
+    return 1
+
+
+def _run_host_list(args: argparse.Namespace) -> int:
+    hosts = load_all_ssh_hosts()
+    if not hosts:
+        print("No SSH hosts registered.")
+        return 0
+    print("ID  NAME  DESTINATION")
+    for host in hosts:
+        print(f"{host.id}  {host.display_name}  {host.destination}")
+    return 0
+
+
+def _run_host_add(args: argparse.Namespace) -> int:
+    try:
+        host = create_ssh_host(SshHost(args.id or str(uuid4()), args.name, args.destination))
+    except (SshModelValidationError, SshHostStoreError) as exc:
+        return _management_error(exc)
+    print(f"Added SSH host {host.id} ({host.display_name}).")
+    return 0
+
+
+def _run_host_edit(args: argparse.Namespace) -> int:
+    try:
+        host = update_ssh_host(
+            args.id, display_name=args.name, destination=args.destination
+        )
+    except (SshModelValidationError, SshHostStoreError) as exc:
+        return _management_error(exc)
+    if host is None:
+        return _management_error(f"SSH host {args.id} is not registered.")
+    print(f"Updated SSH host {host.id}.")
+    return 0
+
+
+def _run_host_remove(args: argparse.Namespace) -> int:
+    try:
+        removed = remove_ssh_host(args.id)
+    except (RemoteRegistryError, SshHostStoreError) as exc:
+        return _management_error(exc)
+    if not removed:
+        return _management_error(f"SSH host {args.id} is not registered.")
+    print(f"Removed SSH host {args.id}.")
+    return 0
+
+
+def _run_remote_list(args: argparse.Namespace) -> int:
+    integrity = inspect_remote_registry_integrity()
+    if integrity.project_error:
+        return _management_error(integrity.project_error)
+    hosts = {host.id: host for host in integrity.hosts}
+    if not integrity.projects:
+        print("No remote projects registered.")
+        return 0
+    print("ID  NAME  HOST  REMOTE PATH  STATUS")
+    for project in integrity.projects:
+        host_label = (
+            hosts[project.host_id].display_name
+            if project.host_id in hosts
+            else project.host_id
+        )
+        status = (
+            "registered"
+            if project.id not in integrity.orphaned_project_ids
+            else "missing host"
+        )
+        print(f"{project.id}  {project.name}  {host_label}  {project.remote_path}  {status}")
+    return 0
+
+
+def _run_remote_add(args: argparse.Namespace) -> int:
+    try:
+        project = register_remote_project(
+            RemoteProjectRegistration(
+                args.id or str(uuid4()), args.host_id, args.name, args.remote_path
+            )
+        )
+    except (SshModelValidationError, RemoteRegistryError, RemoteProjectStoreError) as exc:
+        return _management_error(exc)
+    print(f"Added remote project {project.id} ({project.name}).")
+    return 0
+
+
+def _run_remote_edit(args: argparse.Namespace) -> int:
+    try:
+        project = update_registered_remote_project(
+            args.id,
+            name=args.name,
+            host_id=args.host_id,
+            remote_path=args.remote_path,
+        )
+    except (SshModelValidationError, RemoteRegistryError, RemoteProjectStoreError) as exc:
+        return _management_error(exc)
+    if project is None:
+        return _management_error(f"Remote project {args.id} is not registered.")
+    print(f"Updated remote project {project.id} ({project.name}).")
+    return 0
+
+
+def _run_remote_remove(args: argparse.Namespace) -> int:
+    try:
+        removed = remove_registered_remote_project(args.id)
+    except RemoteProjectStoreError as exc:
+        return _management_error(exc)
+    if not removed:
+        return _management_error(f"Remote project {args.id} is not registered.")
+    print(f"Removed remote project {args.id}.")
+    return 0
 
 
 def _print_project_table(statuses: Sequence[ProjectStatus]) -> None:

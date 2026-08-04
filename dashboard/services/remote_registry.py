@@ -86,6 +86,7 @@ def update_registered_remote_project(
     registration_id: str,
     *,
     name: str,
+    host_id: str | None = None,
     remote_path: str,
     host_store_path: Path | None = None,
     project_store_path: Path | None = None,
@@ -98,9 +99,18 @@ def update_registered_remote_project(
     )
     if target is None:
         return None
-    _require_host(target.host_id, host_store_path)
+    replacement_host_id = target.host_id if host_id is None else host_id
+    host_result = load_ssh_hosts_result(host_store_path)
+    if host_result.error:
+        raise RemoteRegistryUnavailableError(host_result.error)
+    if replacement_host_id != target.host_id:
+        _require_host(replacement_host_id, host_store_path)
     return update_remote_project(
-        registration_id, name=name, remote_path=remote_path, store_path=project_store_path
+        registration_id,
+        name=name,
+        host_id=replacement_host_id,
+        remote_path=remote_path,
+        store_path=project_store_path,
     )
 
 

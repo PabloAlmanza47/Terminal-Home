@@ -248,6 +248,74 @@ def test_list_order_is_deterministic(
     assert names_in_order == ["apple", "banana", "zebra"]
 
 
+def test_host_cli_crud_and_referenced_removal_protection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    project_id = "c27c7b67-8e3f-4ebc-8dce-d66d559df977"
+
+    assert cli_module.run(
+        ["host", "add", "--id", host_id, "--name", "build", "--destination", "builder"]
+    ) == 0
+    assert cli_module.run(
+        ["host", "edit", host_id, "--name", "build-prod", "--destination", "prod-builder"]
+    ) == 0
+    assert cli_module.run(["host", "list"]) == 0
+    assert "build-prod" in capsys.readouterr().out
+
+    assert cli_module.run(
+        [
+            "remote",
+            "add",
+            "--id",
+            project_id,
+            "--name",
+            "api",
+            "--host-id",
+            host_id,
+            "--remote-path",
+            "/srv/Project With Spaces",
+        ]
+    ) == 0
+    assert cli_module.run(["host", "remove", host_id]) == 1
+    assert "still referenced" in capsys.readouterr().err
+
+    assert cli_module.run(
+        [
+            "remote",
+            "edit",
+            project_id,
+            "--name",
+            "api-renamed",
+            "--remote-path",
+            "/srv/api-renamed",
+        ]
+    ) == 0
+    assert cli_module.run(["remote", "list"]) == 0
+    assert "api-renamed" in capsys.readouterr().out
+    assert cli_module.run(["remote", "remove", project_id]) == 0
+    assert cli_module.run(["host", "remove", host_id]) == 0
+
+
+def test_orphaned_remote_registration_can_be_listed_and_edited_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    missing_host = "e95bfffc-8d3e-4d74-c4ad-877e66ef2aa8"
+    project_id = "f38d8c78-9f4a-5e85-d5be-988f77f3bb19"
+    create_remote_project(
+        RemoteProjectRegistration(project_id, missing_host, "orphan", "/srv/orphan")
+    )
+
+    assert cli_module.run(["remote", "list"]) == 0
+    assert "missing host" in capsys.readouterr().out
+    assert cli_module.run(
+        ["remote", "edit", project_id, "--name", "orphan-renamed", "--remote-path", "/srv/new"]
+    ) == 0
+    assert "orphan-renamed" in capsys.readouterr().out
+
+
 def test_list_shows_registered_remote_projects_without_ssh_or_tmux(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -482,7 +550,9 @@ def test_plan_saved_remote_workspace_recreates_and_missing_host_fails(
             "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", host_id, "remote-api", "/srv/api"
         )
     )
-    workspace_store_module.save_workspace(build_default_workspace("remote-api", location, "remote-api"))
+    workspace_store_module.save_workspace(
+        build_default_workspace("remote-api", location, "remote-api")
+    )
     monkeypatch.setattr(
         project_launch_module,
         "resolve_tmux_runner",
@@ -504,7 +574,9 @@ def test_plan_saved_remote_workspace_recreates_and_missing_host_fails(
             "/srv/orphan",
         )
     )
-    monkeypatch.setattr(project_launch_module, "resolve_tmux_runner", tmux_module.resolve_tmux_runner)
+    monkeypatch.setattr(
+        project_launch_module, "resolve_tmux_runner", tmux_module.resolve_tmux_runner
+    )
     monkeypatch.setattr(
         project_launch_module,
         "session_exists",
@@ -651,7 +723,9 @@ def test_up_saved_remote_workspace_recreates_and_missing_host_does_not_execute(
             "/srv/orphan",
         )
     )
-    monkeypatch.setattr(project_launch_module, "resolve_tmux_runner", tmux_module.resolve_tmux_runner)
+    monkeypatch.setattr(
+        project_launch_module, "resolve_tmux_runner", tmux_module.resolve_tmux_runner
+    )
     monkeypatch.setattr(
         cli_module,
         "execute_launch_request",

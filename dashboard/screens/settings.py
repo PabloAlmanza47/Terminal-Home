@@ -16,6 +16,8 @@ from textual.widgets import Button, Checkbox, Footer, Static
 
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.project_discovery import ProjectDiscoveryScreen
+from dashboard.screens.remote_projects import RemoteProjectsScreen
+from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
 
 
@@ -53,6 +55,8 @@ class SettingsScreen(Screen[None]):
                 )
                 with Horizontal(classes="button-row"):
                     yield Button("Project Discovery...", id="project-discovery-button")
+                    yield Button("SSH Hosts...", id="ssh-hosts-button")
+                    yield Button("Remote Projects...", id="remote-projects-button")
                 yield Static(
                     "Theme: open the command palette (ctrl+p) and search\n"
                     "\"theme\" -- your choice is applied immediately and\n"
@@ -85,6 +89,10 @@ class SettingsScreen(Screen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "project-discovery-button":
             self.app.push_screen(ProjectDiscoveryScreen())
+        elif event.button.id == "ssh-hosts-button":
+            self.app.push_screen(SshHostsScreen())
+        elif event.button.id == "remote-projects-button":
+            self.app.push_screen(RemoteProjectsScreen())
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
