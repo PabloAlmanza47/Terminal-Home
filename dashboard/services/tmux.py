@@ -19,17 +19,21 @@ import shutil
 import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
-from dashboard.models import WindowSpec, WorkspaceSpec
+from dashboard.models import LocalProjectLocation, SshProjectLocation, WindowSpec, WorkspaceSpec
 from dashboard.models.layout import tmux_layout_for_pane_count
 from dashboard.services.pane_commands import PaneLaunchPlan
 from dashboard.services.ssh import SshCommandResult, quote_remote_argument, run_ssh_command
+from dashboard.services.ssh_host_store import get_ssh_host
 
 _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t#{session_attached}"
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 TmuxCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+TmuxRunnerResolutionStatus = Literal["resolved", "missing-host"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +48,58 @@ class TmuxSession:
 
 class TmuxCommandError(Exception):
     """Raised when a tmux command used to build or query a workspace fails."""
+
+
+@dataclass(frozen=True, slots=True)
+class TmuxRunnerResolutionError:
+    """A structured failure to resolve a workspace's tmux runner."""
+
+    status: Literal["missing-host"]
+    host_id: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class TmuxRunnerResolution:
+    """The runner selected for a workspace, or a structured resolution error."""
+
+    status: TmuxRunnerResolutionStatus
+    runner: TmuxCommandRunner | None = None
+    error: TmuxRunnerResolutionError | None = None
+
+
+def resolve_tmux_runner(
+    workspace: WorkspaceSpec,
+    *,
+    host_store_path: Path | None = None,
+) -> TmuxRunnerResolution:
+    """Resolve the local or SSH tmux runner for *workspace*.
+
+    This only selects a runner; it does not execute tmux or SSH commands and
+    does not inspect or modify a project.  Remote paths remain the strings
+    held by ``SshProjectLocation`` and are not needed to construct the runner.
+    """
+    location = workspace.project_location
+    if isinstance(location, LocalProjectLocation):
+        return TmuxRunnerResolution(status="resolved", runner=run_tmux_command)
+
+    if not isinstance(location, SshProjectLocation):
+        raise TypeError("Unsupported workspace project location.")
+
+    host = get_ssh_host(location.host_id, host_store_path)
+    if host is None:
+        return TmuxRunnerResolution(
+            status="missing-host",
+            error=TmuxRunnerResolutionError(
+                status="missing-host",
+                host_id=location.host_id,
+                message=f"SSH host {location.host_id} is not registered.",
+            ),
+        )
+    return TmuxRunnerResolution(
+        status="resolved",
+        runner=SshTmuxCommandRunner(host.destination),
+    )
 
 
 def is_tmux_installed() -> bool:
