@@ -85,6 +85,8 @@ th list         # list discovered projects and their status
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
 th doctor       # check tmux, config paths, and project roots
+th completion bash  # print Bash completion setup
+th completion zsh   # print Zsh completion setup
 ```
 
 `list`, `plan`, and `doctor` never create, attach to, or modify a tmux
@@ -98,6 +100,41 @@ Project selectors may be a unique discovered name or an exact existing path.
 Duplicate names require an exact path. An explicit path outside configured
 roots works, but is not automatically registered in `projects.json` and will
 not appear in `th list` unless separately configured for discovery.
+
+## Shell completion
+
+Terminal Home provides dynamic completion for commands and projects discovered
+from your configured roots and manual-project list. Unique projects are offered
+by short name; projects with duplicate names are offered by exact path. The
+completion path is read-only and does not inspect Git status or tmux sessions.
+
+For Bash, enable completion in the current session with:
+
+```bash
+eval "$(th completion bash)"
+```
+
+To enable it persistently:
+
+```bash
+echo 'eval "$(th completion bash)"' >> ~/.bashrc
+```
+
+For Zsh, enable completion in the current session with:
+
+```zsh
+eval "$(th completion zsh)"
+```
+
+To enable it persistently:
+
+```zsh
+echo 'eval "$(th completion zsh)"' >> ~/.zshrc
+```
+
+Restart the shell or source its configuration after adding persistent setup.
+Both `th up` and `th plan` use the same dynamic project suggestions. The
+`terminal-home` and `dev` command aliases are registered by the same scripts.
 
 ## Usage
 
@@ -159,7 +196,8 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 302 pytest tests passing, Ruff clean, mypy clean.
+Current status: 573 pytest tests collected (572 passed and one optional Zsh
+syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
 
 ```bash
 pytest

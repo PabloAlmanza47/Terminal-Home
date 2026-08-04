@@ -21,6 +21,11 @@ import subprocess
 import sys
 from collections.abc import Sequence
 
+from dashboard.services.completion import (
+    SHELLS,
+    discover_project_selector_candidates,
+    render_completion,
+)
 from dashboard.services.doctor import exit_code_for, format_diagnostic, run_diagnostics
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
@@ -81,6 +86,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "doctor", help="Check the local environment (read-only)."
     )
     doctor_parser.set_defaults(handler=_run_doctor)
+
+    completion_parser = subparsers.add_parser(
+        "completion", help="Generate dynamic shell completion."
+    )
+    completion_parser.add_argument("shell", choices=SHELLS, help="Shell to generate for.")
+    completion_parser.set_defaults(handler=_run_completion)
 
     return parser
 
@@ -163,14 +174,32 @@ def _run_doctor(args: argparse.Namespace) -> int:
     return exit_code_for(diagnostics)
 
 
+def _run_completion(args: argparse.Namespace) -> int:
+    print(render_completion(args.shell), end="")
+    return 0
+
+
+def _run_internal_completion(argv: Sequence[str]) -> int | None:
+    if list(argv) != ["__complete", "projects"]:
+        return None
+    for candidate in discover_project_selector_candidates():
+        print(candidate)
+    return 0
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Parse *argv* (defaulting to sys.argv[1:]) and either open the
     Textual dashboard (no subcommand given) or dispatch to a CLI command
     handler. Like argparse itself, `--help` and an invalid invocation exit
     the process directly (SystemExit) rather than returning.
     """
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    internal_result = _run_internal_completion(effective_argv)
+    if internal_result is not None:
+        return internal_result
+
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
 
     if args.command is None:
         from dashboard.app import main as app_main
