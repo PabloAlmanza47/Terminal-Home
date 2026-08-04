@@ -9,6 +9,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -45,6 +47,18 @@ def test_entrypoint_module_and_function_are_importable_and_callable() -> None:
     func = getattr(module, func_name)
 
     assert callable(func)
+
+
+def test_version_is_authoritative_and_cli_reports_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dashboard import __version__
+    from dashboard.cli import run
+
+    with pytest.raises(SystemExit) as excinfo:
+        run(["--version"])
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip().endswith(__version__)
 
 
 def test_python_dash_m_dashboard_targets_the_same_dispatcher() -> None:

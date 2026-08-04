@@ -51,37 +51,76 @@ terminal-home
         -> Neovim + Claude Code + dev server, tiled and ready
 ```
 
-## Installation
+## Normal user installation
 
-Requires Linux or WSL with `tmux` installed.
+Terminal Home targets Linux and WSL with `tmux` installed. For a normal
+installation, use an isolated application installer so `th` is available from
+a new terminal without activating a repository virtual environment:
+
+```bash
+pipx install .
+# or
+uv tool install .
+```
+
+To install directly from GitHub:
+
+```bash
+pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+# or
+uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+```
+
+After installation, open a new terminal and run `th` or `th doctor`.
+`terminal-home` is the long command name. `dev` is retained as a compatibility
+alias for older installations. Upgrade with `pipx install --force .` or
+`uv tool install --upgrade .`; uninstall with `pipx uninstall terminal-home`
+or `uv tool uninstall terminal-home`.
+
+## Contributor installation
+
+Cloning the repository and installing editable development dependencies is for
+contributors and maintainers:
 
 ```bash
 git clone https://github.com/PabloAlmanza47/Terminal-Home.git
 cd Terminal-Home
-
 python3 -m venv .venv
 source .venv/bin/activate
-
-pip install -e ".[dev]"
-
+python -m pip install -e ".[dev]"
 tmux -V   # confirm tmux is installed and on PATH
-
-terminal-home   # launch the dashboard (or the shorter `th`)
 ```
 
-`dev` remains available too, for compatibility with earlier installs.
-
-For contributor installation, create the virtual environment above and install
-the editable development extras with `pip install -e ".[dev]"`; the focused
-tests, Ruff, and Mypy commands are then available from `.venv/bin`. Terminal
-Home currently targets Linux and WSL; native Windows and macOS workflows are
-not supported.
+Development-only tools such as pytest, Ruff, Mypy, and the build frontend are
+not runtime dependencies. Terminal Home currently targets Linux and WSL;
+native Windows and macOS workflows are not supported. WSL users should
+install Linux `tmux` inside their WSL distribution.
 
 **Required:** Python 3.10+, `tmux`.
 **Optional:** `nvim`, `claude` (Claude Code), `lazygit`, `tree`, `git`, and
 the package manager selected by a project's lockfile (`npm`, `pnpm`, `yarn`,
 or `bun`). Tool-oriented panes fall back safely when their preferred tool is
 missing; detected package scripts require their selected package manager.
+
+## Building a local release
+
+Maintainers can build an sdist and wheel locally without publishing them:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m build
+```
+
+The output is written to `dist/`. The package has one authoritative version in
+`dashboard.__version__`; installed metadata and `th --version` derive from it.
+
+### Maintainer release checklist
+
+1. Update `dashboard.__version__` using `MAJOR.MINOR.PATCH` versioning.
+2. Run the full test suite, Ruff, Mypy, and isolated build/install checks.
+3. Review the generated wheel and sdist in a clean environment.
+4. Create tags and releases manually when ready. CI uploads tagged artifacts
+   but does not publish to PyPI automatically.
 
 ## Command-line interface
 

@@ -22,6 +22,7 @@ import sys
 from collections.abc import Sequence
 from uuid import uuid4
 
+from dashboard import __version__
 from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
 from dashboard.services.completion import (
     SHELLS,
@@ -85,6 +86,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Run with no arguments to open the dashboard."
         ),
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     list_parser = subparsers.add_parser(
