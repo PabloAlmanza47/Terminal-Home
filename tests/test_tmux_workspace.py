@@ -19,14 +19,24 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+from dashboard.models import (
+    PaneKind,
+    PaneSpec,
+    SshHost,
+    SshProjectLocation,
+    WindowSpec,
+    WorkspaceSpec,
+)
 from dashboard.services import pane_commands
 from dashboard.services import tmux as tmux_module
+from dashboard.services.ssh_host_store import create_ssh_host
 from dashboard.services.tmux import (
+    SshTmuxCommandRunner,
     TmuxCommandError,
     attach_or_switch_argv,
     create_workspace_session,
     generate_session_name,
+    resolve_tmux_runner,
     sanitize_session_name,
     session_exists,
 )
@@ -185,6 +195,70 @@ def test_generate_session_name_default_listing_supports_zero_argument_monkeypatc
     )
 
     assert generate_session_name("My Project") == "My-Project-2"
+
+
+def test_generate_session_name_passes_explicit_runner_to_listing() -> None:
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str]) -> _FakeCompletedProcess:
+        calls.append(argv)
+        return _FakeCompletedProcess(stdout="My-Project\t1\tcreated\t0\n")
+
+    assert generate_session_name("My Project", runner=runner) == "My-Project-2"
+    assert calls == [["tmux", "list-sessions", "-F", tmux_module._LIST_FORMAT]]
+
+
+def test_local_workspace_resolves_existing_local_runner(tmp_path: Path) -> None:
+    resolution = resolve_tmux_runner(_workspace(tmp_path))
+
+    assert resolution.status == "resolved"
+    assert resolution.error is None
+    assert resolution.runner is tmux_module.run_tmux_command
+
+
+def _ssh_workspace(remote_path: str = "/srv/project with spaces") -> WorkspaceSpec:
+    return WorkspaceSpec(
+        project_name="remote-demo",
+        project_location=SshProjectLocation(
+            host_id="c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            remote_path=remote_path,
+        ),
+        session_name="remote-demo",
+        windows=(WindowSpec(window_name="main", panes=(_pane(),)),),
+    )
+
+
+def test_ssh_workspace_resolves_registered_host_destination_without_execution(
+    tmp_path: Path,
+) -> None:
+    host_id = "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3"
+    host_store = tmp_path / "hosts.json"
+    create_ssh_host(SshHost(host_id, "Development", "deploy@example.test"), host_store)
+    workspace = _ssh_workspace("/srv/Project With Spaces/$HOME")
+
+    resolution = resolve_tmux_runner(workspace, host_store_path=host_store)
+
+    assert resolution.status == "resolved"
+    assert resolution.error is None
+    assert isinstance(resolution.runner, SshTmuxCommandRunner)
+    assert resolution.runner.destination == "deploy@example.test"
+    assert isinstance(workspace.project_location.remote_path, str)
+
+
+def test_ssh_workspace_with_missing_host_returns_structured_error(tmp_path: Path) -> None:
+    workspace = _ssh_workspace("/srv/orphan")
+
+    resolution = resolve_tmux_runner(
+        workspace,
+        host_store_path=tmp_path / "missing-hosts.json",
+    )
+
+    assert resolution.status == "missing-host"
+    assert resolution.runner is None
+    assert resolution.error is not None
+    assert resolution.error.status == "missing-host"
+    assert resolution.error.host_id == workspace.project_location.host_id
+    assert "not registered" in resolution.error.message
 
 
 # --- session_exists: isolation from a real tmux server --------------------------
