@@ -8,6 +8,20 @@ models and hand them to dashboard.services.workspace_launcher.
 
 from __future__ import annotations
 
+from dashboard.models.project_location import (
+    LocalProjectLocation,
+    ProjectLocation,
+    ProjectLocationKind,
+    ProjectLocationValidationError,
+    SshProjectLocation,
+    project_location_from_dict,
+)
+from dashboard.models.ssh import (
+    MAX_REMOTE_NAME_LENGTH,
+    RemoteProjectRegistration,
+    SshHost,
+    SshModelValidationError,
+)
 from dashboard.models.template import (
     MAX_TEMPLATE_NAME_LENGTH,
     TemplateValidationError,
@@ -31,10 +45,19 @@ from dashboard.models.workspace import (
 __all__ = [
     "LaunchAction",
     "LaunchRequest",
+    "LocalProjectLocation",
     "MAX_PANES_PER_WINDOW",
+    "MAX_REMOTE_NAME_LENGTH",
     "PANE_KIND_LABELS",
     "PaneKind",
     "PaneSpec",
+    "ProjectLocation",
+    "ProjectLocationKind",
+    "ProjectLocationValidationError",
+    "RemoteProjectRegistration",
+    "SshHost",
+    "SshModelValidationError",
+    "SshProjectLocation",
     "WindowSpec",
     "WorkspaceSpec",
     "WorkspaceValidationError",
@@ -42,6 +65,7 @@ __all__ = [
     "TemplateValidationError",
     "WorkspaceTemplate",
     "normalize_template_name",
+    "project_location_from_dict",
     "template_from_workspace",
     "workspace_from_template",
 ]
