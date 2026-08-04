@@ -18,9 +18,11 @@ import dashboard.services.project_launch as project_launch_module
 import dashboard.services.tmux as tmux_module
 import dashboard.services.workspace_launcher as workspace_launcher_module
 import dashboard.services.workspace_store as workspace_store_module
-from dashboard.models import LocalProjectLocation
+from dashboard.models import LocalProjectLocation, RemoteProjectRegistration, SshHost
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services.projects_config_store import save_projects_config
+from dashboard.services.remote_project_store import create_remote_project
+from dashboard.services.ssh_host_store import create_ssh_host
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_launcher import LaunchError
 
@@ -239,6 +241,53 @@ def test_list_order_is_deterministic(
     assert first == second
     names_in_order = [line.split()[0] for line in first.splitlines()[1:] if line.strip()]
     assert names_in_order == ["apple", "banana", "zebra"]
+
+
+def test_list_shows_registered_remote_projects_without_ssh_or_tmux(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    _configure_roots(empty_root)
+    _assume_no_tmux_sessions(monkeypatch)
+    monkeypatch.setattr(
+        "dashboard.services.ssh.run_ssh_command",
+        lambda *args, **kwargs: pytest.fail("list must not make an SSH call"),
+    )
+
+    known_host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    missing_host_id = "e95bfffc-8d3e-4d74-c4ad-877e66ef2aa8"
+    create_ssh_host(SshHost(known_host_id, "build host", "builder"))
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            known_host_id,
+            "remote-api",
+            "/srv/Project With Spaces",
+        )
+    )
+    create_remote_project(
+        RemoteProjectRegistration(
+            "f38d8c78-9f4a-5e85-d5be-988f77f3bb19",
+            missing_host_id,
+            "orphan-api",
+            "/srv/orphan path",
+        )
+    )
+
+    assert cli_module.run(["list"]) == 0
+    out = capsys.readouterr().out
+
+    assert "REMOTE PROJECTS" in out
+    assert "remote-api" in out
+    assert "ssh:d84aeefb-7c29-4c63-b39c-766d559df977:/srv/Project With Spaces" in out
+    assert "/srv/Project With Spaces" in out
+    assert "orphan-api" in out
+    assert "ssh:e95bfffc-8d3e-4d74-c4ad-877e66ef2aa8:/srv/orphan path" in out
+    assert "orphaned (missing host)" in out
 
 
 # --- `th plan` -----------------------------------------------------------------

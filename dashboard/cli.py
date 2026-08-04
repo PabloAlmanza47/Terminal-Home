@@ -33,12 +33,17 @@ from dashboard.services.project_launch import (
     prepare_project_launch,
     resolve_project_status,
 )
+from dashboard.services.project_selection import (
+    RegisteredRemoteProject,
+    list_selectable_projects,
+)
 from dashboard.services.projects import (
     ProjectStatus,
     format_scan_warnings,
     scan_all_projects,
     status_badge,
 )
+from dashboard.services.ssh_host_store import load_all_ssh_hosts
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
 from dashboard.services.workspace_plan import build_workspace_plan, format_plan
@@ -113,13 +118,52 @@ def _print_project_table(statuses: Sequence[ProjectStatus]) -> None:
         print(f"{line}  {row[-1]}")
 
 
+def _print_remote_project_table(
+    projects: Sequence[RegisteredRemoteProject],
+) -> None:
+    headers = ("NAME", "SELECTOR", "HOST", "PATH", "STATUS")
+    known_host_ids = {host.id for host in load_all_ssh_hosts()}
+    rows = [
+        (
+            project.name,
+            project.selector,
+            project.location.host_id,
+            project.location.remote_path,
+            "orphaned (missing host)"
+            if project.location.host_id not in known_host_ids
+            else "registered",
+        )
+        for project in projects
+    ]
+    widths = [
+        max(len(row[index]) for row in (headers, *rows))
+        for index in range(len(headers) - 1)
+    ]
+    for row in (headers, *rows):
+        line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
+        print(f"{line}  {row[-1]}")
+
+
 def _run_list(args: argparse.Namespace) -> int:
+    selectable_projects = list_selectable_projects()
+    remote_projects = tuple(
+        project
+        for project in selectable_projects
+        if isinstance(project, RegisteredRemoteProject)
+    )
     result = scan_all_projects()
 
     if not result.statuses:
-        print("No projects discovered.")
+        if not remote_projects:
+            print("No projects discovered.")
     else:
         _print_project_table(result.statuses)
+
+    if remote_projects:
+        if result.statuses:
+            print()
+        print("REMOTE PROJECTS")
+        _print_remote_project_table(remote_projects)
 
     warning = format_scan_warnings(result)
     if warning:
