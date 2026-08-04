@@ -185,11 +185,22 @@ Workspace, and every saved template. The selected layout remains editable and
 nothing is created, saved, launched, or executed until the wizard's existing
 final confirmation.
 
-Open **Workspace Templates** from Home to inspect, rename, or delete user
-templates. Names are trimmed, limited to 80 characters, reject control
-characters, and must be unique case-insensitively; case-only renames of the
-same stable template are allowed. Deletion requires confirmation and affects
-only template metadata.
+Open **Workspace Templates** from Home to inspect, rename, delete, import, or
+export user templates. Import asks for a local file, validates it, and shows an
+explicit review of every window, pane kind, display name, and literal custom
+command before anything is saved. If its name conflicts case-insensitively with
+a local template, choose a different validated name; Terminal Home never
+overwrites the existing template or silently adds a suffix. Every successful
+import receives a fresh local UUID.
+
+Export asks for one destination path and recommends the
+`.th-template.json` extension. The destination parent must already exist. An
+existing file is overwritten only after confirmation, using atomic replacement
+and preserving its previous contents as `<filename>.bak`. Export does not
+modify the selected template or the local template store. Names are trimmed,
+limited to 80 characters, reject control characters, and must be unique
+case-insensitively; case-only renames of the same stable template are allowed.
+Deletion requires confirmation and affects only template metadata.
 
 Templates are stored locally at
 `$XDG_DATA_HOME/terminal-home/templates.json` (or
@@ -199,8 +210,20 @@ independent copy: later edits, rename, or deletion cannot change a project
 workspace already created from it. Development Server and Test Terminal panes
 still store intent only; their commands are detected for the destination
 project at launch time. The built-in Default Workspace remains separate and
-cannot be renamed or deleted. Template import, export, online sharing, and a
-marketplace are not supported yet.
+cannot be renamed, deleted, or exported.
+
+Portable files use an independent version-1 envelope identified by
+`terminal-home-workspace-template`. They contain the template name and ordered
+window/pane intent, but no local UUID, project/session identity, Git state,
+detected commands, installed-tool results, or live tmux data. Content is
+validated by the envelope rather than its filename extension. Import and export
+are local file operations only; online sharing, remote URLs, cloud storage, and
+a marketplace are not supported.
+
+> **Trust custom commands before launching.** Import never executes, expands,
+> interpolates, or validates shell commands. It displays custom commands
+> literally for review. A custom command runs only later if you apply that
+> template to a project and launch the resulting workspace.
 
 ## Architecture
 
@@ -212,8 +235,8 @@ marketplace are not supported yet.
   `LaunchRequest`, ...) with no
   Textual imports and no subprocess calls, so they're trivially unit tested.
 - **Services** (`dashboard/services/`) — the logic layer: project scanning,
-  git info, slug generation, pane command resolution, and the tmux
-  orchestration itself. No Textual imports here either.
+  git info, slug generation, pane command resolution, portable-template file
+  validation, and the tmux orchestration itself. No Textual imports here either.
 - **Persistence** — confirmed workspaces are saved as JSON under
   `$XDG_DATA_HOME/terminal-home/workspaces.json`; reusable templates are saved
   separately under `$XDG_DATA_HOME/terminal-home/templates.json`; presentation preferences
@@ -235,7 +258,7 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 649 pytest tests collected (648 passed and one optional Zsh
+Current status: 681 pytest tests collected (680 passed and one optional Zsh
 syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
 
 ```bash
@@ -273,7 +296,7 @@ will and won't do to a running session or a saved workspace — see
 
 ## Roadmap
 
-- Template import/export and optional online sharing
+- Optional online template sharing and marketplace
 - Optional remote/SSH project support
 - Packaging and installation improvements
 
@@ -311,14 +334,17 @@ dashboard/
         workspace_defaults.py         The simple default WorkspaceSpec (Open Default/Reset)
         workspace_store.py           JSON persistence under XDG_DATA_HOME; load/forget by canonical path
         template_store.py            Independent versioned templates.json persistence
+        template_portability.py      Strict portable-envelope parsing and atomic file export
         workspace_launcher.py         Non-Textual orchestration: LaunchRequest -> running tmux
         settings_store.py            JSON persistence under XDG_CONFIG_HOME
     screens/                    One module per screen
         home.py
         projects.py                Continue Project: searchable, status-annotated project list
         project_detail.py           Resume/Recreate/Default/Configure/Edit/Save Template/Reset/Forget
-        workspace_templates.py      List, summarize, rename, and delete local templates
+        workspace_templates.py      Manage, import, review, and export local templates
         template_name.py            Reusable template-name input modal
+        template_path.py            Reusable import/export path modal
+        template_import_review.py   Explicit imported-layout and custom-command review
         confirm.py                   Reusable Yes/No modal for destructive metadata actions
         tmux_sessions.py            Resume tmux Session (read-only session list)
         system_info.py               System Information

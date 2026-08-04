@@ -77,6 +77,22 @@ never both, and never a guess.
 - Template rename preserves stable identity. Delete and rename affect only
   `templates.json`; neither operation changes saved project workspaces or live
   sessions. The built-in Default Workspace is not a user template.
+- A portable template file has its own versioned format, independent of the
+  local `templates.json` schema. It contains name/window/pane intent but never a
+  local UUID or project, session, Git, detection, tool, launch, or live-tmux
+  state. Import always assigns a fresh local UUID.
+- Import reads only a bounded local UTF-8 JSON file. It never evaluates project
+  code, expands shell syntax, executes custom commands, detects commands, or
+  contacts tmux. The exact decoded custom commands are shown before explicit
+  confirmation and run only after a later apply-and-launch action.
+- Case-insensitive duplicate imports never overwrite existing templates. The
+  user must choose a different valid name, changing only local display identity
+  while preserving the reviewed layout.
+- Export writes only the selected user template. It never mutates that template
+  or the local store, and an existing destination requires explicit overwrite
+  confirmation. The built-in Default Workspace is not exportable.
+- Import/export are local file operations, not online sharing or a trust
+  mechanism. A portable file must be reviewed as untrusted input.
 
 ## Where this is enforced in code
 

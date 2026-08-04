@@ -9,14 +9,33 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, OptionList, Static
 from textual.widgets.option_list import Option
 
-from dashboard.models import TemplateValidationError, WorkspaceTemplate
+from dashboard.models import (
+    TemplateValidationError,
+    WorkspaceTemplate,
+    normalize_template_name,
+)
 from dashboard.screens.confirm import ConfirmScreen
+from dashboard.screens.template_import_review import ImportTemplateReviewScreen
 from dashboard.screens.template_name import TemplateNameScreen
+from dashboard.screens.template_path import TemplatePathScreen
+from dashboard.services.template_portability import (
+    ExportDestinationExistsError,
+    LoadedPortableTemplate,
+    TemplatePortabilityError,
+    construct_imported_template,
+    export_template,
+    load_portable_template,
+    safe_default_export_filename,
+    verify_import_source_unchanged,
+)
 from dashboard.services.template_store import (
     DuplicateTemplateNameError,
     TemplateStoreError,
     TemplateStoreVersionError,
+    create_template,
     delete_template,
+    find_template_by_name,
+    get_template,
     load_templates_result,
     rename_template,
 )
@@ -27,12 +46,15 @@ class WorkspaceTemplatesScreen(Screen[None]):
         ("escape", "go_back", "Back"),
         ("r", "rename_selected", "Rename"),
         ("d", "delete_selected", "Delete"),
+        ("i", "import_template", "Import"),
+        ("e", "export_selected", "Export"),
         ("f5", "refresh", "Refresh"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self._templates: dict[str, WorkspaceTemplate] = {}
+        self._pending_import: LoadedPortableTemplate | None = None
 
     def compose(self) -> ComposeResult:
         with Container(classes="screen-root"):
@@ -45,6 +67,9 @@ class WorkspaceTemplatesScreen(Screen[None]):
                 yield OptionList(id="template-list")
                 yield Static("", id="template-summary")
                 yield Static("", id="template-error")
+                with Horizontal(classes="button-row"):
+                    yield Button("Import", id="import-template-button", variant="primary")
+                    yield Button("Export", id="export-template-button")
                 with Horizontal(classes="button-row"):
                     yield Button("Rename", id="rename-template-button")
                     yield Button("Delete", id="delete-template-button", variant="error")
@@ -72,6 +97,13 @@ class WorkspaceTemplatesScreen(Screen[None]):
             option_list.highlighted = ids.index(preferred_id) if preferred_id in ids else 0
             self._show_selected()
         self.query_one("#template-error", Static).update(result.error or result.warning or "")
+        self._update_action_buttons()
+
+    def _update_action_buttons(self) -> None:
+        disabled = self._selected() is None
+        self.query_one("#export-template-button", Button).disabled = disabled
+        self.query_one("#rename-template-button", Button).disabled = disabled
+        self.query_one("#delete-template-button", Button).disabled = disabled
 
     def _selected(self) -> WorkspaceTemplate | None:
         option_list = self.query_one("#template-list", OptionList)
@@ -95,9 +127,14 @@ class WorkspaceTemplatesScreen(Screen[None]):
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_list.id == "template-list":
             self._show_selected()
+            self._update_action_buttons()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "rename-template-button":
+        if event.button.id == "import-template-button":
+            self.action_import_template()
+        elif event.button.id == "export-template-button":
+            self.action_export_selected()
+        elif event.button.id == "rename-template-button":
             self.action_rename_selected()
         elif event.button.id == "delete-template-button":
             self.action_delete_selected()
@@ -110,6 +147,132 @@ class WorkspaceTemplatesScreen(Screen[None]):
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
+
+    def _show_status(self, message: str) -> None:
+        self.query_one("#template-error", Static).update(message)
+
+    async def _choose_available_import_name(self, initial_name: str) -> str | None:
+        name = initial_name
+        while find_template_by_name(name) is not None:
+            chosen = await self.app.push_screen_wait(
+                TemplateNameScreen(
+                    "Choose a Different Template Name",
+                    value=name,
+                    submit_label="Continue",
+                )
+            )
+            if chosen is None:
+                return None
+            try:
+                candidate_name = normalize_template_name(chosen)
+            except TemplateValidationError as exc:
+                self.app.notify(str(exc), title="Import", severity="error")
+                continue
+            if find_template_by_name(candidate_name) is not None:
+                self.app.notify(
+                    f'A template named "{candidate_name}" already exists.',
+                    title="Import",
+                    severity="error",
+                )
+                name = candidate_name
+                continue
+            return candidate_name
+        return name
+
+    @work
+    async def action_import_template(self) -> None:
+        raw_path = await self.app.push_screen_wait(
+            TemplatePathScreen("Import Workspace Template", submit_label="Review")
+        )
+        if raw_path is None:
+            return
+        try:
+            self._pending_import = load_portable_template(raw_path)
+            local_name = await self._choose_available_import_name(
+                self._pending_import.template.name
+            )
+        except (TemplatePortabilityError, TemplateValidationError) as exc:
+            self._show_status(str(exc))
+            return
+        if local_name is None:
+            return
+        assert self._pending_import is not None
+        while True:
+            confirmed = await self.app.push_screen_wait(
+                ImportTemplateReviewScreen(self._pending_import.template, local_name)
+            )
+            if not confirmed:
+                return
+            try:
+                verify_import_source_unchanged(self._pending_import)
+                imported = construct_imported_template(
+                    self._pending_import.template, name=local_name
+                )
+                create_template(imported)
+            except DuplicateTemplateNameError:
+                local_name = await self._choose_available_import_name(local_name)
+                if local_name is None:
+                    return
+                continue
+            except (
+                TemplatePortabilityError,
+                TemplateStoreError,
+                TemplateValidationError,
+                OSError,
+            ) as exc:
+                self._show_status(str(exc))
+                return
+            self._refresh(imported.id)
+            self._show_status(
+                f'Imported template "{imported.name}" from {self._pending_import.path}.'
+            )
+            return
+
+    @work
+    async def action_export_selected(self) -> None:
+        selected = self._selected()
+        if selected is None:
+            return
+        raw_path = await self.app.push_screen_wait(
+            TemplatePathScreen(
+                "Export Workspace Template",
+                value=safe_default_export_filename(selected.name),
+                submit_label="Export",
+            )
+        )
+        if raw_path is None:
+            return
+        current = get_template(selected.id)
+        if current is None:
+            self._refresh()
+            self._show_status("Template no longer exists.")
+            return
+        try:
+            exported_path = export_template(current, raw_path)
+        except ExportDestinationExistsError as exc:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmScreen(
+                    f"{exc}\nOverwrite it and preserve the previous file as a backup?",
+                    confirm_label="Overwrite",
+                )
+            )
+            if not confirmed:
+                return
+            current = get_template(selected.id)
+            if current is None:
+                self._refresh()
+                self._show_status("Template no longer exists.")
+                return
+            try:
+                exported_path = export_template(current, raw_path, overwrite=True)
+            except (TemplatePortabilityError, OSError) as overwrite_exc:
+                self._show_status(str(overwrite_exc))
+                return
+        except (TemplatePortabilityError, OSError) as exc:
+            self._show_status(str(exc))
+            return
+        self._refresh(current.id)
+        self._show_status(f"Exported template to {exported_path}.")
 
     @work
     async def action_rename_selected(self) -> None:

@@ -279,6 +279,19 @@ ConfirmScreen {
     padding: 1 2;
 }
 
+#template-path-panel {
+    width: 76;
+    height: auto;
+    max-height: 14;
+    padding: 1 2;
+}
+
+#template-import-review-panel {
+    width: 84;
+    height: 80%;
+    padding: 1 2;
+}
+
 #confirm-message {
     text-align: center;
 }
