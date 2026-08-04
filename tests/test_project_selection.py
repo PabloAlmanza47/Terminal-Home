@@ -9,8 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from dashboard.models import RemoteProjectRegistration, SshProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
-from dashboard.services.project_selection import resolve_project_selector
+from dashboard.services import ssh as ssh_module
+from dashboard.services.project_selection import (
+    RegisteredRemoteProject,
+    list_selectable_projects,
+    resolve_project_selector,
+)
+from dashboard.services.remote_project_store import create_remote_project
 
 
 def _make_root(tmp_path: Path, name: str, dirs: list[str]) -> Path:
@@ -174,3 +181,114 @@ def test_empty_selector_is_a_concise_error(tmp_path: Path) -> None:
 
     assert not result.ok
     assert result.error is not None
+
+
+def _remote_project(
+    project_id: str, host_id: str, name: str, path: str
+) -> RemoteProjectRegistration:
+    return RemoteProjectRegistration(project_id, host_id, name, path)
+
+
+def test_registered_remote_projects_are_in_combined_selection_data(tmp_path: Path) -> None:
+    store = tmp_path / "remote-projects.json"
+    registration = _remote_project(
+        "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+        "d84aeefb-7c29-4c63-b39c-766d559df977",
+        "remote-api",
+        "/srv/Project With Spaces",
+    )
+    create_remote_project(registration, store)
+
+    projects = list_selectable_projects(ProjectsConfig(roots=()), remote_store_path=store)
+
+    assert len(projects) == 1
+    project = projects[0]
+    assert isinstance(project, RegisteredRemoteProject)
+    assert project.location == SshProjectLocation(registration.host_id, registration.remote_path)
+    assert isinstance(project.location.remote_path, str)
+    assert project.selector == (
+        "ssh:d84aeefb-7c29-4c63-b39c-766d559df977:/srv/Project With Spaces"
+    )
+
+
+def test_local_and_remote_same_name_are_ambiguous(tmp_path: Path) -> None:
+    root = _make_root(tmp_path, "roots", ["demo"])
+    store = tmp_path / "remote-projects.json"
+    create_remote_project(
+        _remote_project(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            "d84aeefb-7c29-4c63-b39c-766d559df977",
+            "demo",
+            "/srv/demo",
+        ),
+        store,
+    )
+
+    result = resolve_project_selector(
+        "demo", config=ProjectsConfig(roots=(root,)), remote_store_path=store
+    )
+
+    assert not result.ok
+    assert len(result.candidates) == 2
+    assert result.error is not None
+    assert "ssh:" in result.error
+
+
+def test_duplicate_remote_names_are_distinguishable_by_selector(tmp_path: Path) -> None:
+    store = tmp_path / "remote-projects.json"
+    first = _remote_project(
+        "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+        "d84aeefb-7c29-4c63-b39c-766d559df977",
+        "demo",
+        "/srv/one",
+    )
+    second = _remote_project(
+        "6cd81f5d-9fe4-4c32-b17f-f88e5db754f4",
+        "760525f1-fdc9-49a7-99fa-2ff90f324bd9",
+        "demo",
+        "/srv/two",
+    )
+    create_remote_project(first, store)
+    create_remote_project(second, store)
+
+    ambiguous = resolve_project_selector(
+        "demo", config=ProjectsConfig(roots=()), remote_store_path=store
+    )
+    selected = resolve_project_selector(
+        "ssh:760525f1-fdc9-49a7-99fa-2ff90f324bd9:/srv/two",
+        config=ProjectsConfig(roots=()),
+        remote_store_path=store,
+    )
+
+    assert not ambiguous.ok
+    assert len(ambiguous.candidates) == 2
+    assert selected.ok
+    assert isinstance(selected.project, RegisteredRemoteProject)
+    assert selected.project.location.remote_path == "/srv/two"
+
+
+def test_missing_host_registration_remains_visible_and_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "remote-projects.json"
+    registration = _remote_project(
+        "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+        "d84aeefb-7c29-4c63-b39c-766d559df977",
+        "orphan",
+        "/srv/orphan",
+    )
+    create_remote_project(registration, store)
+    monkeypatch.setattr(
+        ssh_module,
+        "run_ssh_command",
+        lambda *args, **kwargs: pytest.fail("selection must not connect over SSH"),
+    )
+
+    result = resolve_project_selector(
+        "orphan", config=ProjectsConfig(roots=()), remote_store_path=store
+    )
+
+    assert result.ok
+    assert isinstance(result.project, RegisteredRemoteProject)
+    assert result.project.location.host_id == registration.host_id
+    assert result.project.location.remote_path == registration.remote_path

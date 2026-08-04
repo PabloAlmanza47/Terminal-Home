@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models import LaunchAction, LaunchRequest
-from dashboard.services.project_selection import resolve_project_selector
+from dashboard.services.project_selection import RegisteredRemoteProject, resolve_project_selector
 from dashboard.services.projects import (
+    Project,
     ProjectStatus,
     build_launch_request,
     gather_single_project_status,
@@ -43,6 +44,13 @@ def resolve_project_status(selector: str) -> ResolvedProjectStatus:
     selection = resolve_project_selector(selector, config=config_result.value)
     if selection.project is None:
         return ResolvedProjectStatus(None, selection.error, tuple(warnings))
+    if isinstance(selection.project, RegisteredRemoteProject):
+        return ResolvedProjectStatus(
+            None,
+            "Remote project CLI launch integration is not available yet.",
+            tuple(warnings),
+        )
+    assert isinstance(selection.project, Project)
 
     status = gather_single_project_status(selection.project, config=config_result.value)
     if status.workspace_metadata_warning:

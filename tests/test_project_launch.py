@@ -4,12 +4,19 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.models import LaunchAction, LocalProjectLocation
+from dashboard.models import (
+    LaunchAction,
+    LocalProjectLocation,
+    RemoteProjectRegistration,
+    SshProjectLocation,
+)
 from dashboard.services import project_launch
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     prepare_project_launch,
+    resolve_project_status,
 )
+from dashboard.services.project_selection import ProjectSelectionResult, RegisteredRemoteProject
 from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.workspace_defaults import build_default_workspace
 
@@ -146,3 +153,57 @@ def test_directory_disappearing_after_scan_blocks_before_save(
     with pytest.raises(ProjectLaunchPreparationError, match="no longer exists"):
         prepare_project_launch(status)
     assert calls == []
+
+
+def test_local_project_status_resolution_still_gathers_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = Project("demo", tmp_path)
+    expected = _status(tmp_path)
+    monkeypatch.setattr(
+        project_launch,
+        "resolve_project_selector",
+        lambda selector, config: ProjectSelectionResult(project=local),
+    )
+    monkeypatch.setattr(
+        project_launch,
+        "gather_single_project_status",
+        lambda project, config: expected,
+    )
+
+    result = resolve_project_status("demo")
+
+    assert result.status is expected
+    assert result.error is None
+
+
+def test_remote_project_status_resolution_stops_before_local_gathering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remote = RegisteredRemoteProject(
+        name="remote-demo",
+        location=SshProjectLocation(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", "/srv/remote"
+        ),
+        registration=RemoteProjectRegistration(
+            "6cd81f5d-9fe4-4c32-b17f-f88e5db754f4",
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            "remote-demo",
+            "/srv/remote",
+        ),
+    )
+    monkeypatch.setattr(
+        project_launch,
+        "resolve_project_selector",
+        lambda selector, config: ProjectSelectionResult(project=remote),
+    )
+    monkeypatch.setattr(
+        project_launch,
+        "gather_single_project_status",
+        lambda *args, **kwargs: pytest.fail("remote projects must not gather local status"),
+    )
+
+    result = resolve_project_status("ssh:c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3:/srv/remote")
+
+    assert result.status is None
+    assert result.error == "Remote project CLI launch integration is not available yet."

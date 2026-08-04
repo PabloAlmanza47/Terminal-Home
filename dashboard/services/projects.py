@@ -37,6 +37,11 @@ class Project:
     name: str
     path: Path
 
+    @property
+    def location(self) -> LocalProjectLocation:
+        """The location identity used by selection and workspace models."""
+        return LocalProjectLocation(self.path)
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectDiscoveryResult:
