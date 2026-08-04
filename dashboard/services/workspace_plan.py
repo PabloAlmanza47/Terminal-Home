@@ -14,12 +14,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dashboard.models import LocalProjectLocation, PaneKind, PaneSpec, WorkspaceSpec
+from dashboard.models import (
+    LocalProjectLocation,
+    PaneKind,
+    PaneSpec,
+    ProjectLocation,
+    WorkspaceSpec,
+)
 from dashboard.services.projects import ProjectStatus
 from dashboard.services.workspace_defaults import build_default_workspace
 
 ACTION_ATTACH = "attach to existing session"
 ACTION_CREATE_SAVED = "create saved workspace"
+ACTION_RECREATE = "recreate saved workspace"
 ACTION_CREATE_DEFAULT = "create default workspace"
 ACTION_BLOCKED = "blocked"
 
@@ -41,7 +48,8 @@ class WorkspacePlan:
     """
 
     project_name: str
-    project_path: Path
+    project_path: Path | str
+    project_location: ProjectLocation
     session_name: str
     action: str
     source: str
@@ -63,6 +71,7 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
         return WorkspacePlan(
             project_name=status.project.name,
             project_path=status.canonical_path,
+            project_location=LocalProjectLocation(status.canonical_path),
             session_name=status.expected_session_name,
             action=ACTION_ATTACH,
             source=SOURCE_RUNNING,
@@ -74,6 +83,7 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
         return WorkspacePlan(
             project_name=status.project.name,
             project_path=status.canonical_path,
+            project_location=LocalProjectLocation(status.canonical_path),
             session_name=status.expected_session_name,
             action=ACTION_BLOCKED,
             source=SOURCE_INVALID,
@@ -88,6 +98,7 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
         return WorkspacePlan(
             project_name=status.project.name,
             project_path=status.canonical_path,
+            project_location=LocalProjectLocation(status.canonical_path),
             session_name=status.expected_session_name,
             action=ACTION_BLOCKED,
             source=SOURCE_MISSING_DIRECTORY,
@@ -99,6 +110,7 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
         return WorkspacePlan(
             project_name=status.project.name,
             project_path=status.canonical_path,
+            project_location=LocalProjectLocation(status.canonical_path),
             session_name=status.expected_session_name,
             action=ACTION_CREATE_SAVED,
             source=SOURCE_SAVED,
@@ -116,10 +128,63 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
     return WorkspacePlan(
         project_name=status.project.name,
         project_path=status.canonical_path,
+        project_location=LocalProjectLocation(status.canonical_path),
         session_name=status.expected_session_name,
         action=ACTION_CREATE_DEFAULT,
         source=SOURCE_DEFAULT,
         workspace=default_workspace,
+    )
+
+
+def build_workspace_plan_for_location(
+    *,
+    project_name: str,
+    project_location: ProjectLocation,
+    session_name: str,
+    saved_workspace: WorkspaceSpec | None,
+    session_running: bool,
+) -> WorkspacePlan:
+    """Build a read-only plan for a local or registered remote location.
+
+    This is intentionally limited to saved-workspace precedence and the
+    expected-session query result. It performs no filesystem or remote
+    project inspection.
+    """
+    project_path: Path | str = (
+        project_location.path
+        if isinstance(project_location, LocalProjectLocation)
+        else project_location.remote_path
+    )
+    if session_running:
+        return WorkspacePlan(
+            project_name=project_name,
+            project_path=project_path,
+            project_location=project_location,
+            session_name=session_name,
+            action=ACTION_ATTACH,
+            source=SOURCE_RUNNING,
+            workspace=None,
+            note=_ATTACH_NOTE,
+        )
+    if saved_workspace is not None:
+        return WorkspacePlan(
+            project_name=project_name,
+            project_path=project_path,
+            project_location=project_location,
+            session_name=session_name,
+            action=ACTION_RECREATE,
+            source=SOURCE_SAVED,
+            workspace=saved_workspace,
+        )
+    workspace = build_default_workspace(project_name, project_location, session_name)
+    return WorkspacePlan(
+        project_name=project_name,
+        project_path=project_path,
+        project_location=project_location,
+        session_name=session_name,
+        action=ACTION_CREATE_DEFAULT,
+        source=SOURCE_DEFAULT,
+        workspace=workspace,
     )
 
 
@@ -148,11 +213,17 @@ def format_plan(plan: WorkspacePlan) -> str:
     lines = [
         f"Project: {plan.project_name}",
         f"Path: {plan.project_path}",
+        (
+            f"Location: ssh:{plan.project_location.host_id}:{plan.project_location.remote_path}"
+            if not isinstance(plan.project_location, LocalProjectLocation)
+            else None
+        ),
         f"Session: {plan.session_name}",
         f"Action: {plan.action}",
         f"Source: {plan.source}",
         "",
     ]
+    lines = [line for line in lines if line is not None]
     if plan.workspace is not None:
         lines.extend(_format_workspace(plan.workspace))
     elif plan.note is not None:

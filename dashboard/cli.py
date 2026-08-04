@@ -31,6 +31,7 @@ from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     launch_status_line,
     prepare_project_launch,
+    resolve_project_plan,
     resolve_project_status,
 )
 from dashboard.services.project_selection import (
@@ -46,7 +47,7 @@ from dashboard.services.projects import (
 from dashboard.services.ssh_host_store import load_all_ssh_hosts
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
-from dashboard.services.workspace_plan import build_workspace_plan, format_plan
+from dashboard.services.workspace_plan import format_plan
 from dashboard.services.workspace_store import WorkspaceStoreVersionError
 
 PROG = "th"
@@ -173,16 +174,15 @@ def _run_list(args: argparse.Namespace) -> int:
 
 
 def _run_plan(args: argparse.Namespace) -> int:
-    resolved = resolve_project_status(args.project)
+    resolved = resolve_project_plan(args.project)
     for warning in resolved.warnings:
         print(warning, file=sys.stderr)
-    if resolved.status is None:
+    if resolved.plan is None:
         print(f"error: {resolved.error}", file=sys.stderr)
         return 1
 
-    plan = build_workspace_plan(resolved.status)
-    print(format_plan(plan))
-    return 1 if plan.blocked else 0
+    print(format_plan(resolved.plan))
+    return 1 if resolved.plan.blocked else 0
 
 
 def _run_up(args: argparse.Namespace) -> int:

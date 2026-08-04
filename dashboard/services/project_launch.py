@@ -24,8 +24,16 @@ from dashboard.services.workspace_plan import (
     ACTION_CREATE_DEFAULT,
     WorkspacePlan,
     build_workspace_plan,
+    build_workspace_plan_for_location,
 )
-from dashboard.services.workspace_store import save_workspace
+from dashboard.services.tmux import (
+    TmuxCommandError,
+    resolve_tmux_runner,
+    sanitize_session_name,
+    session_exists,
+)
+from dashboard.services.workspace_store import load_workspace_result_for_location, save_workspace
+from dashboard.services.workspace_defaults import build_default_workspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,15 @@ class ResolvedProjectStatus:
     """Read-only selector resolution, status, and nonfatal warnings."""
 
     status: ProjectStatus | None
+    error: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedProjectPlan:
+    """The read-only plan resolution result used by ``th plan``."""
+
+    plan: WorkspacePlan | None
     error: str | None = None
     warnings: tuple[str, ...] = ()
 
@@ -56,6 +73,63 @@ def resolve_project_status(selector: str) -> ResolvedProjectStatus:
     if status.workspace_metadata_warning:
         warnings.append(status.workspace_metadata_warning)
     return ResolvedProjectStatus(status, warnings=tuple(dict.fromkeys(warnings)))
+
+
+def resolve_project_plan(selector: str) -> ResolvedProjectPlan:
+    """Resolve and build a local or registered-remote plan without mutation."""
+    config_result = load_projects_config_result()
+    warnings = [config_result.warning] if config_result.warning else []
+    selection = resolve_project_selector(selector, config=config_result.value)
+    if selection.project is None:
+        return ResolvedProjectPlan(None, selection.error, tuple(warnings))
+
+    if isinstance(selection.project, Project):
+        status_result = resolve_project_status(selector)
+        if status_result.status is None:
+            return ResolvedProjectPlan(None, status_result.error, status_result.warnings)
+        return ResolvedProjectPlan(
+            build_workspace_plan(status_result.status),
+            warnings=tuple(dict.fromkeys(status_result.warnings)),
+        )
+
+    remote = selection.project
+    location = remote.location
+    saved_result = load_workspace_result_for_location(location)
+    warnings.extend(filter(None, (saved_result.warning,)))
+    if saved_result.error:
+        return ResolvedProjectPlan(None, saved_result.error, tuple(warnings))
+
+    workspace = saved_result.workspace
+    if workspace is None:
+        session_name = sanitize_session_name(remote.name)
+        workspace = build_default_workspace(remote.name, location, session_name)
+    else:
+        session_name = workspace.session_name
+
+    runner_result = resolve_tmux_runner(workspace)
+    if runner_result.error is not None or runner_result.runner is None:
+        return ResolvedProjectPlan(
+            None,
+            runner_result.error.message
+            if runner_result.error is not None
+            else "Unable to resolve the SSH tmux runner.",
+            tuple(warnings),
+        )
+    try:
+        running = session_exists(session_name, runner=runner_result.runner)
+    except (FileNotFoundError, OSError, TmuxCommandError) as exc:
+        return ResolvedProjectPlan(None, f"Unable to query remote tmux session: {exc}", tuple(warnings))
+
+    return ResolvedProjectPlan(
+        build_workspace_plan_for_location(
+            project_name=remote.name,
+            project_location=location,
+            session_name=session_name,
+            saved_workspace=saved_result.workspace,
+            session_running=running,
+        ),
+        warnings=tuple(dict.fromkeys(warnings)),
+    )
 
 
 class ProjectLaunchPreparationError(Exception):

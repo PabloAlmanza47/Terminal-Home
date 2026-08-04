@@ -18,7 +18,12 @@ import dashboard.services.project_launch as project_launch_module
 import dashboard.services.tmux as tmux_module
 import dashboard.services.workspace_launcher as workspace_launcher_module
 import dashboard.services.workspace_store as workspace_store_module
-from dashboard.models import LocalProjectLocation, RemoteProjectRegistration, SshHost
+from dashboard.models import (
+    LocalProjectLocation,
+    RemoteProjectRegistration,
+    SshHost,
+    SshProjectLocation,
+)
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.remote_project_store import create_remote_project
@@ -379,6 +384,134 @@ def test_plan_default_workspace(
     assert exit_code == 0
     assert "Action: create default workspace" in out
     assert "Source: generated default" in out
+
+
+def test_plan_remote_registration_creates_in_memory_default_without_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    _configure_roots(empty_root)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_ssh_host(SshHost(host_id, "build host", "builder"))
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            host_id,
+            "remote-api",
+            "/srv/Project With Spaces",
+        )
+    )
+    runner_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        project_launch_module,
+        "resolve_tmux_runner",
+        lambda workspace: tmux_module.TmuxRunnerResolution(
+            status="resolved", runner=lambda argv: runner_calls.append(argv)
+        ),
+    )
+    monkeypatch.setattr(project_launch_module, "session_exists", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        project_launch_module,
+        "save_workspace",
+        lambda *args, **kwargs: pytest.fail("th plan must not save a workspace"),
+    )
+
+    assert cli_module.run(["plan", "ssh:" + host_id + ":/srv/Project With Spaces"]) == 0
+    out = capsys.readouterr().out
+
+    assert "Project: remote-api" in out
+    assert "Location: ssh:" + host_id + ":/srv/Project With Spaces" in out
+    assert "Session: remote-api" in out
+    assert "Action: create default workspace" in out
+    assert runner_calls == []
+
+
+def test_plan_running_remote_session_attaches_and_unique_name_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    _configure_roots(empty_root)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_ssh_host(SshHost(host_id, "build host", "builder"))
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", host_id, "remote-api", "/srv/api"
+        )
+    )
+    calls = []
+    monkeypatch.setattr(
+        project_launch_module,
+        "resolve_tmux_runner",
+        lambda workspace: tmux_module.TmuxRunnerResolution(
+            status="resolved", runner=lambda argv: calls.append(argv)
+        ),
+    )
+    monkeypatch.setattr(project_launch_module, "session_exists", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        project_launch_module,
+        "run_interactive_ssh",
+        lambda *args, **kwargs: pytest.fail("th plan must not attach interactively"),
+        raising=False,
+    )
+
+    assert cli_module.run(["plan", "remote-api"]) == 0
+    out = capsys.readouterr().out
+    assert "Action: attach to existing session" in out
+    assert "Session: remote-api" in out
+    assert calls == []
+
+
+def test_plan_saved_remote_workspace_recreates_and_missing_host_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    _configure_roots(empty_root)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_ssh_host(SshHost(host_id, "build host", "builder"))
+    location = SshProjectLocation(host_id, "/srv/api")
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", host_id, "remote-api", "/srv/api"
+        )
+    )
+    workspace_store_module.save_workspace(build_default_workspace("remote-api", location, "remote-api"))
+    monkeypatch.setattr(
+        project_launch_module,
+        "resolve_tmux_runner",
+        lambda workspace: tmux_module.TmuxRunnerResolution(
+            status="resolved", runner=lambda argv: pytest.fail("fake runner unused")
+        ),
+    )
+    monkeypatch.setattr(project_launch_module, "session_exists", lambda *args, **kwargs: False)
+
+    assert cli_module.run(["plan", "remote-api"]) == 0
+    assert "Action: recreate saved workspace" in capsys.readouterr().out
+
+    missing_host = "e95bfffc-8d3e-4d74-c4ad-877e66ef2aa8"
+    create_remote_project(
+        RemoteProjectRegistration(
+            "f38d8c78-9f4a-5e85-d5be-988f77f3bb19",
+            missing_host,
+            "orphan-api",
+            "/srv/orphan",
+        )
+    )
+    monkeypatch.setattr(project_launch_module, "resolve_tmux_runner", tmux_module.resolve_tmux_runner)
+    monkeypatch.setattr(
+        project_launch_module,
+        "session_exists",
+        lambda *args, **kwargs: pytest.fail("missing host must fail before tmux"),
+    )
+    assert cli_module.run(["plan", "orphan-api"]) == 1
+    assert "SSH host " + missing_host + " is not registered." in capsys.readouterr().err
 
 
 # --- `th up` -----------------------------------------------------------------
