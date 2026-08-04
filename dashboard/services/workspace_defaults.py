@@ -15,6 +15,25 @@ from dashboard.models import PANE_KIND_LABELS, PaneKind, PaneSpec, WindowSpec, W
 DEFAULT_WINDOW_NAME = "code"
 
 
+def default_workspace_windows() -> tuple[WindowSpec, ...]:
+    """Return the built-in project-neutral default layout."""
+    return (
+        WindowSpec(
+            window_name=DEFAULT_WINDOW_NAME,
+            panes=(
+                PaneSpec(
+                    kind=PaneKind.CODE_EDITOR,
+                    display_name=PANE_KIND_LABELS[PaneKind.CODE_EDITOR],
+                ),
+                PaneSpec(
+                    kind=PaneKind.BLANK_TERMINAL,
+                    display_name=PANE_KIND_LABELS[PaneKind.BLANK_TERMINAL],
+                ),
+            ),
+        ),
+    )
+
+
 def build_default_workspace(
     project_name: str, project_path: Path, session_name: str
 ) -> WorkspaceSpec:
@@ -26,19 +45,5 @@ def build_default_workspace(
         project_name=project_name,
         project_path=project_path,
         session_name=session_name,
-        windows=(
-            WindowSpec(
-                window_name=DEFAULT_WINDOW_NAME,
-                panes=(
-                    PaneSpec(
-                        kind=PaneKind.CODE_EDITOR,
-                        display_name=PANE_KIND_LABELS[PaneKind.CODE_EDITOR],
-                    ),
-                    PaneSpec(
-                        kind=PaneKind.BLANK_TERMINAL,
-                        display_name=PANE_KIND_LABELS[PaneKind.BLANK_TERMINAL],
-                    ),
-                ),
-            ),
-        ),
+        windows=default_workspace_windows(),
     )

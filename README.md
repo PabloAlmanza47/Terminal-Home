@@ -33,6 +33,7 @@ dashboard.
 - Guided new-project wizard (name, folder, optional `git init`, workspace layout)
 - Configurable tmux windows with 1-4 pane layouts per window
 - Saved workspace persistence — layouts survive tmux restarts and WSL reboots
+- Reusable local workspace templates with stable identity and independent copies
 - Resume-if-running, recreate-if-not launch behavior with no duplicate sessions
 - Neovim, Claude Code, Git (lazygit), file tree, test, dev server, blank shell,
   and custom-command pane types
@@ -167,19 +168,55 @@ Both `th up` and `th plan` use the same dynamic project suggestions. The
 the wizard's preview, its review step, and the real tmux `select-layout` call
 all derive from it.
 
+## Workspace Templates
+
+Workspace templates let you reuse a configured layout across projects without
+copying project identity or runtime state. A user template contains its stable
+internal ID, name, ordered windows, and ordered pane intent, including custom
+pane display names and literal custom commands. It does **not** contain a
+project name or path, tmux session name, launch action, Git state, detected
+development/test commands, installed-tool results, or live tmux state.
+
+From **Project Detail**, choose **Save as Template** for any project with a
+valid saved workspace, whether its tmux session is running or stopped. When
+creating a new project or choosing **Configure Workspace** for an unconfigured
+project, the **Start From** step offers Blank Workspace, the built-in Default
+Workspace, and every saved template. The selected layout remains editable and
+nothing is created, saved, launched, or executed until the wizard's existing
+final confirmation.
+
+Open **Workspace Templates** from Home to inspect, rename, or delete user
+templates. Names are trimmed, limited to 80 characters, reject control
+characters, and must be unique case-insensitively; case-only renames of the
+same stable template are allowed. Deletion requires confirmation and affects
+only template metadata.
+
+Templates are stored locally at
+`$XDG_DATA_HOME/terminal-home/templates.json` (or
+`~/.local/share/terminal-home/templates.json`) using independent versioned,
+atomic persistence with a one-generation backup. Applying a template makes an
+independent copy: later edits, rename, or deletion cannot change a project
+workspace already created from it. Development Server and Test Terminal panes
+still store intent only; their commands are detected for the destination
+project at launch time. The built-in Default Workspace remains separate and
+cannot be renamed or deleted. Template import, export, online sharing, and a
+marketplace are not supported yet.
+
 ## Architecture
 
 - **Screens** (`dashboard/screens/`) — one Textual screen per view: home
   dashboard, project list, project detail, the shared new/edit workspace
-  wizard, system info, settings.
+  wizard, workspace-template management, system info, settings.
 - **Models** (`dashboard/models/`) — plain, validated dataclasses
-  (`WorkspaceSpec`, `WindowSpec`, `PaneSpec`, `LaunchRequest`, ...) with no
+  (`WorkspaceSpec`, `WorkspaceTemplate`, `WindowSpec`, `PaneSpec`,
+  `LaunchRequest`, ...) with no
   Textual imports and no subprocess calls, so they're trivially unit tested.
 - **Services** (`dashboard/services/`) — the logic layer: project scanning,
   git info, slug generation, pane command resolution, and the tmux
   orchestration itself. No Textual imports here either.
 - **Persistence** — confirmed workspaces are saved as JSON under
-  `$XDG_DATA_HOME/terminal-home/workspaces.json`; presentation preferences
+  `$XDG_DATA_HOME/terminal-home/workspaces.json`; reusable templates are saved
+  separately under `$XDG_DATA_HOME/terminal-home/templates.json`; presentation preferences
   (including the chosen Textual theme, changed via the command palette)
   under `$XDG_CONFIG_HOME/terminal-home/settings.json`. Never inside the
   project directory. Writes use atomic replacement and retain the immediately
@@ -198,7 +235,7 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 625 pytest tests collected (624 passed and one optional Zsh
+Current status: 649 pytest tests collected (648 passed and one optional Zsh
 syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
 
 ```bash
@@ -236,8 +273,7 @@ will and won't do to a running session or a saved workspace — see
 
 ## Roadmap
 
-- Project-aware development/test command detection
-- Portable, shareable workspace templates
+- Template import/export and optional online sharing
 - Optional remote/SSH project support
 - Packaging and installation improvements
 
@@ -261,6 +297,7 @@ dashboard/
     art.py                      ASCII art + the fullwidth-text trick used for the title
     models/                     Plain dataclasses, no Textual imports, no subprocess calls
         workspace.py               PaneKind, PaneSpec, WindowSpec, WorkspaceSpec, LaunchAction, LaunchRequest
+        template.py                WorkspaceTemplate, name validation, copy conversions
         layout.py                   Pane layout rules + ASCII preview rendering
         settings.py                  AppSettings, LayoutMode
     services/                  Plain Python, no Textual imports -- easy to unit test
@@ -273,12 +310,15 @@ dashboard/
         pane_commands.py             Resolves each pane kind into a launch plan at launch time
         workspace_defaults.py         The simple default WorkspaceSpec (Open Default/Reset)
         workspace_store.py           JSON persistence under XDG_DATA_HOME; load/forget by canonical path
+        template_store.py            Independent versioned templates.json persistence
         workspace_launcher.py         Non-Textual orchestration: LaunchRequest -> running tmux
         settings_store.py            JSON persistence under XDG_CONFIG_HOME
     screens/                    One module per screen
         home.py
         projects.py                Continue Project: searchable, status-annotated project list
-        project_detail.py           Resume/Recreate/Default/Configure/Edit/Reset/Forget
+        project_detail.py           Resume/Recreate/Default/Configure/Edit/Save Template/Reset/Forget
+        workspace_templates.py      List, summarize, rename, and delete local templates
+        template_name.py            Reusable template-name input modal
         confirm.py                   Reusable Yes/No modal for destructive metadata actions
         tmux_sessions.py            Resume tmux Session (read-only session list)
         system_info.py               System Information
@@ -287,6 +327,7 @@ dashboard/
                                      EXISTING_CREATE, EXISTING_EDIT -- see state.py)
             state.py                    WizardState, WindowDraft, WizardMode, step-numbering/factories
             step_project_info.py         Step 1 (NEW_PROJECT only)
+            step_workspace_start.py      Blank/Default/saved-template selection for create flows
             step_window_config.py        Configure Window (entry point for EXISTING_CREATE)
             step_layout_preview.py       Layout Preview
             step_window_summary.py       Windows summary (entry point for EXISTING_EDIT)
@@ -440,3 +481,8 @@ If a primary settings, project-configuration, or workspace file is corrupt,
 Terminal Home may read its valid one-generation `.bak` without repairing either
 file and reports the recovery to the user. Unsupported future workspace schemas
 are never silently replaced or recovered from an older backup.
+
+The independent template store follows the same atomic-write and backup policy
+at `$XDG_DATA_HOME/terminal-home/templates.json`. A missing file means no user
+templates. Unsupported future template schemas are reported and never
+overwritten or recovered from an older backup.

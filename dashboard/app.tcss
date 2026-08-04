@@ -272,6 +272,13 @@ ConfirmScreen {
     background: $panel;
 }
 
+#template-name-panel {
+    width: 60;
+    height: auto;
+    max-height: 14;
+    padding: 1 2;
+}
+
 #confirm-message {
     text-align: center;
 }

@@ -80,6 +80,9 @@ async def _fill_step1(pilot, project_name: str) -> None:
 async def _click(pilot, button_id: str) -> None:
     await pilot.click(button_id)
     await pilot.pause()
+    if button_id == "#next-button" and type(pilot.app.screen).__name__ == "WorkspaceStartScreen":
+        await pilot.click("#continue-button")
+        await pilot.pause()
 
 
 def _run(coro):
@@ -280,6 +283,8 @@ def test_going_back_to_step1_preserves_window_config(
             assert len(screen._panes) == 2
 
             await _click(pilot, "#back-button")
+            assert type(app.screen).__name__ == "WorkspaceStartScreen"
+            await _click(pilot, "#back-button")
             assert type(app.screen).__name__ == "NewProjectScreen"
 
             await _fill_step1(pilot, "Renamed Project")
@@ -335,9 +340,7 @@ def test_wizard_rejects_duplicate_window_name(
 # --- Add / edit / remove windows, and the one-window floor -------------------
 
 
-def test_add_edit_and_remove_windows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_add_edit_and_remove_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> None:
@@ -466,9 +469,7 @@ def test_custom_command_pane_requires_name_and_command(
             await _click(pilot, "#next-button")
 
             screen = app.screen
-            screen.query_one("#pane-selection-list", SelectionList).toggle(
-                PaneKind.CUSTOM_COMMAND
-            )
+            screen.query_one("#pane-selection-list", SelectionList).toggle(PaneKind.CUSTOM_COMMAND)
             await pilot.pause()
             await pilot.pause()
             assert screen.query_one("#custom-command-fields").display is True

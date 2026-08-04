@@ -100,6 +100,12 @@ async def _open_project_detail(pilot, project_name: str) -> None:
 async def _click(pilot, button_id: str) -> None:
     await pilot.click(button_id)
     await pilot.pause()
+    if (
+        button_id == "#action-configure"
+        and type(pilot.app.screen).__name__ == "WorkspaceStartScreen"
+    ):
+        await pilot.click("#continue-button")
+        await pilot.pause()
 
 
 def _future_version_store_path(tmp_path: Path) -> Path:
@@ -137,9 +143,7 @@ def test_configure_workspace_never_creates_or_renames_the_directory(
             # already fixed (never prompted for).
 
             app.screen.query_one("#window-name-input", Input).value = "main"
-            app.screen.query_one("#pane-selection-list", SelectionList).toggle(
-                PaneKind.CODE_EDITOR
-            )
+            app.screen.query_one("#pane-selection-list", SelectionList).toggle(PaneKind.CODE_EDITOR)
             await pilot.pause()
             await _click(pilot, "#next-button")
             assert type(app.screen).__name__ == "LayoutPreviewScreen"
@@ -187,9 +191,7 @@ def test_configure_workspace_save_against_future_version_store_does_not_overwrit
             assert type(app.screen).__name__ == "WindowConfigScreen"
 
             app.screen.query_one("#window-name-input", Input).value = "main"
-            app.screen.query_one("#pane-selection-list", SelectionList).toggle(
-                PaneKind.CODE_EDITOR
-            )
+            app.screen.query_one("#pane-selection-list", SelectionList).toggle(PaneKind.CODE_EDITOR)
             await pilot.pause()
             await _click(pilot, "#next-button")
             await _click(pilot, "#continue-button")
@@ -239,9 +241,7 @@ def test_configure_workspace_review_hides_git_and_destination_validation(
             await _click(pilot, "#finish-button")
             assert type(app.screen).__name__ == "ReviewScreen"
 
-            review_text = "\n".join(
-                str(s.render()) for s in app.screen.query(Static)
-            )
+            review_text = "\n".join(str(s.render()) for s in app.screen.query(Static))
         return review_text
 
     review_text = _run(scenario())
@@ -297,6 +297,9 @@ def test_cancelling_configure_workspace_returns_to_detail_without_saving(
             await _click(pilot, "#action-configure")
             assert type(app.screen).__name__ == "WindowConfigScreen"
 
+            await pilot.press("escape")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "WorkspaceStartScreen"
             await pilot.press("escape")
             await pilot.pause()
             screen_name = type(app.screen).__name__

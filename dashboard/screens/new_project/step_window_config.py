@@ -51,9 +51,7 @@ class WindowConfigScreen(Screen[None]):
                     placeholder="main",
                     id="window-name-input",
                 )
-                yield Static(
-                    f"Panes (choose 1-{MAX_PANES_PER_WINDOW})", classes="field-label"
-                )
+                yield Static(f"Panes (choose 1-{MAX_PANES_PER_WINDOW})", classes="field-label")
                 yield SelectionList[PaneKind](
                     *[
                         Selection(PANE_KIND_LABELS[kind], kind, kind in selected_kinds)
@@ -97,9 +95,7 @@ class WindowConfigScreen(Screen[None]):
         self._refresh_order_list()
         self._refresh_custom_fields()
 
-    def on_selection_list_selection_toggled(
-        self, event: SelectionList.SelectionToggled
-    ) -> None:
+    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         if self._suppress_toggle:
             return
         kind = event.selection.value
@@ -111,9 +107,7 @@ class WindowConfigScreen(Screen[None]):
                 self._suppress_toggle = True
                 selection_list.deselect(kind)
                 self._suppress_toggle = False
-                self._show_error(
-                    f"You can select up to {MAX_PANES_PER_WINDOW} panes per window."
-                )
+                self._show_error(f"You can select up to {MAX_PANES_PER_WINDOW} panes per window.")
                 return
             self._panes.append(PaneDraft(kind))
         else:
@@ -217,9 +211,7 @@ class WindowConfigScreen(Screen[None]):
         back to a previous step and forward again doesn't silently drop
         in-progress edits.
         """
-        self.state.pending_window.window_name = self.query_one(
-            "#window-name-input", Input
-        ).value
+        self.state.pending_window.window_name = self.query_one("#window-name-input", Input).value
         self.state.pending_window.panes = self._panes
 
     def action_back(self) -> None:
@@ -232,6 +224,10 @@ class WindowConfigScreen(Screen[None]):
             from dashboard.screens.new_project.step_project_info import NewProjectScreen
 
             self.app.switch_screen(NewProjectScreen(self.state))
+        elif self.back_target == "workspace_start":
+            from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
+
+            self.app.switch_screen(WorkspaceStartScreen(self.state))
         else:
             from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 

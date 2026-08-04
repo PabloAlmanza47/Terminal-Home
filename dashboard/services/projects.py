@@ -543,6 +543,7 @@ class ProjectAction(str, Enum):
     OPEN_DEFAULT = "open_default"
     CONFIGURE = "configure"
     EDIT = "edit"
+    SAVE_TEMPLATE = "save_template"
     RESET = "reset"
     FORGET = "forget"
 
@@ -588,7 +589,12 @@ def secondary_actions(status: ProjectStatus) -> list[ProjectAction]:
     one(s) above.
     """
     if status.saved_workspace is not None:
-        return [ProjectAction.EDIT, ProjectAction.RESET, ProjectAction.FORGET]
+        return [
+            ProjectAction.EDIT,
+            ProjectAction.RESET,
+            ProjectAction.FORGET,
+            ProjectAction.SAVE_TEMPLATE,
+        ]
     if status.workspace_metadata_error and status.session_running:
         return [ProjectAction.FORGET]
     return []

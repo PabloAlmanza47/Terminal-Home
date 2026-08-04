@@ -19,11 +19,17 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
-from dashboard.models import LaunchAction, LaunchRequest
+from dashboard.models import (
+    LaunchAction,
+    LaunchRequest,
+    TemplateValidationError,
+    template_from_workspace,
+)
 from dashboard.screens.confirm import ConfirmScreen
 from dashboard.screens.new_project.state import WizardState
-from dashboard.screens.new_project.step_window_config import WindowConfigScreen
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
+from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
+from dashboard.screens.template_name import TemplateNameScreen
 from dashboard.services.projects import (
     Project,
     ProjectAction,
@@ -32,6 +38,12 @@ from dashboard.services.projects import (
     gather_single_project_status,
     primary_actions,
     secondary_actions,
+)
+from dashboard.services.template_store import (
+    DuplicateTemplateNameError,
+    TemplateStoreError,
+    TemplateStoreVersionError,
+    create_template,
 )
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import (
@@ -46,6 +58,7 @@ _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.OPEN_DEFAULT: "Open Default Workspace",
     ProjectAction.CONFIGURE: "Configure Workspace",
     ProjectAction.EDIT: "Edit Workspace",
+    ProjectAction.SAVE_TEMPLATE: "Save as Template",
     ProjectAction.RESET: "Reset to Default Workspace",
     ProjectAction.FORGET: "Forget Saved Workspace",
 }
@@ -92,6 +105,7 @@ class ProjectDetailScreen(Screen[None]):
         super().__init__()
         self.project = project
         self.status: ProjectStatus = gather_single_project_status(project)
+        self._feedback = ""
 
     def compose(self) -> ComposeResult:
         status = self.status
@@ -129,7 +143,7 @@ class ProjectDetailScreen(Screen[None]):
                         pane_summary = ", ".join(pane.display_name for pane in window.panes)
                         yield Static(f"  {window.window_name}: {pane_summary}")
 
-                yield Static("", id="detail-error")
+                yield Static(self._feedback, id="detail-error")
 
                 primary = primary_actions(status)
                 secondary = secondary_actions(status)
@@ -150,9 +164,10 @@ class ProjectDetailScreen(Screen[None]):
                     )
 
                 if secondary:
-                    with Horizontal(classes="button-row"):
-                        for action in secondary:
-                            yield Button(_ACTION_LABELS[action], id=_action_id(action))
+                    for start in range(0, len(secondary), 3):
+                        with Horizontal(classes="button-row"):
+                            for action in secondary[start : start + 3]:
+                                yield Button(_ACTION_LABELS[action], id=_action_id(action))
 
                 with Horizontal(classes="button-row"):
                     yield Button("Back to Project List", id="back-to-list-button")
@@ -172,6 +187,7 @@ class ProjectDetailScreen(Screen[None]):
         await self.recompose()
 
     def _show_error(self, message: str) -> None:
+        self._feedback = message
         self.query_one("#detail-error", Static).update(message)
 
     @work
@@ -187,6 +203,8 @@ class ProjectDetailScreen(Screen[None]):
             self._configure_workspace()
         elif button_id == _action_id(ProjectAction.EDIT):
             self._edit_workspace()
+        elif button_id == _action_id(ProjectAction.SAVE_TEMPLATE):
+            await self._save_as_template()
         elif button_id == _action_id(ProjectAction.RESET):
             await self._reset_to_default()
         elif button_id == _action_id(ProjectAction.FORGET):
@@ -223,7 +241,7 @@ class ProjectDetailScreen(Screen[None]):
         state = WizardState.for_configuring_existing_project(
             status.project.name, status.canonical_path, session_name=status.expected_session_name
         )
-        self.app.push_screen(WindowConfigScreen(state, back_target=None))
+        self.app.push_screen(WorkspaceStartScreen(state))
 
     def _edit_workspace(self) -> None:
         status = self.status
@@ -233,6 +251,27 @@ class ProjectDetailScreen(Screen[None]):
             status.saved_workspace, session_running=status.session_running
         )
         self.app.push_screen(WindowSummaryScreen(state))
+
+    async def _save_as_template(self) -> None:
+        workspace = self.status.saved_workspace
+        if workspace is None:
+            return
+        name = await self.app.push_screen_wait(TemplateNameScreen("Save Workspace as Template"))
+        if name is None:
+            return
+        try:
+            template = template_from_workspace(workspace, name)
+            create_template(template)
+        except (
+            DuplicateTemplateNameError,
+            TemplateStoreError,
+            TemplateStoreVersionError,
+            TemplateValidationError,
+            OSError,
+        ) as exc:
+            self._show_error(str(exc))
+            return
+        self._show_error(f'Saved template "{template.name}".')
 
     async def _reset_to_default(self) -> None:
         status = self.status

@@ -27,7 +27,7 @@ class NewProjectScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         with Container(classes="screen-root"):
             with Vertical(classes="panel"):
-                yield Static("Create New Project -- Step 1 of 5: Project Info", id="screen-title")
+                yield Static("Create New Project -- Step 1 of 6: Project Info", id="screen-title")
                 yield Static("Project name", classes="field-label")
                 yield Input(
                     value=self.state.project_name,
@@ -93,9 +93,9 @@ class NewProjectScreen(Screen[None]):
         self.query_one("#wizard-error", Static).update("")
         # Imported here to avoid a circular import (step_window_config also
         # imports this module's screen for the "Back" transition).
-        from dashboard.screens.new_project.step_window_config import WindowConfigScreen
+        from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 
-        self.app.switch_screen(WindowConfigScreen(self.state, back_target="project_info"))
+        self.app.switch_screen(WorkspaceStartScreen(self.state))
 
     def action_cancel(self) -> None:
         self.app.pop_screen()

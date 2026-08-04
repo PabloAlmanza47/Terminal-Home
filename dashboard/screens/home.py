@@ -30,6 +30,7 @@ from dashboard.screens.projects import ProjectsScreen
 from dashboard.screens.settings import SettingsScreen
 from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
+from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
 from dashboard.services.formatting import format_relative_time, greeting_for
 from dashboard.services.projects import (
@@ -61,6 +62,7 @@ NEW_PROJECT = "new_project"
 RESUME_TMUX = "resume_tmux"
 SYSTEM_INFO = "system_info"
 SETTINGS = "settings"
+WORKSPACE_TEMPLATES = "workspace_templates"
 EXIT = "exit"
 
 _VIEW_ALL_PROJECTS = "__view_all_projects__"
@@ -74,7 +76,8 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
     ("3", "Resume tmux Session", RESUME_TMUX),
     ("4", "System Information", SYSTEM_INFO),
     ("5", "Settings", SETTINGS),
-    ("6", "Exit", EXIT),
+    ("6", "Workspace Templates", WORKSPACE_TEMPLATES),
+    ("7", "Exit", EXIT),
 ]
 
 
@@ -131,7 +134,8 @@ class HomeScreen(Screen[None]):
         ("3", "select_menu(2)", "Resume tmux"),
         ("4", "select_menu(3)", "System Info"),
         ("5", "select_menu(4)", "Settings"),
-        ("6", "select_menu(5)", "Exit"),
+        ("6", "select_menu(5)", "Workspace Templates"),
+        ("7", "select_menu(6)", "Exit"),
     ]
 
     def __init__(self) -> None:
@@ -354,6 +358,8 @@ class HomeScreen(Screen[None]):
             self.app.push_screen(SystemInfoScreen())
         elif option_id == SETTINGS:
             self.app.push_screen(SettingsScreen())
+        elif option_id == WORKSPACE_TEMPLATES:
+            self.app.push_screen(WorkspaceTemplatesScreen())
         elif option_id == EXIT:
             self.app.exit()
 

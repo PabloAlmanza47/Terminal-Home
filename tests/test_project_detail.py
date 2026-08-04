@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, OptionList, Static
+from textual.widgets import Button, Input, OptionList, Static
 
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
@@ -24,6 +24,7 @@ from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.system_info import SystemInfo
+from dashboard.services.template_store import load_all_templates
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import (
     WORKSPACE_STORE_SCHEMA_VERSION,
@@ -95,6 +96,56 @@ def _write_future_version_store(tmp_path: Path, workspaces: dict[str, object] | 
     text = json.dumps(envelope, indent=2)
     store_path.write_text(text)
     return text
+
+
+def test_save_as_template_uses_saved_metadata_and_leaves_workspace_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    save_workspace(workspace)
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def scenario() -> tuple[object, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            assert app.screen.query("#action-save_template").first(Button) is not None
+            await pilot.click("#action-save_template")
+            await pilot.pause()
+            app.screen.query_one("#template-name-input", Input).value = "Full Stack"
+            await pilot.click("#template-name-submit")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            feedback = str(app.screen.query_one("#detail-error", Static).render())
+        return load_workspace(project_path), feedback
+
+    unchanged, feedback = _run(scenario())
+    templates = load_all_templates()
+    assert unchanged == workspace
+    assert len(templates) == 1
+    assert templates[0].windows == workspace.windows
+    assert "Saved template" in feedback
+
+
+def test_unconfigured_project_cannot_save_as_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "demo").mkdir()
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def scenario() -> bool:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            return bool(app.screen.query("#action-save_template"))
+
+    assert _run(scenario()) is False
 
 
 async def _open_project_detail(pilot, project_name: str) -> None:

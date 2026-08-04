@@ -55,6 +55,29 @@ never both, and never a guess.
   "Metadata Warning" when the *saved JSON itself* fails to parse — never
   because a live session doesn't match what's saved.
 
+## Reusable template semantics
+
+- A `WorkspaceTemplate` is reusable layout intent only: stable ID, user-visible
+  name, ordered windows, and ordered pane specifications. It never contains a
+  project path/name, session identity, launch action, Git or repository state,
+  detected commands, tool availability, workspace-store key, or live tmux state.
+- Saving a workspace as a template reads only the saved `WorkspaceSpec`. It does
+  not inspect live panes, execute commands, access project source, or alter a
+  running session.
+- Selecting Blank, Default, or a saved template only initializes wizard draft
+  state. It does not create a directory, save metadata, run Git, detect commands,
+  or create/attach to tmux.
+- Applying a template creates an independent destination workspace with the
+  destination's path, project name, and already-determined session identity.
+  Later template rename/deletion cannot affect that workspace, and editing the
+  applied draft cannot mutate the template.
+- Development Server and Test Terminal panes retain only their pane-kind intent.
+  Their commands remain destination-specific and are detected at launch time.
+  Custom pane commands remain exact reusable user-authored values.
+- Template rename preserves stable identity. Delete and rename affect only
+  `templates.json`; neither operation changes saved project workspaces or live
+  sessions. The built-in Default Workspace is not a user template.
+
 ## Where this is enforced in code
 
 - `dashboard/services/projects.py::build_launch_request` — builds the

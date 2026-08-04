@@ -8,6 +8,14 @@ models and hand them to dashboard.services.workspace_launcher.
 
 from __future__ import annotations
 
+from dashboard.models.template import (
+    MAX_TEMPLATE_NAME_LENGTH,
+    TemplateValidationError,
+    WorkspaceTemplate,
+    normalize_template_name,
+    template_from_workspace,
+    workspace_from_template,
+)
 from dashboard.models.workspace import (
     MAX_PANES_PER_WINDOW,
     PANE_KIND_LABELS,
@@ -30,4 +38,10 @@ __all__ = [
     "WindowSpec",
     "WorkspaceSpec",
     "WorkspaceValidationError",
+    "MAX_TEMPLATE_NAME_LENGTH",
+    "TemplateValidationError",
+    "WorkspaceTemplate",
+    "normalize_template_name",
+    "template_from_workspace",
+    "workspace_from_template",
 ]

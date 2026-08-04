@@ -209,9 +209,7 @@ def test_manual_project_outside_all_roots_is_included(tmp_path: Path) -> None:
     manual_dir = tmp_path / "elsewhere" / "manual-project"
     manual_dir.mkdir(parents=True)
 
-    result = discover_projects(
-        ProjectsConfig(roots=(root,), manual_projects=(manual_dir,))
-    )
+    result = discover_projects(ProjectsConfig(roots=(root,), manual_projects=(manual_dir,)))
 
     assert sorted(p.name for p in result.projects) == ["alpha", "manual-project"]
 
@@ -220,9 +218,7 @@ def test_missing_manual_project_is_ignored_safely(tmp_path: Path) -> None:
     root = _make_tree(tmp_path, dirs=["alpha"])
     missing_manual = tmp_path / "does-not-exist"
 
-    result = discover_projects(
-        ProjectsConfig(roots=(root,), manual_projects=(missing_manual,))
-    )
+    result = discover_projects(ProjectsConfig(roots=(root,), manual_projects=(missing_manual,)))
 
     assert [p.name for p in result.projects] == ["alpha"]
 
@@ -254,9 +250,7 @@ def test_duplicate_across_scanned_and_manual_prefers_the_scanned_path(tmp_path: 
     # scanned directory -- reachable without needing real symlinks.
     manual_duplicate = root / "." / "alpha"
 
-    result = discover_projects(
-        ProjectsConfig(roots=(root,), manual_projects=(manual_duplicate,))
-    )
+    result = discover_projects(ProjectsConfig(roots=(root,), manual_projects=(manual_duplicate,)))
 
     assert len(result.projects) == 1
     # The scanned entry's clean path wins over the manual registration's.
@@ -573,9 +567,7 @@ def test_status_running_session_with_no_saved_workspace_uses_deterministic_name(
     store_path = tmp_path / "workspaces.json"
     project = Project(name="My Demo", path=project_path)
 
-    status = gather_project_status(
-        project, store_path=store_path, running_sessions={"My-Demo"}
-    )
+    status = gather_project_status(project, store_path=store_path, running_sessions={"My-Demo"})
 
     assert status.saved_workspace is None
     assert status.expected_session_name == "My-Demo"
@@ -856,9 +848,7 @@ def test_gather_single_project_status_unique_name_unaffected(tmp_path: Path) -> 
     project_path.mkdir()
     config = ProjectsConfig(roots=(tmp_path,))
 
-    status = gather_single_project_status(
-        Project(name="solo", path=project_path), config=config
-    )
+    status = gather_single_project_status(Project(name="solo", path=project_path), config=config)
 
     assert status.expected_session_name == "solo"
 
@@ -907,9 +897,7 @@ def test_primary_action_corrupt_metadata_offers_forget_and_configure() -> None:
 
 
 def test_primary_action_running_session_wins_over_corrupt_metadata() -> None:
-    actions = primary_actions(
-        _status(session_running=True, workspace_metadata_error="bad data")
-    )
+    actions = primary_actions(_status(session_running=True, workspace_metadata_error="bad data"))
     assert actions == [ProjectAction.RESUME]
 
 
@@ -925,7 +913,12 @@ def test_primary_action_missing_directory_still_offers_resume_when_running() -> 
 def test_secondary_actions_for_saved_workspace(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     actions = secondary_actions(_status(saved_workspace=workspace))
-    assert actions == [ProjectAction.EDIT, ProjectAction.RESET, ProjectAction.FORGET]
+    assert actions == [
+        ProjectAction.EDIT,
+        ProjectAction.RESET,
+        ProjectAction.FORGET,
+        ProjectAction.SAVE_TEMPLATE,
+    ]
 
 
 def test_secondary_actions_empty_when_nothing_saved() -> None:
@@ -933,9 +926,7 @@ def test_secondary_actions_empty_when_nothing_saved() -> None:
 
 
 def test_secondary_actions_offers_forget_for_corrupt_metadata_with_running_session() -> None:
-    actions = secondary_actions(
-        _status(session_running=True, workspace_metadata_error="bad data")
-    )
+    actions = secondary_actions(_status(session_running=True, workspace_metadata_error="bad data"))
     assert actions == [ProjectAction.FORGET]
 
 
@@ -947,9 +938,7 @@ def test_build_launch_request_with_saved_workspace_attaches_with_workspace(
 ) -> None:
     workspace = _workspace(tmp_path)
     request = build_launch_request(_status(saved_workspace=workspace))
-    assert request == LaunchRequest(
-        workspace=workspace, init_git=False, action=LaunchAction.ATTACH
-    )
+    assert request == LaunchRequest(workspace=workspace, init_git=False, action=LaunchAction.ATTACH)
 
 
 def test_build_launch_request_without_saved_workspace_attaches_by_session_name() -> None:
@@ -968,9 +957,7 @@ def test_build_launch_request_is_the_same_whether_or_not_the_session_is_running(
     """
     workspace = _workspace(tmp_path)
     running = build_launch_request(_status(saved_workspace=workspace, session_running=True))
-    not_running = build_launch_request(
-        _status(saved_workspace=workspace, session_running=False)
-    )
+    not_running = build_launch_request(_status(saved_workspace=workspace, session_running=False))
     assert running == not_running
 
 

@@ -66,9 +66,7 @@ class PaneDraft:
         return PaneSpec(
             kind=self.kind,
             display_name=self.display_name,
-            custom_command=(
-                self.custom_command.strip() if self.kind is PaneKind.CUSTOM_COMMAND else None
-            ),
+            custom_command=(self.custom_command if self.kind is PaneKind.CUSTOM_COMMAND else None),
         )
 
 
@@ -200,6 +198,8 @@ class WizardState:
         """
         prefix = _STEP_PREFIXES[self.mode]
         if self.mode is WizardMode.NEW_PROJECT:
+            return f"{prefix} -- Step {new_project_step + 1} of 6: {step_name}"
+        if self.mode is WizardMode.EXISTING_CREATE:
             return f"{prefix} -- Step {new_project_step} of 5: {step_name}"
         return f"{prefix} -- Step {new_project_step - 1} of 4: {step_name}"
 
@@ -207,6 +207,12 @@ class WizardState:
         """Reset the pending-window draft for adding a brand-new window."""
         default_name = "main" if not self.windows else ""
         self.pending_window = WindowDraft(window_name=default_name)
+        self.editing_index = None
+
+    def replace_windows(self, windows: tuple[WindowSpec, ...]) -> None:
+        """Replace the draft layout with independent copies of validated windows."""
+        self.windows = [WindowDraft.from_window_spec(window) for window in windows]
+        self.pending_window = WindowDraft()
         self.editing_index = None
 
     def start_editing_window(self, index: int) -> None:
