@@ -23,10 +23,13 @@ from dataclasses import dataclass
 from dashboard.models import WindowSpec, WorkspaceSpec
 from dashboard.models.layout import tmux_layout_for_pane_count
 from dashboard.services.pane_commands import PaneLaunchPlan
+from dashboard.services.ssh import SshCommandResult, quote_remote_argument, run_ssh_command
 
 _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t#{session_attached}"
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+TmuxCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,23 +51,88 @@ def is_tmux_installed() -> bool:
     return shutil.which("tmux") is not None
 
 
-def list_tmux_sessions() -> list[TmuxSession]:
+def run_local_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Execute one tmux argv command locally, capturing its output."""
+    return subprocess.run(
+        argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+    )
+
+
+def run_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Backward-compatible name for the local tmux command runner."""
+    return run_local_tmux_command(argv)
+
+
+class SshTmuxCommandRunner:
+    """Run tmux argv through one noninteractive SSH command.
+
+    The callable accepts tmux argv only.  It quotes each individual argument
+    for the remote POSIX shell and passes the SSH destination separately to
+    the transport; callers cannot provide a precomposed shell command here.
+    """
+
+    def __init__(
+        self,
+        destination: str,
+        *,
+        connection_timeout: int = _SUBPROCESS_TIMEOUT_SECONDS,
+        execution_timeout: float = _SUBPROCESS_TIMEOUT_SECONDS,
+        max_output_chars: int | None = None,
+        ssh_runner: Callable[..., SshCommandResult] = run_ssh_command,
+    ) -> None:
+        self.destination = destination
+        self.connection_timeout = connection_timeout
+        self.execution_timeout = execution_timeout
+        self.max_output_chars = max_output_chars
+        self.ssh_runner = ssh_runner
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        if not argv:
+            raise ValueError("tmux argv cannot be empty")
+
+        remote_command = " ".join(quote_remote_argument(argument) for argument in argv)
+        options: dict[str, object] = {
+            "connection_timeout": self.connection_timeout,
+            "execution_timeout": self.execution_timeout,
+        }
+        if self.max_output_chars is not None:
+            options["max_output_chars"] = self.max_output_chars
+        result = self.ssh_runner(self.destination, remote_command, **options)
+
+        if result.status == "timeout":
+            raise subprocess.TimeoutExpired(
+                cmd=argv,
+                timeout=self.execution_timeout,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        if result.status == "missing-ssh":
+            raise FileNotFoundError(result.error or "The ssh executable was not found.")
+        if result.returncode is None:
+            raise TmuxCommandError(
+                result.error or f"SSH tmux command failed with status {result.status}."
+            )
+
+        return subprocess.CompletedProcess(
+            argv,
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
+
+
+def list_tmux_sessions(*, runner: TmuxCommandRunner = run_tmux_command) -> list[TmuxSession]:
     """Return currently running tmux sessions.
 
     Returns an empty list if tmux is not installed, no server is running, or
     the command fails for any other reason -- callers use is_tmux_installed()
     separately to tell "not installed" from "installed, no sessions" in the UI.
     """
-    if not is_tmux_installed():
+    if runner is run_tmux_command and not is_tmux_installed():
         return []
 
     try:
-        result = subprocess.run(
-            ["tmux", "list-sessions", "-F", _LIST_FORMAT],
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        result = runner(["tmux", "list-sessions", "-F", _LIST_FORMAT])
     except (OSError, subprocess.TimeoutExpired):
         return []
 
@@ -89,17 +157,12 @@ def list_tmux_sessions() -> list[TmuxSession]:
     return sessions
 
 
-def get_tmux_version() -> str | None:
+def get_tmux_version(*, runner: TmuxCommandRunner = run_tmux_command) -> str | None:
     """Return the `tmux -V` output, or None if tmux is unavailable."""
-    if not is_tmux_installed():
+    if runner is run_tmux_command and not is_tmux_installed():
         return None
     try:
-        result = subprocess.run(
-            ["tmux", "-V"],
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        result = runner(["tmux", "-V"])
     except (OSError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() or None
@@ -119,17 +182,10 @@ def sanitize_session_name(name: str) -> str:
     return sanitized or "workspace"
 
 
-def run_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    """Execute a single tmux argv command, capturing its output."""
-    return subprocess.run(
-        argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS
-    )
-
-
 def session_exists(
     session_name: str,
     *,
-    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] = run_tmux_command,
+    runner: TmuxCommandRunner = run_tmux_command,
 ) -> bool:
     """Whether a tmux session named *session_name* is currently running.
 
@@ -139,7 +195,7 @@ def session_exists(
     to -- callers that don't pass one still hit the real server via
     run_tmux_command, unchanged.
     """
-    if not is_tmux_installed():
+    if runner is run_tmux_command and not is_tmux_installed():
         return False
     try:
         result = runner(["tmux", "has-session", "-t", session_name])
@@ -148,7 +204,12 @@ def session_exists(
     return result.returncode == 0
 
 
-def generate_session_name(project_name: str, existing: Iterable[str] | None = None) -> str:
+def generate_session_name(
+    project_name: str,
+    existing: Iterable[str] | None = None,
+    *,
+    runner: TmuxCommandRunner | None = None,
+) -> str:
     """A deterministic, sanitized, collision-free session name for
     *project_name*.
 
@@ -157,9 +218,12 @@ def generate_session_name(project_name: str, existing: Iterable[str] | None = No
     `-3`, ... is appended until a free name is found.
     """
     base = sanitize_session_name(project_name)
-    existing_names = (
-        set(existing) if existing is not None else {s.name for s in list_tmux_sessions()}
-    )
+    if existing is not None:
+        existing_names = set(existing)
+    elif runner is None:
+        existing_names = {s.name for s in list_tmux_sessions()}
+    else:
+        existing_names = {s.name for s in list_tmux_sessions(runner=runner)}
     if base not in existing_names:
         return base
     suffix = 2
@@ -247,7 +311,7 @@ def _select_pane_argv(pane_id: str) -> list[str]:
 
 
 def _run_step(
-    runner: Callable[[list[str]], subprocess.CompletedProcess[str]], argv: list[str]
+    runner: TmuxCommandRunner, argv: list[str]
 ) -> subprocess.CompletedProcess[str]:
     result = runner(argv)
     if result.returncode != 0:
@@ -276,7 +340,7 @@ def _parse_pane_capture(result: subprocess.CompletedProcess[str], argv: list[str
 
 
 def _create_window_panes(
-    runner: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    runner: TmuxCommandRunner,
     window: WindowSpec,
     window_id: str,
     first_pane_id: str,
@@ -315,7 +379,7 @@ def create_workspace_session(
     workspace: WorkspaceSpec,
     pane_plans: Mapping[tuple[str, int], PaneLaunchPlan],
     *,
-    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] = run_tmux_command,
+    runner: TmuxCommandRunner = run_tmux_command,
 ) -> None:
     """Create *workspace* as a real tmux session by running each tmux
     command in order via *runner*.

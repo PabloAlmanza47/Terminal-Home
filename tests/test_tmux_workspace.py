@@ -21,6 +21,7 @@ import pytest
 
 from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
 from dashboard.services import pane_commands
+from dashboard.services import tmux as tmux_module
 from dashboard.services.tmux import (
     TmuxCommandError,
     attach_or_switch_argv,
@@ -174,6 +175,18 @@ def test_generate_session_name_appends_suffix_on_collision() -> None:
     assert name == "My-Project-3"
 
 
+def test_generate_session_name_default_listing_supports_zero_argument_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tmux_module,
+        "list_tmux_sessions",
+        lambda: [tmux_module.TmuxSession("My-Project", 1, "created", False)],
+    )
+
+    assert generate_session_name("My Project") == "My-Project-2"
+
+
 # --- session_exists: isolation from a real tmux server --------------------------
 
 
@@ -217,6 +230,23 @@ def test_create_workspace_session_with_fake_runner_never_calls_real_tmux(
     create_workspace_session(workspace, {("main", 0): _plan()}, runner=fake)
 
     assert fake.executed  # the fake did the work; subprocess.run was never hit
+
+
+def test_create_workspace_session_uses_local_runner_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _FakeTmux()
+
+    def fake_subprocess_run(argv: list[str], **kwargs: object) -> _FakeCompletedProcess:
+        return fake(argv)
+
+    monkeypatch.setattr(tmux_module.shutil, "which", lambda name: "/usr/bin/tmux")
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_subprocess_run)
+
+    create_workspace_session(_workspace(tmp_path), {("main", 0): _plan()})
+
+    assert fake.executed
+    assert fake.executed[0] == ["tmux", "has-session", "-t", "demo"]
 
 
 # --- create_workspace_session: pane counts / layouts ----------------------------
