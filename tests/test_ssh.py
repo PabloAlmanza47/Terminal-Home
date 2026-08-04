@@ -130,7 +130,11 @@ def test_file_not_found_during_start_is_handled(
     [
         (0, "", "success"),
         (1, "bash: line 1: missing-command: command not found", "command-failure"),
-        (255, "ssh: connect to host example.test port 22: Connection refused", "connection-failure"),
+        (
+            255,
+            "ssh: connect to host example.test port 22: Connection refused",
+            "connection-failure"
+        ),
         (255, "Permission denied (publickey,password).", "authentication-failure"),
     ],
 )
