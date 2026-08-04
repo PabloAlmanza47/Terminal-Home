@@ -5,25 +5,43 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 
-from dashboard.services.projects import Project, discover_projects
+from dashboard.models import SshProjectLocation
+from dashboard.services.project_selection import (
+    RegisteredRemoteProject,
+    SelectableProject,
+)
+from dashboard.services.projects import discover_projects
 from dashboard.services.projects_config_store import load_projects_config_result
+from dashboard.services.remote_project_store import load_all_remote_projects
 
 SUBCOMMANDS = ("list", "plan", "up", "doctor", "completion")
 SHELLS = ("bash", "zsh")
 
 
-def project_selector_candidates(projects: Iterable[Project]) -> tuple[str, ...]:
-    """Return deterministic, unambiguous selectors for discovered projects."""
+def project_selector_candidates(projects: Iterable[SelectableProject]) -> tuple[str, ...]:
+    """Return deterministic, unambiguous local and remote selectors."""
     ordered = sorted(
         projects,
-        key=lambda project: (project.name.casefold(), str(project.path.resolve())),
+        key=lambda project: (
+            project.name.casefold(),
+            project.selector.casefold()
+            if isinstance(project, RegisteredRemoteProject)
+            else str(project.path.resolve()).casefold(),
+        ),
     )
     name_counts = Counter(project.name for project in ordered)
     candidates: list[str] = []
     for project in ordered:
-        candidate = (
-            project.name if name_counts[project.name] == 1 else str(project.path.resolve())
-        )
+        if isinstance(project, RegisteredRemoteProject):
+            if name_counts[project.name] == 1 and project.name not in candidates:
+                candidates.append(project.name)
+            candidate = project.selector
+        else:
+            candidate = (
+                project.name
+                if name_counts[project.name] == 1
+                else str(project.path.resolve())
+            )
         # The internal protocol is line-delimited. A newline in a filesystem
         # name cannot be represented without corrupting the candidate stream.
         if "\n" not in candidate and "\r" not in candidate:
@@ -34,7 +52,16 @@ def project_selector_candidates(projects: Iterable[Project]) -> tuple[str, ...]:
 def discover_project_selector_candidates() -> tuple[str, ...]:
     """Load configured discovery and return selectors without gathering status."""
     config = load_projects_config_result().value
-    return project_selector_candidates(discover_projects(config).projects)
+    local_projects = discover_projects(config).projects
+    remote_projects = tuple(
+        RegisteredRemoteProject(
+            name=registration.name,
+            location=SshProjectLocation(registration.host_id, registration.remote_path),
+            registration=registration,
+        )
+        for registration in load_all_remote_projects()
+    )
+    return project_selector_candidates((*local_projects, *remote_projects))
 
 
 def render_bash_completion() -> str:

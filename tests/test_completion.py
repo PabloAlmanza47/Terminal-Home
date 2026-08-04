@@ -12,7 +12,9 @@ import pytest
 
 import dashboard.cli as cli_module
 import dashboard.services.completion as completion_module
+from dashboard.models import RemoteProjectRegistration, SshProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
+from dashboard.services.project_selection import RegisteredRemoteProject
 from dashboard.services.projects import Project, ProjectDiscoveryResult
 from dashboard.services.projects_config_store import save_projects_config
 
@@ -75,6 +77,28 @@ def test_case_differing_names_remain_unique_exact_selectors(tmp_path: Path) -> N
 def test_line_delimiter_characters_are_not_emitted(tmp_path: Path) -> None:
     projects = (_project(tmp_path / "safe"), _project(tmp_path / "bad", "bad\nname"))
     assert completion_module.project_selector_candidates(projects) == ("safe",)
+
+
+def test_remote_projects_use_exact_selectors_and_join_name_ambiguity(tmp_path: Path) -> None:
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    remote = RegisteredRemoteProject(
+        "remote-api",
+        SshProjectLocation(host_id, "/srv/Project With Spaces"),
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            host_id,
+            "remote-api",
+            "/srv/Project With Spaces",
+        ),
+    )
+    local = _project(tmp_path / "remote-api", "remote-api")
+
+    candidates = completion_module.project_selector_candidates((local, remote))
+
+    assert candidates == (
+        str(local.path.resolve()),
+        "ssh:d84aeefb-7c29-4c63-b39c-766d559df977:/srv/Project With Spaces",
+    )
 
 
 def test_discovery_candidates_include_manual_projects_and_ignore_missing_roots(

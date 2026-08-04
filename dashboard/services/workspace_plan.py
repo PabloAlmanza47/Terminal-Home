@@ -210,20 +210,19 @@ def format_plan(plan: WorkspacePlan) -> str:
     """Render *plan* as the plain-text block `th plan` prints -- a
     structural summary, never an exact future tmux argv list.
     """
-    lines = [
+    lines: list[str] = [
         f"Project: {plan.project_name}",
         f"Path: {plan.project_path}",
-        (
-            f"Location: ssh:{plan.project_location.host_id}:{plan.project_location.remote_path}"
-            if not isinstance(plan.project_location, LocalProjectLocation)
-            else None
-        ),
         f"Session: {plan.session_name}",
         f"Action: {plan.action}",
         f"Source: {plan.source}",
         "",
     ]
-    lines = [line for line in lines if line is not None]
+    if not isinstance(plan.project_location, LocalProjectLocation):
+        lines.insert(
+            2,
+            f"Location: ssh:{plan.project_location.host_id}:{plan.project_location.remote_path}",
+        )
     if plan.workspace is not None:
         lines.extend(_format_workspace(plan.workspace))
     elif plan.note is not None:

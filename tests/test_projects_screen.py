@@ -18,9 +18,11 @@ from textual.widgets import Input, OptionList
 
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
+from dashboard.models import RemoteProjectRegistration
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects_config_store import save_projects_config
+from dashboard.services.remote_project_store import create_remote_project
 from dashboard.services.system_info import SystemInfo
 
 _SIZE = (100, 100)
@@ -109,6 +111,51 @@ def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     expected = [_project_id(projects_root / "alpha"), _project_id(projects_root / "beta")]
     assert _run(scenario()) == expected
+
+
+def test_lists_registered_remote_projects_and_opens_offline_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            host_id,
+            "remote-api",
+            "/srv/Project With Spaces",
+        )
+    )
+
+    async def scenario() -> tuple[list[str], list[str], str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            option_list = app.screen.query_one("#project-list", OptionList)
+            ids = _option_ids(pilot)
+            labels = [
+                str(option_list.get_option_at_index(i).prompt)
+                for i in range(option_list.option_count)
+            ]
+            option_list.highlighted = 0
+            option_list.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            detail = app.screen
+            return (
+                ids,
+                labels,
+                str(detail.query_one("#detail-host").render()),
+                str(detail.query_one("#detail-remote-status").render()),
+            )
+
+    ids, labels, host_text, status_text = _run(scenario())
+    selector = f"ssh:{host_id}:/srv/Project With Spaces"
+    assert ids == [selector]
+    assert "[Remote]" in labels[0]
+    assert "/srv/Project With Spaces" in labels[0]
+    assert host_id in host_text
+    assert "metadata only" in status_text
 
 
 def test_excludes_terminal_home_and_hidden_dirs(

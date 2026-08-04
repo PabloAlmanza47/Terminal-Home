@@ -31,6 +31,8 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
+from dashboard.services.project_launch import prepare_project_launch_for_selector
+from dashboard.services.project_selection import RegisteredRemoteProject
 from dashboard.services.projects import (
     Project,
     ProjectAction,
@@ -40,6 +42,7 @@ from dashboard.services.projects import (
     primary_actions,
     secondary_actions,
 )
+from dashboard.services.ssh_host_store import get_ssh_host
 from dashboard.services.template_store import (
     DuplicateTemplateNameError,
     TemplateStoreError,
@@ -50,6 +53,7 @@ from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import (
     WorkspaceStoreVersionError,
     forget_workspace,
+    load_workspace_result_for_location,
     save_workspace,
 )
 
@@ -102,14 +106,35 @@ class ProjectDetailScreen(Screen[None]):
         ("f5", "refresh", "Refresh"),
     ]
 
-    def __init__(self, project: Project) -> None:
+    def __init__(self, project: Project | RegisteredRemoteProject) -> None:
         super().__init__()
         self.project = project
-        self.status: ProjectStatus = gather_single_project_status(project)
+        self.status: ProjectStatus | None = (
+            gather_single_project_status(project) if isinstance(project, Project) else None
+        )
+        remote_project = project if isinstance(project, RegisteredRemoteProject) else None
+        self.remote_project = remote_project
+        self.remote_workspace = (
+            load_workspace_result_for_location(remote_project.location).workspace
+            if remote_project is not None
+            else None
+        )
+        self.remote_host = (
+            get_ssh_host(remote_project.location.host_id)
+            if remote_project is not None
+            else None
+        )
         self._feedback = ""
 
     def compose(self) -> ComposeResult:
         status = self.status
+
+        if status is None:
+            assert self.remote_project is not None
+            project = self.remote_project
+            yield from self._compose_remote(project)
+            yield Footer()
+            return
 
         with Container(classes="screen-root"):
             with VerticalScroll(classes="panel"):
@@ -174,6 +199,35 @@ class ProjectDetailScreen(Screen[None]):
                     yield Button("Back to Project List", id="back-to-list-button")
         yield Footer()
 
+    def _compose_remote(self, project: RegisteredRemoteProject) -> ComposeResult:
+        with Container(classes="screen-root"):
+            with VerticalScroll(classes="panel"):
+                yield Static(f"Project: {project.name}", id="screen-title")
+                yield Static(f"Host ID:       {project.location.host_id}", id="detail-host")
+                yield Static(f"Remote path:   {project.location.remote_path}", id="detail-path")
+                if self.remote_host is None:
+                    yield Static(
+                        "Missing SSH host registration.",
+                        id="detail-missing-host",
+                        classes="wizard-hint",
+                    )
+                else:
+                    yield Static(
+                        f"SSH destination: {self.remote_host.destination}",
+                        id="detail-destination",
+                    )
+                saved = "yes" if self.remote_workspace is not None else "not configured"
+                yield Static(f"Saved workspace: {saved}", id="detail-workspace")
+                yield Static(
+                    "Remote status: registered metadata only (not checked)",
+                    id="detail-remote-status",
+                )
+                yield Static(self._feedback, id="detail-error")
+                with Horizontal(classes="button-row"):
+                    yield Button("Launch Remote Workspace", id="action-resume", variant="primary")
+                with Horizontal(classes="button-row"):
+                    yield Button("Back to Project List", id="back-to-list-button")
+
     async def on_screen_resume(self) -> None:
         await self._refresh_status()
 
@@ -184,6 +238,13 @@ class ProjectDetailScreen(Screen[None]):
         self.app.pop_screen()
 
     async def _refresh_status(self) -> None:
+        if self.remote_project is not None:
+            self.remote_workspace = load_workspace_result_for_location(
+                self.remote_project.location
+            ).workspace
+            await self.recompose()
+            return
+        assert isinstance(self.project, Project)
         self.status = gather_single_project_status(self.project)
         await self.recompose()
 
@@ -215,9 +276,26 @@ class ProjectDetailScreen(Screen[None]):
         """Both Resume Session and Recreate Workspace produce the exact
         same ATTACH request -- see build_launch_request.
         """
+        if self.remote_project is not None:
+            self._launch_remote()
+            return
+        assert self.status is not None
         self.app.exit(build_launch_request(self.status))
 
+    def _launch_remote(self) -> None:
+        assert self.remote_project is not None
+        try:
+            resolved = prepare_project_launch_for_selector(self.remote_project.selector)
+        except OSError as exc:
+            self._show_error(str(exc))
+            return
+        if resolved.prepared is None:
+            self._show_error(resolved.error or "Remote workspace could not be prepared.")
+            return
+        self.app.exit(resolved.prepared.request)
+
     def _open_default_workspace(self) -> None:
+        assert self.status is not None
         status = self.status
         # status.expected_session_name is already the deterministic,
         # collision-aware name gather_single_project_status assigned this
@@ -240,6 +318,7 @@ class ProjectDetailScreen(Screen[None]):
         )
 
     def _configure_workspace(self) -> None:
+        assert self.status is not None
         status = self.status
         state = WizardState.for_configuring_existing_project(
             status.project.name, status.canonical_path, session_name=status.expected_session_name
@@ -247,6 +326,7 @@ class ProjectDetailScreen(Screen[None]):
         self.app.push_screen(WorkspaceStartScreen(state))
 
     def _edit_workspace(self) -> None:
+        assert self.status is not None
         status = self.status
         if status.saved_workspace is None:
             return
@@ -256,6 +336,7 @@ class ProjectDetailScreen(Screen[None]):
         self.app.push_screen(WindowSummaryScreen(state))
 
     async def _save_as_template(self) -> None:
+        assert self.status is not None
         workspace = self.status.saved_workspace
         if workspace is None:
             return
@@ -277,6 +358,7 @@ class ProjectDetailScreen(Screen[None]):
         self._show_error(f'Saved template "{template.name}".')
 
     async def _reset_to_default(self) -> None:
+        assert self.status is not None
         status = self.status
         if status.saved_workspace is None:
             return
@@ -307,6 +389,7 @@ class ProjectDetailScreen(Screen[None]):
         await self._refresh_status()
 
     async def _forget_workspace(self) -> None:
+        assert self.status is not None
         status = self.status
         confirmed = await self.app.push_screen_wait(
             ConfirmScreen(

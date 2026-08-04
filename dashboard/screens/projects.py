@@ -18,7 +18,13 @@ from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
+from dashboard.services.project_selection import (
+    RegisteredRemoteProject,
+    SelectableProject,
+    list_selectable_projects,
+)
 from dashboard.services.projects import (
+    Project,
     ProjectScanResult,
     ProjectStatus,
     disambiguated_display_names,
@@ -26,6 +32,7 @@ from dashboard.services.projects import (
     project_option_id,
     scan_all_projects,
 )
+from dashboard.services.ssh_host_store import get_ssh_host
 
 
 def _row_label(display_name: str, status: ProjectStatus) -> str:
@@ -44,6 +51,14 @@ def _row_label(display_name: str, status: ProjectStatus) -> str:
     return label
 
 
+def _remote_row_label(project: RegisteredRemoteProject) -> str:
+    host_status = "" if get_ssh_host(project.location.host_id) is not None else "  [missing host]"
+    return (
+        f"{project.name}  [Remote]  {project.location.host_id}"
+        f"  {project.location.remote_path}{host_status}"
+    )
+
+
 def _details_text(status: ProjectStatus) -> str:
     lines = [f"Path: {status.canonical_path}"]
     if not status.project_dir_exists:
@@ -59,6 +74,14 @@ def _details_text(status: ProjectStatus) -> str:
     return "\n".join(lines)
 
 
+def _remote_details_text(project: RegisteredRemoteProject) -> str:
+    return (
+        f"Host ID: {project.location.host_id}\n"
+        f"Remote path: {project.location.remote_path}\n"
+        "Status: registered metadata only (remote status not checked)"
+    )
+
+
 class ProjectsScreen(Screen[None]):
     """Lists and filters project directories; Enter opens project detail."""
 
@@ -70,8 +93,8 @@ class ProjectsScreen(Screen[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._all_statuses: list[ProjectStatus] = []
-        self._statuses_by_id: dict[str, ProjectStatus] = {}
+        self._all_entries: list[ProjectStatus | RegisteredRemoteProject] = []
+        self._entries_by_id: dict[str, ProjectStatus | RegisteredRemoteProject] = {}
         self._scanning = False
 
     def compose(self) -> ComposeResult:
@@ -104,42 +127,79 @@ class ProjectsScreen(Screen[None]):
         filesystem/subprocess calls.
         """
         scan_result = scan_all_projects()
-        self.app.call_from_thread(self._on_scan_complete, scan_result)
+        selectable = list_selectable_projects()
+        self.app.call_from_thread(self._on_scan_complete, scan_result, selectable)
 
-    def _on_scan_complete(self, scan_result: ProjectScanResult) -> None:
+    def _on_scan_complete(
+        self,
+        scan_result: ProjectScanResult,
+        selectable: tuple[SelectableProject, ...],
+    ) -> None:
         self._scanning = False
-        self._all_statuses = list(scan_result.statuses)
-        self._statuses_by_id = {project_option_id(s): s for s in self._all_statuses}
+        statuses_by_location = {status.project.location: status for status in scan_result.statuses}
+        self._all_entries = [
+            statuses_by_location[project.location]
+            if isinstance(project, Project)
+            else project
+            for project in selectable
+            if isinstance(project, RegisteredRemoteProject)
+            or project.location in statuses_by_location
+        ]
+        self._entries_by_id = {
+            project_option_id(entry)
+            if isinstance(entry, ProjectStatus)
+            else entry.selector: entry
+            for entry in self._all_entries
+        }
         self.query_one("#scan-warning", Static).update(format_scan_warnings(scan_result))
         query = self.query_one("#project-filter", Input).value.strip().lower()
         self._populate(self._filtered(query))
 
-    def _filtered(self, query: str) -> list[ProjectStatus]:
+    def _filtered(self, query: str) -> list[ProjectStatus | RegisteredRemoteProject]:
         if not query:
-            return list(self._all_statuses)
-        return [s for s in self._all_statuses if query in s.project.name.lower()]
+            return list(self._all_entries)
+        return [
+            entry
+            for entry in self._all_entries
+            if query in (
+                entry.project.name if isinstance(entry, ProjectStatus) else entry.name
+            ).lower()
+        ]
 
-    def _populate(self, statuses: list[ProjectStatus]) -> None:
+    def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
         option_list = self.query_one("#project-list", OptionList)
         option_list.clear_options()
         path_widget = self.query_one("#project-path", Static)
 
-        if not self._all_statuses:
+        if not self._all_entries:
             option_list.add_option(
                 Option("No projects found in the configured project roots", disabled=True)
             )
             path_widget.update("")
             return
-        if not statuses:
+        if not entries:
             option_list.add_option(Option("No matches", disabled=True))
             path_widget.update("")
             return
-        display_names = disambiguated_display_names(statuses)
-        for status, display_name in zip(statuses, display_names):
+        local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
+        display_names = disambiguated_display_names(local_statuses)
+        local_index = 0
+        for entry in entries:
+            if isinstance(entry, ProjectStatus):
+                display_name = display_names[local_index]
+                local_index += 1
+                label = _row_label(display_name, entry)
+                option_id = project_option_id(entry)
+            else:
+                label = _remote_row_label(entry)
+                option_id = entry.selector
             option_list.add_option(
-                Option(_row_label(display_name, status), id=project_option_id(status))
+                Option(label, id=option_id)
             )
-        self._show_details(project_option_id(statuses[0]))
+        first = entries[0]
+        self._show_details(
+            project_option_id(first) if isinstance(first, ProjectStatus) else first.selector
+        )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate(self._filtered(event.value.strip().lower()))
@@ -149,17 +209,24 @@ class ProjectsScreen(Screen[None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id if event.option else None
-        status = self._statuses_by_id.get(option_id) if option_id else None
-        if status is not None:
-            self.app.push_screen(ProjectDetailScreen(status.project))
+        entry = self._entries_by_id.get(option_id) if option_id else None
+        if isinstance(entry, ProjectStatus):
+            self.app.push_screen(ProjectDetailScreen(entry.project))
+        elif isinstance(entry, RegisteredRemoteProject):
+            self.app.push_screen(ProjectDetailScreen(entry))
 
     def _show_details(self, option_id: str | None) -> None:
         path_widget = self.query_one("#project-path", Static)
         if not option_id:
             path_widget.update("")
             return
-        status = self._statuses_by_id.get(option_id)
-        path_widget.update(_details_text(status) if status is not None else "")
+        entry = self._entries_by_id.get(option_id)
+        if isinstance(entry, ProjectStatus):
+            path_widget.update(_details_text(entry))
+        elif isinstance(entry, RegisteredRemoteProject):
+            path_widget.update(_remote_details_text(entry))
+        else:
+            path_widget.update("")
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
