@@ -30,7 +30,7 @@ from dashboard.services.doctor import exit_code_for, format_diagnostic, run_diag
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     launch_status_line,
-    prepare_project_launch,
+    prepare_project_launch_for_selector,
     resolve_project_plan,
     resolve_project_status,
 )
@@ -186,18 +186,19 @@ def _run_plan(args: argparse.Namespace) -> int:
 
 
 def _run_up(args: argparse.Namespace) -> int:
-    resolved = resolve_project_status(args.project)
-    for warning in resolved.warnings:
-        print(warning, file=sys.stderr)
-    if resolved.status is None:
-        print(f"error: {resolved.error}", file=sys.stderr)
-        return 1
-
     try:
-        prepared = prepare_project_launch(resolved.status)
+        resolved = prepare_project_launch_for_selector(args.project)
     except (OSError, ProjectLaunchPreparationError, WorkspaceStoreVersionError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    for warning in resolved.warnings:
+        print(warning, file=sys.stderr)
+    if resolved.prepared is None:
+        print(f"error: {resolved.error}", file=sys.stderr)
+        return 1
+
+    prepared = resolved.prepared
+    assert prepared is not None
 
     print(launch_status_line(prepared), flush=True)
     try:

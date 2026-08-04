@@ -54,6 +54,15 @@ class ResolvedProjectPlan:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedProjectLaunch:
+    """Selector resolution and launch preparation for the CLI ``up`` path."""
+
+    prepared: PreparedProjectLaunch | None
+    error: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
 def resolve_project_status(selector: str) -> ResolvedProjectStatus:
     """Resolve *selector* and gather status using one configuration snapshot."""
     config_result = load_projects_config_result()
@@ -172,6 +181,56 @@ def prepare_project_launch(
         workspace=plan.workspace, init_git=False, action=LaunchAction.CREATE
     )
     return PreparedProjectLaunch(plan, request, True)
+
+
+def prepare_project_launch_for_selector(selector: str) -> ResolvedProjectLaunch:
+    """Resolve a local or registered remote selector and prepare its launch.
+
+    Local projects use the established status/preparation flow. Remote
+    projects use their saved location-aware workspace or an in-memory default,
+    persist only that new default, and always hand the existing launcher an
+    attach-style request so it can recheck and create when necessary.
+    """
+    selection = resolve_project_selector(selector)
+    if selection.project is None:
+        return ResolvedProjectLaunch(None, selection.error)
+
+    if isinstance(selection.project, Project):
+        resolved = resolve_project_status(selector)
+        if resolved.status is None:
+            return ResolvedProjectLaunch(None, resolved.error, resolved.warnings)
+        try:
+            prepared = prepare_project_launch(resolved.status)
+        except (OSError, ProjectLaunchPreparationError) as exc:
+            return ResolvedProjectLaunch(None, str(exc), resolved.warnings)
+        return ResolvedProjectLaunch(prepared, warnings=resolved.warnings)
+
+    resolved_plan = resolve_project_plan(selector)
+    if resolved_plan.plan is None:
+        return ResolvedProjectLaunch(
+            None, resolved_plan.error, resolved_plan.warnings
+        )
+    plan = resolved_plan.plan
+    if plan.blocked:
+        return ResolvedProjectLaunch(None, plan.note or "Project launch is blocked.")
+
+    workspace = plan.workspace
+    if workspace is None:
+        workspace = build_default_workspace(
+            plan.project_name, plan.project_location, plan.session_name
+        )
+    persisted_default = plan.action == ACTION_CREATE_DEFAULT
+    if persisted_default:
+        save_workspace(workspace)
+    request = LaunchRequest(
+        workspace=workspace,
+        init_git=False,
+        action=LaunchAction.CREATE if persisted_default else LaunchAction.ATTACH,
+    )
+    return ResolvedProjectLaunch(
+        PreparedProjectLaunch(plan, request, persisted_default),
+        warnings=resolved_plan.warnings,
+    )
 
 
 def launch_status_line(prepared: PreparedProjectLaunch) -> str:
