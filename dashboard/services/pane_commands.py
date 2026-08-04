@@ -40,13 +40,13 @@ class PaneLaunchPlan:
     warning: str | None = None
 
 
-def _is_git_repo(project_path: Path) -> bool:
-    return (project_path / ".git").exists()
+def _is_git_repo(project_path: Path | str) -> bool:
+    return isinstance(project_path, Path) and (project_path / ".git").exists()
 
 
 def plan_for_pane(
     pane: PaneSpec,
-    project_path: Path,
+    project_path: Path | str,
     detected_commands: DetectedProjectCommands | None = None,
 ) -> PaneLaunchPlan:
     """Decide the startup command, pane title, and any warning for *pane*,
@@ -87,7 +87,12 @@ def plan_for_pane(
         return PaneLaunchPlan(startup_command=_FILE_TREE_FALLBACK_COMMAND, pane_title="tree")
 
     if pane.kind is PaneKind.TEST_TERMINAL:
-        commands = detected_commands or detect_project_commands(project_path)
+        if detected_commands is not None:
+            commands = detected_commands
+        elif isinstance(project_path, Path):
+            commands = detect_project_commands(project_path)
+        else:
+            commands = DetectedProjectCommands(development=None, test=None)
         if commands.test is not None:
             return PaneLaunchPlan(startup_command=commands.test.command, pane_title="tests")
         return PaneLaunchPlan(
@@ -97,7 +102,12 @@ def plan_for_pane(
         )
 
     if pane.kind is PaneKind.DEV_SERVER:
-        commands = detected_commands or detect_project_commands(project_path)
+        if detected_commands is not None:
+            commands = detected_commands
+        elif isinstance(project_path, Path):
+            commands = detect_project_commands(project_path)
+        else:
+            commands = DetectedProjectCommands(development=None, test=None)
         if commands.development is not None:
             return PaneLaunchPlan(
                 startup_command=commands.development.command, pane_title="server"

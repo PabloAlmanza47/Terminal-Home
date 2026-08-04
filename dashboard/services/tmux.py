@@ -102,6 +102,16 @@ def resolve_tmux_runner(
     )
 
 
+def workspace_project_dir(workspace: WorkspaceSpec) -> str:
+    """Return the tmux working directory without converting remote paths."""
+    location = workspace.project_location
+    if isinstance(location, LocalProjectLocation):
+        return str(location.path)
+    if isinstance(location, SshProjectLocation):
+        return location.remote_path
+    raise TypeError("Unsupported workspace project location.")
+
+
 def is_tmux_installed() -> bool:
     """Whether the `tmux` binary is on PATH."""
     return shutil.which("tmux") is not None
@@ -455,7 +465,7 @@ def create_workspace_session(
         raise TmuxCommandError(f"A tmux session named '{workspace.session_name}' already exists.")
 
     session = workspace.session_name
-    project_dir = str(workspace.project_path)
+    project_dir = workspace_project_dir(workspace)
     first_window = workspace.windows[0]
 
     session_created = False
