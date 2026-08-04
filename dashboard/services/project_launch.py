@@ -19,6 +19,13 @@ from dashboard.services.projects import (
     gather_single_project_status,
 )
 from dashboard.services.projects_config_store import load_projects_config_result
+from dashboard.services.tmux import (
+    TmuxCommandError,
+    resolve_tmux_runner,
+    sanitize_session_name,
+    session_exists,
+)
+from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_plan import (
     ACTION_ATTACH,
     ACTION_CREATE_DEFAULT,
@@ -26,14 +33,10 @@ from dashboard.services.workspace_plan import (
     build_workspace_plan,
     build_workspace_plan_for_location,
 )
-from dashboard.services.tmux import (
-    TmuxCommandError,
-    resolve_tmux_runner,
-    sanitize_session_name,
-    session_exists,
+from dashboard.services.workspace_store import (
+    load_workspace_result_for_location,
+    save_workspace,
 )
-from dashboard.services.workspace_store import load_workspace_result_for_location, save_workspace
-from dashboard.services.workspace_defaults import build_default_workspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +130,9 @@ def resolve_project_plan(selector: str) -> ResolvedProjectPlan:
     try:
         running = session_exists(session_name, runner=runner_result.runner)
     except (FileNotFoundError, OSError, TmuxCommandError) as exc:
-        return ResolvedProjectPlan(None, f"Unable to query remote tmux session: {exc}", tuple(warnings))
+        return ResolvedProjectPlan(
+            None, f"Unable to query remote tmux session: {exc}", tuple(warnings)
+        )
 
     return ResolvedProjectPlan(
         build_workspace_plan_for_location(
