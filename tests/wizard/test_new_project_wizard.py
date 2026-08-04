@@ -16,15 +16,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from textual.widgets import Input, OptionList, SelectionList, Static
 
+import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchRequest, PaneKind
+from dashboard.models.projects_config import ProjectsConfig
 from dashboard.screens.new_project import step_review as step_review_module
 from dashboard.services import project_creation as project_creation_module
+from dashboard.services import tmux as tmux_module
+from dashboard.services.projects_config_store import save_projects_config
+from dashboard.services.system_info import SystemInfo
 from dashboard.services.workspace_store import WORKSPACE_STORE_SCHEMA_VERSION, load_workspace
 
 _SIZE = (100, 100)
@@ -37,6 +43,24 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(project_creation_module, "DEFAULT_PROJECTS_ROOT", projects_root)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    save_projects_config(ProjectsConfig(roots=(projects_root,)))
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        home_module,
+        "gather_system_info",
+        lambda: SystemInfo(
+            hostname="test-host",
+            operating_system="test-os",
+            python_version="3.12",
+            shell="/bin/test-shell",
+            tmux_version="tmux test",
+            disk_usage=None,
+            memory_usage=None,
+            wsl_distro=None,
+        ),
+    )
     return projects_root
 
 
@@ -59,7 +83,18 @@ async def _click(pilot, button_id: str) -> None:
 
 
 def _run(coro):
-    return asyncio.run(coro)
+    async def run_with_owned_executor():
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(thread_name_prefix="new-project-wizard-test")
+        loop.set_default_executor(executor)
+        try:
+            return await coro
+        finally:
+            # Home's Textual worker uses the loop's default executor. Join it
+            # before asyncio.run() begins its own implicit loop teardown.
+            executor.shutdown(wait=True)
+
+    return asyncio.run(run_with_owned_executor())
 
 
 def _future_version_store_path(tmp_path: Path) -> Path:
