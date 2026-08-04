@@ -21,6 +21,11 @@ from dashboard.models import (
 )
 from dashboard.services import workspace_launcher as launcher_module
 from dashboard.services.pane_commands import PaneLaunchPlan
+from dashboard.services.project_commands import (
+    CommandSource,
+    DetectedCommand,
+    DetectedProjectCommands,
+)
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
 
 
@@ -98,7 +103,7 @@ def test_reports_pane_warnings_before_attaching(
     monkeypatch.setattr(
         launcher_module.pane_commands,
         "plan_for_pane",
-        lambda pane, path: PaneLaunchPlan(
+        lambda pane, path, detected=None: PaneLaunchPlan(
             startup_command=None, pane_title=None, warning="Neovim was not found"
         ),
     )
@@ -234,3 +239,76 @@ def test_build_pane_plans_keys_by_window_and_pane_index(
     pane_plans = launcher_module.build_pane_plans(workspace)
 
     assert set(pane_plans.keys()) == {("main", 0), ("main", 1)}
+
+
+def test_project_commands_are_detected_once_per_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Path] = []
+    detected = DetectedProjectCommands(
+        development=DetectedCommand("npm run dev", CommandSource.NODE_DEV),
+        test=DetectedCommand("npm test", CommandSource.NODE_TEST),
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "detect_project_commands",
+        lambda path: calls.append(path) or detected,
+    )
+    request = _request(
+        tmp_path,
+        _pane(PaneKind.DEV_SERVER),
+        _pane(PaneKind.TEST_TERMINAL),
+    )
+    assert request.workspace is not None
+
+    plans = launcher_module.build_pane_plans(request.workspace)
+
+    assert calls == [tmp_path]
+    assert plans[("main", 0)].startup_command == "npm run dev"
+    assert plans[("main", 1)].startup_command == "npm test"
+
+
+def test_command_detection_is_repeated_for_each_pane_planning_pass(tmp_path: Path) -> None:
+    request = _request(tmp_path, _pane(PaneKind.DEV_SERVER))
+    assert request.workspace is not None
+    (tmp_path / "package.json").write_text('{"scripts": {"dev": "vite"}}')
+    first = launcher_module.build_pane_plans(request.workspace)
+    (tmp_path / "package.json").write_text('{"scripts": {"start": "node app"}}')
+    second = launcher_module.build_pane_plans(request.workspace)
+    assert first[("main", 0)].startup_command == "npm run dev"
+    assert second[("main", 0)].startup_command == "npm start"
+
+
+def test_running_attach_never_detects_project_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _assume_tmux_installed(monkeypatch)
+    monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: True)
+    monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
+    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    monkeypatch.setattr(
+        launcher_module,
+        "detect_project_commands",
+        lambda path: pytest.fail("running attach performed command detection"),
+    )
+
+    execute_launch_request(
+        _request(tmp_path, _pane(PaneKind.DEV_SERVER), action=LaunchAction.ATTACH)
+    )
+
+
+def test_project_command_fallback_warning_is_nonfatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _assume_tmux_installed(monkeypatch)
+    monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        launcher_module.tmux, "create_workspace_session", lambda workspace, plans: None
+    )
+    monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
+    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    out = io.StringIO()
+
+    execute_launch_request(_request(tmp_path, _pane(PaneKind.DEV_SERVER)), out=out)
+
+    assert "No supported development command was detected" in out.getvalue()

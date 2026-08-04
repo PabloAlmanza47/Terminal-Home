@@ -148,18 +148,40 @@ def test_file_tree_falls_back_when_tree_missing(
 # --- Test Terminal / Dev Server / Blank Terminal ----------------------------------
 
 
-def test_test_terminal_is_a_titled_shell(tmp_path: Path) -> None:
+def test_test_terminal_uses_detected_pytest_command(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
     pane = PaneSpec(kind=PaneKind.TEST_TERMINAL, display_name="Test Terminal")
     plan = plan_for_pane(pane, tmp_path)
-    assert plan.startup_command is None
+    assert plan.startup_command == "pytest"
     assert plan.pane_title == "tests"
+    assert plan.warning is None
 
 
-def test_dev_server_is_a_titled_shell(tmp_path: Path) -> None:
+def test_dev_server_uses_detected_node_command(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"scripts": {"dev": "vite"}}')
     pane = PaneSpec(kind=PaneKind.DEV_SERVER, display_name="Development Server")
     plan = plan_for_pane(pane, tmp_path)
-    assert plan.startup_command is None
+    assert plan.startup_command == "npm run dev"
     assert plan.pane_title == "server"
+    assert plan.warning is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "title", "warning_fragment"),
+    [
+        (PaneKind.TEST_TERMINAL, "tests", "test command"),
+        (PaneKind.DEV_SERVER, "server", "development command"),
+    ],
+)
+def test_project_aware_panes_fall_back_to_titled_shell_with_warning(
+    tmp_path: Path, kind: PaneKind, title: str, warning_fragment: str
+) -> None:
+    pane = PaneSpec(kind=kind, display_name="Intent")
+    plan = plan_for_pane(pane, tmp_path)
+    assert plan.startup_command is None
+    assert plan.pane_title == title
+    assert plan.warning is not None
+    assert warning_fragment in plan.warning
 
 
 def test_blank_terminal_has_no_command_or_title(tmp_path: Path) -> None:

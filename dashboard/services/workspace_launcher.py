@@ -11,8 +11,9 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
+from dashboard.models import LaunchAction, LaunchRequest, PaneKind, WorkspaceSpec
 from dashboard.services import pane_commands, tmux
+from dashboard.services.project_commands import detect_project_commands
 
 
 class LaunchError(Exception):
@@ -25,9 +26,18 @@ def build_pane_plans(
     """Resolve every pane in *workspace* into a PaneLaunchPlan, keyed by
     (window_name, pane_index).
     """
+    project_aware_kinds = {PaneKind.DEV_SERVER, PaneKind.TEST_TERMINAL}
+    needs_detection = any(
+        pane.kind in project_aware_kinds
+        for window in workspace.windows
+        for pane in window.panes
+    )
+    detected_commands = (
+        detect_project_commands(workspace.project_path) if needs_detection else None
+    )
     return {
         (window.window_name, pane_index): pane_commands.plan_for_pane(
-            pane, workspace.project_path
+            pane, workspace.project_path, detected_commands
         )
         for window in workspace.windows
         for pane_index, pane in enumerate(window.panes)

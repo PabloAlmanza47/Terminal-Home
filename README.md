@@ -71,8 +71,10 @@ terminal-home   # launch the dashboard (or the shorter `th`)
 `dev` remains available too, for compatibility with earlier installs.
 
 **Required:** Python 3.10+, `tmux`.
-**Optional** (each pane type falls back to a plain shell if missing): `nvim`,
-`claude` (Claude Code), `lazygit`, `tree`, `git`.
+**Optional:** `nvim`, `claude` (Claude Code), `lazygit`, `tree`, `git`, and
+the package manager selected by a project's lockfile (`npm`, `pnpm`, `yarn`,
+or `bun`). Tool-oriented panes fall back safely when their preferred tool is
+missing; detected package scripts require their selected package manager.
 
 ## Command-line interface
 
@@ -196,7 +198,7 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 573 pytest tests collected (572 passed and one optional Zsh
+Current status: 625 pytest tests collected (624 passed and one optional Zsh
 syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
 
 ```bash
@@ -300,17 +302,42 @@ tests/                       Unit tests for models/ and services/, plus Pilot te
 | Claude Code     | `claude`           | interactive shell (Claude Code not found)   |
 | Git             | `lazygit`          | `git status` then a shell; or, if the project isn't a git repo yet, a plain shell |
 | File Tree       | `tree -C .`        | `find`-based listing, then a shell          |
-| Test Terminal   | (none — a plain shell titled "tests")                                          |
-| Development Server | (none — a plain shell titled "server")                                     |
+| Test Terminal   | detected Node `test` script, otherwise `pytest` for supported Python indicators | interactive shell titled "tests" |
+| Development Server | detected Node `dev`, then `start`; otherwise Django `python manage.py runserver` | interactive shell titled "server" |
 | Blank Terminal  | (none — a plain shell)                                                         |
 | Custom Command  | the exact command you enter                                                     |
 
-Tool availability is checked at *launch* time
-(`dashboard/services/pane_commands.py`), not wizard time, so it always
-reflects what's actually installed. Every pane's shell starts in the
-project's directory regardless of which command (if any) runs in it.
-Falling back to a shell is always nonfatal: a short note is printed before
-the tmux session is attached.
+Editor, Claude Code, Git, and file-tree tool availability is checked at
+*launch* time (`dashboard/services/pane_commands.py`), not wizard time. Every
+pane's shell starts in the project's directory regardless of which command
+(if any) runs in it. Falling back to a shell is always nonfatal: a short note
+is printed before the tmux session is attached.
+
+Test and development commands are detected from the project directory each
+time a workspace is created or recreated. They are never saved into the
+workspace: the saved pane continues to mean **Test Terminal** or
+**Development Server**, so later launches see current project metadata.
+Detection reads only fixed root-level files and never installs dependencies,
+imports the project, or runs a package manager.
+
+For Node projects, a readable root `package.json` is required. Package-manager
+selection follows `pnpm-lock.yaml`, then `yarn.lock`, then `bun.lock` or
+`bun.lockb`, then `package-lock.json`; without a lockfile it uses npm. A
+development pane chooses an explicit `dev` script before `start`. A test pane
+uses a nonempty `test` script, excluding npm's standard "no test specified"
+placeholder. Bun scripts always use `bun run <script>`.
+
+Python support is deliberately conservative. A Test Terminal runs `pytest`
+only for root-level pytest configuration in `pyproject.toml`, `pytest.ini`,
+`setup.cfg`, or `tox.ini`, or when a root `tests/` directory exists. A
+Development Server supports only a root Django `manage.py` and runs
+`python manage.py runserver`; Flask, FastAPI, Uvicorn, Gunicorn, and generic
+module guessing are not detected.
+
+In mixed Node/Python projects, Node `dev` or `start` wins over Django, and a
+non-placeholder Node `test` wins over pytest. Django or pytest is used when
+the corresponding Node script is absent. If no supported command is found,
+the pane remains an interactive shell and launch prints a nonfatal note.
 
 ### New Project wizard
 

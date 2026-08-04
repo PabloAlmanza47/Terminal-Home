@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models import PaneKind, PaneSpec
+from dashboard.services.project_commands import (
+    DetectedProjectCommands,
+    detect_project_commands,
+)
 
 # find/sort is the fallback file-tree listing when `tree` isn't installed --
 # available on every POSIX system this dashboard targets.
@@ -40,7 +44,11 @@ def _is_git_repo(project_path: Path) -> bool:
     return (project_path / ".git").exists()
 
 
-def plan_for_pane(pane: PaneSpec, project_path: Path) -> PaneLaunchPlan:
+def plan_for_pane(
+    pane: PaneSpec,
+    project_path: Path,
+    detected_commands: DetectedProjectCommands | None = None,
+) -> PaneLaunchPlan:
     """Decide the startup command, pane title, and any warning for *pane*,
     given the project directory it belongs to.
     """
@@ -79,10 +87,26 @@ def plan_for_pane(pane: PaneSpec, project_path: Path) -> PaneLaunchPlan:
         return PaneLaunchPlan(startup_command=_FILE_TREE_FALLBACK_COMMAND, pane_title="tree")
 
     if pane.kind is PaneKind.TEST_TERMINAL:
-        return PaneLaunchPlan(startup_command=None, pane_title="tests")
+        commands = detected_commands or detect_project_commands(project_path)
+        if commands.test is not None:
+            return PaneLaunchPlan(startup_command=commands.test.command, pane_title="tests")
+        return PaneLaunchPlan(
+            startup_command=None,
+            pane_title="tests",
+            warning="No supported test command was detected — opened a shell instead.",
+        )
 
     if pane.kind is PaneKind.DEV_SERVER:
-        return PaneLaunchPlan(startup_command=None, pane_title="server")
+        commands = detected_commands or detect_project_commands(project_path)
+        if commands.development is not None:
+            return PaneLaunchPlan(
+                startup_command=commands.development.command, pane_title="server"
+            )
+        return PaneLaunchPlan(
+            startup_command=None,
+            pane_title="server",
+            warning="No supported development command was detected — opened a shell instead.",
+        )
 
     if pane.kind is PaneKind.BLANK_TERMINAL:
         return PaneLaunchPlan(startup_command=None, pane_title=None)
