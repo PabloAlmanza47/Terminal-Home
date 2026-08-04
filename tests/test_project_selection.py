@@ -69,6 +69,39 @@ def test_resolves_relative_path(
     assert result.project.name == "alpha"
 
 
+def test_resolves_dot_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = tmp_path / "alpha"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    result = resolve_project_selector(".", config=ProjectsConfig(roots=()))
+    assert result.ok
+    assert result.project is not None
+    assert result.project.path == project.resolve()
+
+
+def test_resolves_tilde_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "home" / "alpha"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    result = resolve_project_selector("~/alpha", config=ProjectsConfig(roots=()))
+    assert result.ok
+    assert result.project is not None
+    assert result.project.path == project.resolve()
+
+
+def test_explicit_path_outside_configured_roots_is_ad_hoc(tmp_path: Path) -> None:
+    configured = _make_root(tmp_path, "configured", [])
+    outside = _make_root(tmp_path, "outside", ["demo"]) / "demo"
+    result = resolve_project_selector(
+        str(outside), config=ProjectsConfig(roots=(configured,))
+    )
+    assert result.ok
+    assert result.project is not None
+    assert result.project.path == outside.resolve()
+
+
 def test_missing_project_reports_a_concise_error(tmp_path: Path) -> None:
     root = _make_root(tmp_path, "roots", ["alpha"])
     config = ProjectsConfig(roots=(root,))

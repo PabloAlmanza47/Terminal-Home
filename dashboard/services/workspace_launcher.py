@@ -3,7 +3,7 @@ a real tmux session and hands the terminal over to it.
 
 This module must only ever run *after* the Textual App has fully exited --
 never from a mounted screen, since Textual owns the terminal until then.
-dashboard.app.main() is the only caller.
+dashboard.app.main() and the mutating ``th up`` CLI command are its callers.
 """
 
 from __future__ import annotations

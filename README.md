@@ -77,19 +77,27 @@ terminal-home   # launch the dashboard (or the shorter `th`)
 ## Command-line interface
 
 Plain `th` (or `terminal-home` / `dev`) opens the dashboard described below.
-A few read-only subcommands are also available, without launching the TUI:
+The CLI also provides inspection commands and one mutating launch command:
 
 ```bash
 th              # open the dashboard
 th list         # list discovered projects and their status
-th plan <project>  # show what `th up <project>` would do, once it exists
+th plan <project>  # preview the launch action without changing anything
+th up <project>    # create or attach to the project's tmux workspace
 th doctor       # check tmux, config paths, and project roots
 ```
 
 `list`, `plan`, and `doctor` never create, attach to, or modify a tmux
 session, and `plan` never saves a workspace or touches the filesystem — it
-only reports what a future launch would do. `th up` (the command that would
-actually perform a launch) is not implemented yet.
+only reports what `th up` would do. `th up` attaches when the expected session
+is already running, recreates and attaches when a saved workspace is stopped,
+and otherwise persists the existing default workspace before creating and
+attaching. Terminal Home never overwrites a running tmux session.
+
+Project selectors may be a unique discovered name or an exact existing path.
+Duplicate names require an exact path. An explicit path outside configured
+roots works, but is not automatically registered in `projects.json` and will
+not appear in `th list` unless separately configured for discovery.
 
 ## Usage
 

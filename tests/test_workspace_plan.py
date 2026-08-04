@@ -16,6 +16,7 @@ from dashboard.services import workspace_store
 from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.workspace_plan import (
     ACTION_ATTACH,
+    ACTION_BLOCKED,
     ACTION_CREATE_DEFAULT,
     ACTION_CREATE_SAVED,
     SOURCE_DEFAULT,
@@ -176,3 +177,22 @@ def test_repeated_plan_is_equivalent_and_has_no_side_effects(
 
     assert first == second
     assert saved == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "source"),
+    [
+        ({"workspace_metadata_error": "corrupt"}, "invalid saved workspace metadata"),
+        ({"project_dir_exists": False}, "missing project directory"),
+    ],
+)
+def test_stopped_invalid_or_missing_project_plan_is_blocked(
+    tmp_path: Path, changes: dict[str, object], source: str
+) -> None:
+    status = _status(tmp_path)
+    status = __import__("dataclasses").replace(status, **changes)
+    plan = build_workspace_plan(status)
+    assert plan.action == ACTION_BLOCKED
+    assert plan.source == source
+    assert plan.blocked
+    assert "Cannot launch" in format_plan(plan)

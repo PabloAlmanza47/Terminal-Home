@@ -6,6 +6,7 @@ starts a real tmux server or touches the user's real configuration.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,12 +14,14 @@ import pytest
 import dashboard.app as app_module
 import dashboard.cli as cli_module
 import dashboard.services.project_creation as project_creation_module
+import dashboard.services.project_launch as project_launch_module
 import dashboard.services.tmux as tmux_module
 import dashboard.services.workspace_launcher as workspace_launcher_module
 import dashboard.services.workspace_store as workspace_store_module
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.workspace_defaults import build_default_workspace
+from dashboard.services.workspace_launcher import LaunchError
 
 
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -68,12 +71,15 @@ def test_read_only_commands_never_call_the_tui(
     assert calls == []
 
 
-def test_plan_never_calls_the_tui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("command", ["plan", "up"])
+def test_project_commands_never_call_the_tui(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
     _isolate(monkeypatch, tmp_path)
     calls = []
     monkeypatch.setattr(app_module, "main", lambda: calls.append(1))
 
-    cli_module.run(["plan", "nonexistent"])
+    cli_module.run([command, "nonexistent"])
 
     assert calls == []
 
@@ -89,7 +95,9 @@ def test_help_does_not_open_textual(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == []
 
 
-@pytest.mark.parametrize("argv", [["list", "--help"], ["plan", "--help"], ["doctor", "--help"]])
+@pytest.mark.parametrize(
+    "argv", [["list", "--help"], ["plan", "--help"], ["up", "--help"], ["doctor", "--help"]]
+)
 def test_subcommand_help_does_not_open_textual(
     argv: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -107,6 +115,13 @@ def test_unknown_command_exits_with_code_2() -> None:
     with pytest.raises(SystemExit) as excinfo:
         cli_module.run(["bogus"])
 
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("argv", [["up"], ["up", "demo", "--force"]])
+def test_up_syntax_errors_keep_argparse_exit_code_2(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli_module.run(argv)
     assert excinfo.value.code == 2
 
 
@@ -314,6 +329,179 @@ def test_plan_default_workspace(
     assert "Source: generated default" in out
 
 
+# --- `th up` -----------------------------------------------------------------
+
+
+def test_up_default_saves_before_calling_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    project = _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    requests = []
+    monkeypatch.setattr(cli_module, "execute_launch_request", requests.append)
+
+    assert cli_module.run(["up", "demo"]) == 0
+
+    assert len(requests) == 1
+    assert requests[0].action.value == "create"
+    assert workspace_store_module.load_workspace(project) == requests[0].workspace
+    assert "Creating default workspace 'demo'" in capsys.readouterr().out
+
+
+def test_up_running_unsaved_attaches_without_saving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: True)
+    requests = []
+    monkeypatch.setattr(cli_module, "execute_launch_request", requests.append)
+
+    assert cli_module.run(["up", "demo"]) == 0
+    assert requests[0].workspace is None
+    assert requests[0].action.value == "attach"
+    assert not workspace_store_module.default_store_path().exists()
+    assert "Attaching to tmux session 'demo'" in capsys.readouterr().out
+
+
+def test_up_exact_ad_hoc_path_saves_workspace_but_not_project_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    outside = _make_project(tmp_path / "outside", "adhoc")
+    empty = tmp_path / "configured"
+    empty.mkdir()
+    _configure_roots(empty)
+    config_path = tmp_path / "xdg-config" / "terminal-home" / "projects.json"
+    config_before = config_path.read_bytes()
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(cli_module, "execute_launch_request", lambda request: None)
+
+    assert cli_module.run(["up", str(outside)]) == 0
+    assert workspace_store_module.load_workspace(outside) is not None
+    assert config_path.read_bytes() == config_before
+
+
+def test_up_save_failure_never_calls_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        "dashboard.services.project_launch.save_workspace",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    calls = []
+    monkeypatch.setattr(cli_module, "execute_launch_request", lambda request: calls.append(1))
+
+    assert cli_module.run(["up", "demo"]) == 1
+    assert calls == []
+    assert "error: disk full" in capsys.readouterr().err
+
+
+def test_up_launch_failure_is_controlled_and_keeps_saved_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    project = _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        cli_module,
+        "execute_launch_request",
+        lambda request: (_ for _ in ()).throw(OSError("exec failed")),
+    )
+
+    assert cli_module.run(["up", "demo"]) == 1
+    assert workspace_store_module.load_workspace(project) is not None
+    assert "error: exec failed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        LaunchError("launch failed"),
+        tmux_module.TmuxCommandError("tmux failed"),
+        subprocess.TimeoutExpired(["tmux"], 3),
+    ],
+)
+def test_up_expected_launch_failures_are_controlled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: BaseException,
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    monkeypatch.setattr(
+        cli_module,
+        "execute_launch_request",
+        lambda request: (_ for _ in ()).throw(failure),
+    )
+    assert cli_module.run(["up", "demo"]) == 1
+    assert "error:" in capsys.readouterr().err
+
+
+def test_up_launches_backup_recovered_workspace_without_rewriting_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    project = _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    workspace_store_module.save_workspace(build_default_workspace("demo", project, "demo"))
+    store = workspace_store_module.default_store_path()
+    store.rename(Path(f"{store}.bak"))
+    store.write_text("broken")
+    before = (store.read_bytes(), Path(f"{store}.bak").read_bytes())
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    requests = []
+    monkeypatch.setattr(cli_module, "execute_launch_request", requests.append)
+
+    assert cli_module.run(["up", "demo"]) == 0
+    captured = capsys.readouterr()
+    assert requests[0].action.value == "attach"
+    assert "Recovered workspace data" in captured.err
+    assert (store.read_bytes(), Path(f"{store}.bak").read_bytes()) == before
+
+
+def test_plan_and_up_block_corrupt_stopped_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _make_project(tmp_path / "projects", "demo")
+    _configure_roots(tmp_path / "projects")
+    store = workspace_store_module.default_store_path()
+    store.parent.mkdir(parents=True)
+    store.write_text("broken")
+    monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+    calls = []
+    monkeypatch.setattr(cli_module, "execute_launch_request", lambda request: calls.append(1))
+
+    assert cli_module.run(["plan", "demo"]) == 1
+    plan_output = capsys.readouterr().out
+    assert "Action: blocked" in plan_output
+    assert "invalid saved workspace metadata" in plan_output
+    assert cli_module.run(["up", "demo"]) == 1
+    assert "error:" in capsys.readouterr().err
+    assert calls == []
+    assert store.read_text() == "broken"
+
+
 # --- No-mutation guarantee ---------------------------------------------------
 
 
@@ -347,6 +535,11 @@ def test_read_only_commands_never_mutate_anything(
     )
     monkeypatch.setattr(
         workspace_store_module,
+        "save_workspace",
+        lambda *a, **k: spies["save_workspace"].append(1),
+    )
+    monkeypatch.setattr(
+        project_launch_module,
         "save_workspace",
         lambda *a, **k: spies["save_workspace"].append(1),
     )

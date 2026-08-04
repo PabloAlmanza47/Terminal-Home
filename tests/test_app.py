@@ -17,6 +17,7 @@ import pytest
 
 from dashboard.app import TerminalHomeApp
 from dashboard.models.settings import AppSettings, LayoutMode
+from dashboard.screens.home import HomeScreen
 from dashboard.services.settings_store import default_settings_path, load_settings, save_settings
 
 _SIZE = (80, 24)
@@ -24,6 +25,11 @@ _SIZE = (80, 24)
 
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    # These tests cover app/settings startup, not project discovery. Avoid
+    # racing run_test teardown against Home's executor-backed scan worker;
+    # dedicated HomeScreen tests exercise that worker and await it explicitly.
+    monkeypatch.setattr(HomeScreen, "_start_scan", lambda self: None)
 
 
 def _run(coro):

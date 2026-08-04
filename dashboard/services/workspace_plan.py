@@ -21,10 +21,13 @@ from dashboard.services.workspace_defaults import build_default_workspace
 ACTION_ATTACH = "attach to existing session"
 ACTION_CREATE_SAVED = "create saved workspace"
 ACTION_CREATE_DEFAULT = "create default workspace"
+ACTION_BLOCKED = "blocked"
 
 SOURCE_RUNNING = "running tmux session"
 SOURCE_SAVED = "saved workspace"
 SOURCE_DEFAULT = "generated default"
+SOURCE_INVALID = "invalid saved workspace metadata"
+SOURCE_MISSING_DIRECTORY = "missing project directory"
 
 _ATTACH_NOTE = (
     "The running session is authoritative; no windows or panes would be recreated."
@@ -47,6 +50,10 @@ class WorkspacePlan:
     workspace: WorkspaceSpec | None
     note: str | None = None
 
+    @property
+    def blocked(self) -> bool:
+        return self.action == ACTION_BLOCKED
+
 
 def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
     """The plan for *status*'s project, following the same priority a real
@@ -63,6 +70,31 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
             source=SOURCE_RUNNING,
             workspace=None,
             note=_ATTACH_NOTE,
+        )
+
+    if status.workspace_metadata_error:
+        return WorkspacePlan(
+            project_name=status.project.name,
+            project_path=status.canonical_path,
+            session_name=status.expected_session_name,
+            action=ACTION_BLOCKED,
+            source=SOURCE_INVALID,
+            workspace=None,
+            note=(
+                "Cannot launch because the saved workspace metadata could not be loaded.\n"
+                "Use the dashboard to inspect, forget, or reconfigure the saved workspace."
+            ),
+        )
+
+    if not status.project_dir_exists:
+        return WorkspacePlan(
+            project_name=status.project.name,
+            project_path=status.canonical_path,
+            session_name=status.expected_session_name,
+            action=ACTION_BLOCKED,
+            source=SOURCE_MISSING_DIRECTORY,
+            workspace=None,
+            note="Cannot launch because the project directory no longer exists.",
         )
 
     if status.saved_workspace is not None:

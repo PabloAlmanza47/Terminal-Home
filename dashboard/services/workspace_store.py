@@ -104,6 +104,7 @@ class _RawStoreLoadResult:
     entries: dict[str, object]
     source: LoadSource
     warning: str | None = None
+    error: str | None = None
 
 
 def _load_raw_store_result(store_path: Path) -> _RawStoreLoadResult:
@@ -126,7 +127,14 @@ def _load_raw_store_result(store_path: Path) -> _RawStoreLoadResult:
                     f"{store_path} could not be loaded."
                 )
                 return _RawStoreLoadResult(entries, LoadSource.BACKUP, warning)
-        return _RawStoreLoadResult({}, LoadSource.DEFAULT)
+        return _RawStoreLoadResult(
+            {},
+            LoadSource.DEFAULT,
+            error=(
+                f"Workspace store {store_path} could not be loaded, and no valid backup "
+                "is available."
+            ),
+        )
 
 
 def ensure_workspace_store_writable(store_path: Path | None = None) -> None:
@@ -242,6 +250,14 @@ def load_workspace_result(
         raw = store_result.entries
     except WorkspaceStoreVersionError as exc:
         return WorkspaceLoadResult(workspace=None, error=str(exc), source=LoadSource.PRIMARY)
+
+    if store_result.error:
+        return WorkspaceLoadResult(
+            workspace=None,
+            error=store_result.error,
+            source=store_result.source,
+            warning=store_result.warning,
+        )
 
     key = str(project_path.resolve())
     if key not in raw:
