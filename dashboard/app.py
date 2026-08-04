@@ -17,7 +17,7 @@ from textual.theme import Theme
 from dashboard.models import LaunchRequest
 from dashboard.models.settings import AppSettings
 from dashboard.screens.home import HomeScreen
-from dashboard.services.settings_store import load_settings, save_settings
+from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
 
@@ -30,7 +30,9 @@ class TerminalHomeApp(App[LaunchRequest | None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self.settings: AppSettings = load_settings()
+        settings_result = load_settings_result()
+        self.settings: AppSettings = settings_result.value
+        self._settings_recovery_warning = settings_result.warning
 
     def on_mount(self) -> None:
         # Subscribed only once running (Signal.subscribe requires it), and

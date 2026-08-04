@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+from dashboard.services.load_result import LoadSource
 from dashboard.services.workspace_store import (
     WORKSPACE_STORE_SCHEMA_VERSION,
     WorkspaceStoreVersionError,
@@ -18,6 +19,51 @@ from dashboard.services.workspace_store import (
     load_workspace_result,
     save_workspace,
 )
+
+
+def test_atomic_rotation_and_corrupt_primary_recovery(tmp_path: Path) -> None:
+    path = tmp_path / "workspaces.json"
+    project = tmp_path / "demo"
+    first = _make_workspace(project)
+    save_workspace(first, path)
+    first_bytes = path.read_bytes()
+    save_workspace(_make_workspace(project, "changed"), path)
+    assert Path(f"{path}.bak").read_bytes() == first_bytes
+    path.write_text("broken")
+    before = path.read_bytes()
+    result = load_workspace_result(project, path)
+    assert result.workspace == first
+    assert result.source is LoadSource.BACKUP
+    assert result.warning
+    assert path.read_bytes() == before
+
+
+def test_corrupt_primary_recovers_from_valid_legacy_backup(tmp_path: Path) -> None:
+    path = tmp_path / "workspaces.json"
+    project = tmp_path / "demo"
+    workspace = _make_workspace(project)
+    path.write_text("broken")
+    Path(f"{path}.bak").write_text(
+        __import__("json").dumps({str(project.resolve()): workspace.to_dict()})
+    )
+    result = load_workspace_result(project, path)
+    assert result.workspace == workspace
+    assert result.source is LoadSource.BACKUP
+
+
+def test_future_primary_never_falls_back_to_backup(tmp_path: Path) -> None:
+    path = tmp_path / "workspaces.json"
+    project = tmp_path / "demo"
+    path.write_text('{"schema_version": 99, "workspaces": {}}')
+    Path(f"{path}.bak").write_text(
+        __import__("json").dumps({str(project.resolve()): _make_workspace(project).to_dict()})
+    )
+    before = path.read_bytes()
+    result = load_workspace_result(project, path)
+    assert result.workspace is None
+    assert result.error and "newer" in result.error
+    assert result.source is LoadSource.PRIMARY
+    assert path.read_bytes() == before
 
 
 def _make_workspace(project_path: Path, name: str = "demo") -> WorkspaceSpec:

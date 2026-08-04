@@ -116,6 +116,12 @@ class ProjectDetailScreen(Screen[None]):
                         id="detail-metadata-error",
                         classes="wizard-hint",
                     )
+                if status.workspace_metadata_warning:
+                    yield Static(
+                        f"Warning: {status.workspace_metadata_warning}",
+                        id="detail-metadata-warning",
+                        classes="wizard-hint",
+                    )
 
                 if status.saved_workspace is not None:
                     yield Static("Saved windows:", classes="field-label")
@@ -205,7 +211,7 @@ class ProjectDetailScreen(Screen[None]):
         )
         try:
             save_workspace(workspace)
-        except WorkspaceStoreVersionError as exc:
+        except (OSError, WorkspaceStoreVersionError) as exc:
             self._show_error(str(exc))
             return
         self.app.exit(
@@ -246,7 +252,7 @@ class ProjectDetailScreen(Screen[None]):
         )
         try:
             save_workspace(workspace)
-        except WorkspaceStoreVersionError as exc:
+        except (OSError, WorkspaceStoreVersionError) as exc:
             # Dismissing the confirm screen above already triggers
             # on_screen_resume's own refresh -- refresh again explicitly
             # and show the error last, so it's never clobbered by that
@@ -269,7 +275,7 @@ class ProjectDetailScreen(Screen[None]):
             return
         try:
             forget_workspace(status.canonical_path)
-        except WorkspaceStoreVersionError as exc:
+        except (OSError, WorkspaceStoreVersionError) as exc:
             # See _reset_to_default: refresh explicitly, then show the
             # error last, so it isn't clobbered by on_screen_resume's own
             # refresh (triggered by dismissing the confirm screen above).

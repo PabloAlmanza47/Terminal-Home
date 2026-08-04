@@ -73,7 +73,14 @@ class SettingsScreen(Screen[None]):
             self.settings = replace(self.settings, layout_mode=new_mode)
         else:
             return
-        save_settings(self.settings)
+        try:
+            save_settings(self.settings)
+        except OSError as exc:
+            self.app.notify(
+                f"Settings changed for this session, but couldn't be saved: {exc}",
+                title="Settings",
+                severity="error",
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "project-discovery-button":

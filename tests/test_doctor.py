@@ -206,3 +206,24 @@ def test_no_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert not doctor_module.default_settings_path().exists()
     assert not doctor_module.default_store_path().exists()
     assert not doctor_module.default_projects_config_path().exists()
+
+
+def test_backup_recovery_is_warn_and_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _assume_tmux_ok(monkeypatch)
+    settings_path = doctor_module.default_settings_path()
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("broken")
+    backup = Path(f"{settings_path}.bak")
+    backup.write_text("{}")
+    before = (settings_path.read_bytes(), backup.read_bytes())
+
+    diagnostics = run_diagnostics()
+
+    settings = _by_label(diagnostics, "settings")[0]
+    assert settings.level is DiagnosticLevel.WARN
+    assert str(settings_path) in settings.detail
+    assert str(backup) in settings.detail
+    assert (settings_path.read_bytes(), backup.read_bytes()) == before

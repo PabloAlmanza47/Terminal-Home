@@ -19,16 +19,19 @@ from enum import Enum
 from pathlib import Path
 
 from dashboard.services import tmux
+from dashboard.services.atomic_file import backup_path_for
 from dashboard.services.projects import discover_projects
 from dashboard.services.projects_config_store import (
     default_projects_config_path,
     load_projects_config,
+    load_projects_config_result,
 )
-from dashboard.services.settings_store import default_settings_path
+from dashboard.services.settings_store import default_settings_path, load_settings_result
 from dashboard.services.workspace_store import (
     WorkspaceStoreVersionError,
     default_store_path,
     ensure_workspace_store_writable,
+    load_workspace_result,
 )
 
 MIN_SUPPORTED_PYTHON = (3, 10)
@@ -88,7 +91,7 @@ def _check_json_file(path: Path, label: str, display_name: str) -> Diagnostic:
         return Diagnostic(DiagnosticLevel.PASS, label, f"{display_name}: {path} (not created yet)")
     try:
         json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return Diagnostic(
             DiagnosticLevel.WARN,
             label,
@@ -105,6 +108,14 @@ def _check_workspace_store(path: Path) -> Diagnostic:
         ensure_workspace_store_writable(path)
     except WorkspaceStoreVersionError as exc:
         return Diagnostic(DiagnosticLevel.FAIL, label, f"workspace store: {path} -- {exc}")
+    # Any canonical path is sufficient to observe file-level backup recovery.
+    result = load_workspace_result(Path("/"), path)
+    if result.warning:
+        return Diagnostic(
+            DiagnosticLevel.WARN,
+            label,
+            f"workspace store: {path} -- recovered from {backup_path_for(path)}",
+        )
     return Diagnostic(DiagnosticLevel.PASS, label, f"workspace store: {path}")
 
 
@@ -149,16 +160,38 @@ def run_diagnostics() -> tuple[Diagnostic, ...]:
     if diagnostics[-1].level is not DiagnosticLevel.FAIL:
         diagnostics.append(_check_tmux_version())
 
-    diagnostics.append(
-        _check_json_file(default_settings_path(), "settings", "settings path")
-    )
-    diagnostics.append(_check_workspace_store(default_store_path()))
-    diagnostics.append(
-        _check_json_file(
-            default_projects_config_path(), "projects_config", "project configuration"
+    settings_path = default_settings_path()
+    settings_result = load_settings_result(settings_path)
+    if settings_result.warning:
+        diagnostics.append(
+            Diagnostic(
+                DiagnosticLevel.WARN,
+                "settings",
+                f"settings path: {settings_path} -- "
+                f"recovered from {backup_path_for(settings_path)}",
+            )
         )
-    )
+    else:
+        diagnostics.append(_check_json_file(settings_path, "settings", "settings path"))
+    diagnostics.append(_check_workspace_store(default_store_path()))
+    projects_path = default_projects_config_path()
+    config_result = load_projects_config_result(projects_path)
+    if config_result.warning:
+        diagnostics.append(
+            Diagnostic(
+                DiagnosticLevel.WARN,
+                "projects_config",
+                f"project configuration: {projects_path} -- "
+                f"recovered from {backup_path_for(projects_path)}",
+            )
+        )
+    else:
+        diagnostics.append(
+            _check_json_file(projects_path, "projects_config", "project configuration")
+        )
 
+    # Keep this convenience API as the injection seam used by doctor callers/tests;
+    # both reads are mutation-free and recovery is reported by the result above.
     config = load_projects_config()
     for root in config.roots:
         diagnostics.append(_check_root(root))

@@ -135,7 +135,8 @@ all derive from it.
   `$XDG_DATA_HOME/terminal-home/workspaces.json`; presentation preferences
   (including the chosen Textual theme, changed via the command palette)
   under `$XDG_CONFIG_HOME/terminal-home/settings.json`. Never inside the
-  project directory.
+  project directory. Writes use atomic replacement and retain the immediately
+  previous valid generation as `<filename>.bak`.
 - **tmux orchestration** — runs strictly *after* Textual exits
   (`dashboard/services/workspace_launcher.py`); Textual and tmux can't both
   own the terminal at once. Every window and pane is targeted by the stable
@@ -362,3 +363,7 @@ partially invalid store is handled without crashing;
 `dashboard.services.workspace_store.load_workspace_result` distinguishes
 "nothing saved" from "something was saved but it's corrupt" so Project
 Detail can offer a friendly warning and a way to forget the bad entry.
+If a primary settings, project-configuration, or workspace file is corrupt,
+Terminal Home may read its valid one-generation `.bak` without repairing either
+file and reports the recovery to the user. Unsupported future workspace schemas
+are never silently replaced or recovered from an older backup.

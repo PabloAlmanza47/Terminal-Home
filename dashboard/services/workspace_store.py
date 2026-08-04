@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models import WorkspaceSpec
+from dashboard.services.atomic_file import atomic_write_text, backup_path_for
+from dashboard.services.load_result import LoadSource
 
 _STORE_FILENAME = "workspaces.json"
 _APP_DIR_NAME = "terminal-home"
@@ -40,6 +42,10 @@ class WorkspaceStoreVersionError(Exception):
     """
 
 
+class _WorkspaceStoreCorruptError(Exception):
+    """Internal signal that the whole store file cannot be interpreted."""
+
+
 def default_store_path() -> Path:
     """The default workspaces.json location under XDG_DATA_HOME (or its
     conventional fallback, ~/.local/share, when unset).
@@ -49,7 +55,7 @@ def default_store_path() -> Path:
     return base / _APP_DIR_NAME / _STORE_FILENAME
 
 
-def _parse_store(store_path: Path) -> dict[str, object]:
+def _parse_store_file(store_path: Path) -> dict[str, object]:
     """The raw, unvalidated workspace entries in *store_path*, keyed by
     canonical project path -- the one place both the current envelope and
     the legacy unversioned flat-dict format are understood.
@@ -60,14 +66,12 @@ def _parse_store(store_path: Path) -> dict[str, object]:
     when schema_version is present and newer than
     WORKSPACE_STORE_SCHEMA_VERSION.
     """
-    if not store_path.exists():
-        return {}
     try:
-        data = json.loads(store_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+        data = json.loads(store_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _WorkspaceStoreCorruptError from exc
     if not isinstance(data, dict):
-        return {}
+        raise _WorkspaceStoreCorruptError
 
     if "schema_version" not in data and "workspaces" not in data:
         # Legacy, unversioned format: every top-level key is itself a
@@ -81,7 +85,48 @@ def _parse_store(store_path: Path) -> dict[str, object]:
             "version of Terminal Home supports."
         )
     workspaces = data.get("workspaces")
-    return workspaces if isinstance(workspaces, dict) else {}
+    if not isinstance(workspaces, dict):
+        raise _WorkspaceStoreCorruptError
+    return workspaces
+
+
+def _parse_store(store_path: Path) -> dict[str, object]:
+    if not store_path.exists():
+        return {}
+    try:
+        return _parse_store_file(store_path)
+    except _WorkspaceStoreCorruptError:
+        return {}
+
+
+@dataclass(frozen=True, slots=True)
+class _RawStoreLoadResult:
+    entries: dict[str, object]
+    source: LoadSource
+    warning: str | None = None
+
+
+def _load_raw_store_result(store_path: Path) -> _RawStoreLoadResult:
+    if not store_path.exists():
+        return _RawStoreLoadResult({}, LoadSource.DEFAULT)
+    try:
+        return _RawStoreLoadResult(_parse_store_file(store_path), LoadSource.PRIMARY)
+    except WorkspaceStoreVersionError:
+        raise
+    except _WorkspaceStoreCorruptError:
+        backup_path = backup_path_for(store_path)
+        if backup_path.exists():
+            try:
+                entries = _parse_store_file(backup_path)
+            except (WorkspaceStoreVersionError, _WorkspaceStoreCorruptError):
+                pass
+            else:
+                warning = (
+                    f"Recovered workspace data from {backup_path} because "
+                    f"{store_path} could not be loaded."
+                )
+                return _RawStoreLoadResult(entries, LoadSource.BACKUP, warning)
+        return _RawStoreLoadResult({}, LoadSource.DEFAULT)
 
 
 def ensure_workspace_store_writable(store_path: Path | None = None) -> None:
@@ -111,7 +156,19 @@ def _write_store(store_path: Path, entries: dict[str, object]) -> None:
     never eagerly, only as a side effect of a real save or forget.
     """
     envelope = {"schema_version": WORKSPACE_STORE_SCHEMA_VERSION, "workspaces": entries}
-    store_path.write_text(json.dumps(envelope, indent=2))
+    serialized = json.dumps(envelope, indent=2)
+    parsed = json.loads(serialized)
+    if not isinstance(parsed.get("workspaces"), dict):
+        raise ValueError("Serialized workspace store is invalid")
+    preserve_existing = False
+    if store_path.exists():
+        try:
+            _parse_store_file(store_path)
+        except _WorkspaceStoreCorruptError:
+            pass
+        else:
+            preserve_existing = True
+    atomic_write_text(store_path, serialized, preserve_existing=preserve_existing)
 
 
 def save_workspace(spec: WorkspaceSpec, store_path: Path | None = None) -> None:
@@ -132,7 +189,7 @@ def load_all_workspaces(store_path: Path | None = None) -> dict[str, WorkspaceSp
     """
     store_path = store_path if store_path is not None else default_store_path()
     try:
-        raw = _parse_store(store_path)
+        raw = _load_raw_store_result(store_path).entries
     except WorkspaceStoreVersionError:
         # A store from a newer version of Terminal Home must never be
         # silently misread as the current version -- degrade to "nothing
@@ -168,6 +225,8 @@ class WorkspaceLoadResult:
 
     workspace: WorkspaceSpec | None
     error: str | None = None
+    source: LoadSource = LoadSource.DEFAULT
+    warning: str | None = None
 
 
 def load_workspace_result(
@@ -179,23 +238,39 @@ def load_workspace_result(
     """
     store_path = store_path if store_path is not None else default_store_path()
     try:
-        raw = _parse_store(store_path)
+        store_result = _load_raw_store_result(store_path)
+        raw = store_result.entries
     except WorkspaceStoreVersionError as exc:
-        return WorkspaceLoadResult(workspace=None, error=str(exc))
+        return WorkspaceLoadResult(workspace=None, error=str(exc), source=LoadSource.PRIMARY)
 
     key = str(project_path.resolve())
     if key not in raw:
-        return WorkspaceLoadResult(workspace=None, error=None)
+        return WorkspaceLoadResult(
+            workspace=None, error=None, source=store_result.source, warning=store_result.warning
+        )
 
     value = raw[key]
     if not isinstance(value, dict):
         return WorkspaceLoadResult(
-            workspace=None, error="Saved workspace data is not in the expected format."
+            workspace=None,
+            error="Saved workspace data is not in the expected format.",
+            source=store_result.source,
+            warning=store_result.warning,
         )
     try:
-        return WorkspaceLoadResult(workspace=WorkspaceSpec.from_dict(value), error=None)
+        return WorkspaceLoadResult(
+            workspace=WorkspaceSpec.from_dict(value),
+            error=None,
+            source=store_result.source,
+            warning=store_result.warning,
+        )
     except (KeyError, TypeError, ValueError) as exc:
-        return WorkspaceLoadResult(workspace=None, error=f"Saved workspace data is invalid: {exc}")
+        return WorkspaceLoadResult(
+            workspace=None,
+            error=f"Saved workspace data is invalid: {exc}",
+            source=store_result.source,
+            warning=store_result.warning,
+        )
 
 
 def forget_workspace(project_path: Path, store_path: Path | None = None) -> bool:

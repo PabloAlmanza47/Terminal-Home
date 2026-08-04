@@ -17,7 +17,10 @@ from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux
 from dashboard.services.git_info import gather_git_info
-from dashboard.services.projects_config_store import load_projects_config
+from dashboard.services.projects_config_store import (
+    load_projects_config,
+    load_projects_config_result,
+)
 from dashboard.services.workspace_store import load_workspace_result
 
 # Hex characters of a canonical path's SHA-256 kept for a collision-
@@ -238,6 +241,7 @@ class ProjectStatus:
     tmux_available: bool
     session_running: bool
     last_modified: datetime | None
+    workspace_metadata_warning: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,7 +273,11 @@ def scan_all_projects(
     active-sessions panels both consume the same result rather than each
     loading or interpreting configuration on its own.
     """
-    config = config if config is not None else load_projects_config()
+    config_warning: str | None = None
+    if config is None:
+        config_result = load_projects_config_result()
+        config = config_result.value
+        config_warning = config_result.warning
     discovery = discover_projects(config)
     running_sessions = {session.name for session in tmux.list_tmux_sessions()}
     base_session_name_counts = _base_session_name_counts(discovery.projects)
@@ -282,8 +290,18 @@ def scan_all_projects(
         )
         for project in discovery.projects
     )
+    warnings = list(discovery.warnings)
+    if config_warning:
+        warnings.append(config_warning)
+    warnings.extend(
+        dict.fromkeys(
+            status.workspace_metadata_warning
+            for status in statuses
+            if status.workspace_metadata_warning is not None
+        )
+    )
     return ProjectScanResult(
-        statuses=statuses, truncated=discovery.truncated, warnings=discovery.warnings
+        statuses=statuses, truncated=discovery.truncated, warnings=tuple(warnings)
     )
 
 
@@ -474,6 +492,7 @@ def gather_project_status(
         git_branch=git_info.branch if git_info is not None else None,
         saved_workspace=saved_workspace,
         workspace_metadata_error=load_result.error,
+        workspace_metadata_warning=load_result.warning,
         expected_session_name=expected_session_name,
         tmux_available=tmux_available,
         session_running=session_running,

@@ -10,12 +10,53 @@ from pathlib import Path
 import pytest
 
 from dashboard.models.projects_config import ProjectsConfig
+from dashboard.services.load_result import LoadSource
 from dashboard.services.projects_config_store import (
     PROJECTS_CONFIG_SCHEMA_VERSION,
     default_projects_config_path,
     load_projects_config,
+    load_projects_config_result,
     save_projects_config,
 )
+
+
+def test_atomic_rotation_and_backup_recovery(tmp_path: Path) -> None:
+    path = tmp_path / "projects.json"
+    first = ProjectsConfig(roots=(tmp_path / "one",))
+    second = ProjectsConfig(roots=(tmp_path / "two",))
+    save_projects_config(first, path)
+    first_bytes = path.read_bytes()
+    save_projects_config(second, path)
+    assert Path(f"{path}.bak").read_bytes() == first_bytes
+    path.write_text("broken")
+    result = load_projects_config_result(path)
+    assert result.value == first
+    assert result.source is LoadSource.BACKUP
+    assert result.warning
+
+
+def test_missing_primary_does_not_resurrect_backup(tmp_path: Path) -> None:
+    path = tmp_path / "projects.json"
+    save_projects_config(ProjectsConfig(roots=(tmp_path / "one",)), path)
+    path.rename(Path(f"{path}.bak"))
+    result = load_projects_config_result(path)
+    assert result.value == ProjectsConfig()
+    assert result.source is LoadSource.DEFAULT
+
+
+def test_future_primary_does_not_fall_back_or_allow_save(tmp_path: Path) -> None:
+    path = tmp_path / "projects.json"
+    path.write_text(json.dumps({"schema_version": 99, "config": {}}))
+    Path(f"{path}.bak").write_text(
+        json.dumps({"schema_version": 1, "config": ProjectsConfig().to_dict()})
+    )
+    before = path.read_bytes()
+    result = load_projects_config_result(path)
+    assert result.source is LoadSource.DEFAULT
+    assert result.unsupported_version
+    with pytest.raises(ValueError, match="newer schema"):
+        save_projects_config(ProjectsConfig(), path)
+    assert path.read_bytes() == before
 
 
 def test_load_missing_file_returns_defaults(tmp_path: Path) -> None:

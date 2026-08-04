@@ -29,6 +29,7 @@ from dashboard.services.projects import (
     scan_all_projects,
     status_badge,
 )
+from dashboard.services.projects_config_store import load_projects_config_result
 from dashboard.services.workspace_plan import build_workspace_plan, format_plan
 
 PROG = "th"
@@ -104,12 +105,17 @@ def _run_list(args: argparse.Namespace) -> int:
 
 
 def _run_plan(args: argparse.Namespace) -> int:
-    selection = resolve_project_selector(args.project)
+    config_result = load_projects_config_result()
+    selection = resolve_project_selector(args.project, config=config_result.value)
+    if config_result.warning:
+        print(config_result.warning, file=sys.stderr)
     if selection.project is None:
         print(f"error: {selection.error}", file=sys.stderr)
         return 1
 
-    status = gather_single_project_status(selection.project)
+    status = gather_single_project_status(selection.project, config=config_result.value)
+    if status.workspace_metadata_warning:
+        print(status.workspace_metadata_warning, file=sys.stderr)
     plan = build_workspace_plan(status)
     print(format_plan(plan))
     return 0

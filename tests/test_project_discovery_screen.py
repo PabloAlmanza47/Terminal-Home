@@ -57,6 +57,31 @@ def test_shows_default_root_when_nothing_saved(
     assert ids == [str(ProjectsConfig().roots[0])]
 
 
+def test_backup_recovery_is_visible_and_nonfatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    recovered = ProjectsConfig(roots=(tmp_path / "recovered",))
+    save_projects_config(recovered)
+    config_path = tmp_path / "xdg-config" / "terminal-home" / "projects.json"
+    config_path.rename(Path(f"{config_path}.bak"))
+    config_path.write_text("broken")
+    before = config_path.read_bytes()
+
+    async def scenario() -> tuple[str, list[str | None]]:
+        app = _HostApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            warning = str(app.screen.query_one("#discovery-recovery-warning", Static).render())
+            roots = _option_ids(app.screen.query_one("#roots-list", OptionList))
+            return warning, roots
+
+    warning, roots = _run(scenario())
+    assert "Recovered project configuration" in warning
+    assert roots == [str(tmp_path / "recovered")]
+    assert config_path.read_bytes() == before
+
+
 def test_shows_configured_roots_and_excluded_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

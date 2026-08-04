@@ -7,11 +7,55 @@ from pathlib import Path
 import pytest
 
 from dashboard.models.settings import AppSettings, LayoutMode
+from dashboard.services.load_result import LoadSource
 from dashboard.services.settings_store import (
     default_settings_path,
     load_settings,
+    load_settings_result,
     save_settings,
 )
+
+
+def test_atomic_rotation_and_backup_recovery_are_observable(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    first = AppSettings(theme="nord")
+    second = AppSettings(theme="dracula", artwork_enabled=False)
+    save_settings(first, path)
+    first_bytes = path.read_bytes()
+    save_settings(second, path)
+    assert Path(f"{path}.bak").read_bytes() == first_bytes
+
+    path.write_text("{broken")
+    primary_before = path.read_bytes()
+    backup_before = Path(f"{path}.bak").read_bytes()
+    result = load_settings_result(path)
+    assert result.value == first
+    assert result.source is LoadSource.BACKUP
+    assert result.warning and str(path) in result.warning and f"{path}.bak" in result.warning
+    assert path.read_bytes() == primary_before
+    assert Path(f"{path}.bak").read_bytes() == backup_before
+
+
+def test_invalid_primary_and_backup_default_without_repair(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"\xff")
+    Path(f"{path}.bak").write_text("broken")
+    result = load_settings_result(path)
+    assert result.value == AppSettings()
+    assert result.source is LoadSource.DEFAULT
+
+
+def test_malformed_optional_theme_stays_on_primary(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    save_settings(AppSettings(theme="nord", artwork_enabled=False), path)
+    path.write_text(
+        '{"artwork_enabled": true, "layout_mode": "compact", '
+        '"clock_visible": false, "theme": 4}'
+    )
+    result = load_settings_result(path)
+    assert result.source is LoadSource.PRIMARY
+    assert result.value.artwork_enabled is True
+    assert result.value.clock_visible is False
 
 
 def test_load_settings_missing_file_returns_defaults(tmp_path: Path) -> None:

@@ -223,3 +223,32 @@ def test_save_failure_is_handled_nonfatally_and_reported(
     assert screen_name == "HomeScreen"
     assert notifications
     assert notifications[0][1].get("severity") == "error"
+
+
+def test_settings_backup_recovery_notifies_once_without_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    path = default_settings_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("broken")
+    Path(f"{path}.bak").write_text(
+        '{"artwork_enabled": false, "layout_mode": "compact", '
+        '"clock_visible": true, "theme": null}'
+    )
+    before = path.read_bytes()
+    notifications = []
+
+    async def scenario() -> AppSettings:
+        app = TerminalHomeApp()
+        app.notify = lambda message, **kwargs: notifications.append((message, kwargs))
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            return app.settings
+
+    recovered = _run(scenario())
+    assert recovered.artwork_enabled is False
+    assert recovered.layout_mode is LayoutMode.COMPACT
+    assert len(notifications) == 1
+    assert notifications[0][1].get("severity") == "warning"
+    assert path.read_bytes() == before

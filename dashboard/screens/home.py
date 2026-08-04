@@ -180,6 +180,13 @@ class HomeScreen(Screen[None]):
         self.set_interval(1.0, self._update_clock)
         self.query_one("#main-menu", OptionList).focus()
         self._start_scan()
+        recovery_warning = getattr(self.app, "_settings_recovery_warning", None)
+        if recovery_warning:
+            self.app.notify(
+                recovery_warning,
+                title="Settings recovery",
+                severity="warning",
+            )
 
     def on_screen_resume(self) -> None:
         # Returning from Settings (or anywhere else) should reflect any

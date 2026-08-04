@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models.projects_config import ProjectsConfig, ProjectsConfigValidationError
+from dashboard.services.atomic_file import atomic_write_text, backup_path_for
+from dashboard.services.load_result import LoadSource
 
 _CONFIG_FILENAME = "projects.json"
 _APP_DIR_NAME = "terminal-home"
@@ -33,6 +36,62 @@ def default_projects_config_path() -> Path:
     return base / _APP_DIR_NAME / _CONFIG_FILENAME
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectsConfigLoadResult:
+    value: ProjectsConfig
+    source: LoadSource
+    warning: str | None = None
+    unsupported_version: bool = False
+
+
+def _load_projects_config_file(path: Path) -> tuple[ProjectsConfig | None, bool]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None, False
+    if not isinstance(data, dict):
+        return None, False
+    version = data.get("schema_version")
+    if isinstance(version, int) and version > PROJECTS_CONFIG_SCHEMA_VERSION:
+        return None, True
+    config = data.get("config")
+    if not isinstance(config, dict):
+        return None, False
+    try:
+        return ProjectsConfig.from_dict(config), False
+    except (KeyError, TypeError, ValueError, ProjectsConfigValidationError):
+        return None, False
+
+
+def load_projects_config_result(config_path: Path | None = None) -> ProjectsConfigLoadResult:
+    config_path = config_path if config_path is not None else default_projects_config_path()
+    if not config_path.exists():
+        return ProjectsConfigLoadResult(ProjectsConfig(), LoadSource.DEFAULT)
+
+    config, unsupported = _load_projects_config_file(config_path)
+    if config is not None:
+        return ProjectsConfigLoadResult(config, LoadSource.PRIMARY)
+    if unsupported:
+        return ProjectsConfigLoadResult(
+            ProjectsConfig(),
+            LoadSource.DEFAULT,
+            f"Project configuration {config_path} uses a newer schema; defaults are in use.",
+            unsupported_version=True,
+        )
+
+    backup_path = backup_path_for(config_path)
+    backup, backup_unsupported = (
+        _load_projects_config_file(backup_path) if backup_path.exists() else (None, False)
+    )
+    if backup is not None and not backup_unsupported:
+        warning = (
+            f"Recovered project configuration from {backup_path} because "
+            f"{config_path} could not be loaded."
+        )
+        return ProjectsConfigLoadResult(backup, LoadSource.BACKUP, warning)
+    return ProjectsConfigLoadResult(ProjectsConfig(), LoadSource.DEFAULT)
+
+
 def load_projects_config(config_path: Path | None = None) -> ProjectsConfig:
     """Load the saved project-discovery configuration, falling back to
     ProjectsConfig() defaults for a missing file, invalid JSON, a schema
@@ -47,32 +106,21 @@ def load_projects_config(config_path: Path | None = None) -> ProjectsConfig:
     so there is nothing irreversible at stake in reinterpreting it as
     "not configured yet" instead.
     """
-    config_path = config_path if config_path is not None else default_projects_config_path()
-    if not config_path.exists():
-        return ProjectsConfig()
-    try:
-        data = json.loads(config_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return ProjectsConfig()
-    if not isinstance(data, dict):
-        return ProjectsConfig()
-
-    version = data.get("schema_version")
-    if isinstance(version, int) and version > PROJECTS_CONFIG_SCHEMA_VERSION:
-        return ProjectsConfig()
-
-    config = data.get("config")
-    if not isinstance(config, dict):
-        return ProjectsConfig()
-    try:
-        return ProjectsConfig.from_dict(config)
-    except (KeyError, TypeError, ValueError, ProjectsConfigValidationError):
-        return ProjectsConfig()
+    return load_projects_config_result(config_path).value
 
 
 def save_projects_config(config: ProjectsConfig, config_path: Path | None = None) -> None:
     """Persist *config*, overwriting whatever was previously saved."""
     config_path = config_path if config_path is not None else default_projects_config_path()
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        _, unsupported = _load_projects_config_file(config_path)
+        if unsupported:
+            raise ProjectsConfigValidationError(
+                "Project configuration uses a newer schema and cannot be overwritten."
+            )
     envelope = {"schema_version": PROJECTS_CONFIG_SCHEMA_VERSION, "config": config.to_dict()}
-    config_path.write_text(json.dumps(envelope, indent=2))
+    serialized = json.dumps(envelope, indent=2)
+    loaded = json.loads(serialized)
+    ProjectsConfig.from_dict(loaded["config"])
+    existing, _ = _load_projects_config_file(config_path) if config_path.exists() else (None, False)
+    atomic_write_text(config_path, serialized, preserve_existing=existing is not None)

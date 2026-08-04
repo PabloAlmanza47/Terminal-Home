@@ -24,7 +24,10 @@ from textual.widgets import Button, Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models.projects_config import ProjectsConfig, ProjectsConfigValidationError
-from dashboard.services.projects_config_store import load_projects_config, save_projects_config
+from dashboard.services.projects_config_store import (
+    load_projects_config_result,
+    save_projects_config,
+)
 
 
 def _clean_path_input(value: str) -> Path | None:
@@ -60,7 +63,9 @@ class ProjectDiscoveryScreen(Screen[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self.config: ProjectsConfig = load_projects_config()
+        load_result = load_projects_config_result()
+        self.config: ProjectsConfig = load_result.value
+        self._recovery_warning = load_result.warning
 
     def compose(self) -> ComposeResult:
         with Container(classes="screen-root"):
@@ -69,6 +74,11 @@ class ProjectDiscoveryScreen(Screen[None]):
                 yield Static(
                     "Changes here take effect the next time projects are scanned "
                     "(Home, or Continue Project).",
+                    classes="wizard-hint",
+                )
+                yield Static(
+                    self._recovery_warning or "",
+                    id="discovery-recovery-warning",
                     classes="wizard-hint",
                 )
 
@@ -141,8 +151,12 @@ class ProjectDiscoveryScreen(Screen[None]):
         self.query_one("#wizard-error", Static).update(message)
 
     def _save(self, new_config: ProjectsConfig) -> None:
+        try:
+            save_projects_config(new_config)
+        except (OSError, ProjectsConfigValidationError) as exc:
+            self._show_error(f"Project discovery settings could not be saved: {exc}")
+            return
         self.config = new_config
-        save_projects_config(self.config)
         self._show_error("")
 
     # --- Button handling -------------------------------------------------------

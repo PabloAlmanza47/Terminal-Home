@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models.settings import AppSettings
+from dashboard.services.atomic_file import atomic_write_text, backup_path_for
+from dashboard.services.load_result import LoadSource
 
 _SETTINGS_FILENAME = "settings.json"
 _APP_DIR_NAME = "terminal-home"
@@ -27,6 +30,42 @@ def default_settings_path() -> Path:
     return base / _APP_DIR_NAME / _SETTINGS_FILENAME
 
 
+@dataclass(frozen=True, slots=True)
+class SettingsLoadResult:
+    value: AppSettings
+    source: LoadSource
+    warning: str | None = None
+
+
+def _load_settings_file(path: Path) -> AppSettings | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return AppSettings.from_dict(data)
+
+
+def load_settings_result(settings_path: Path | None = None) -> SettingsLoadResult:
+    settings_path = settings_path if settings_path is not None else default_settings_path()
+    if not settings_path.exists():
+        return SettingsLoadResult(AppSettings(), LoadSource.DEFAULT)
+
+    settings = _load_settings_file(settings_path)
+    if settings is not None:
+        return SettingsLoadResult(settings, LoadSource.PRIMARY)
+
+    backup_path = backup_path_for(settings_path)
+    backup = _load_settings_file(backup_path) if backup_path.exists() else None
+    if backup is not None:
+        warning = (
+            f"Recovered settings from {backup_path} because {settings_path} could not be loaded."
+        )
+        return SettingsLoadResult(backup, LoadSource.BACKUP, warning)
+    return SettingsLoadResult(AppSettings(), LoadSource.DEFAULT)
+
+
 def load_settings(settings_path: Path | None = None) -> AppSettings:
     """Load saved settings, falling back to defaults for a missing file,
     invalid JSON, or a non-object payload -- a broken settings file must
@@ -35,20 +74,15 @@ def load_settings(settings_path: Path | None = None) -> AppSettings:
     AppSettings.from_dict, which never discards the rest of the file for one
     bad field.
     """
-    settings_path = settings_path if settings_path is not None else default_settings_path()
-    if not settings_path.exists():
-        return AppSettings()
-    try:
-        data = json.loads(settings_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return AppSettings()
-    if not isinstance(data, dict):
-        return AppSettings()
-    return AppSettings.from_dict(data)
+    return load_settings_result(settings_path).value
 
 
 def save_settings(settings: AppSettings, settings_path: Path | None = None) -> None:
     """Persist *settings*, overwriting whatever was previously saved."""
     settings_path = settings_path if settings_path is not None else default_settings_path()
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(settings.to_dict(), indent=2))
+    serialized = json.dumps(settings.to_dict(), indent=2)
+    # Serialization is complete and round-trip validated before touching disk.
+    parsed = json.loads(serialized)
+    AppSettings.from_dict(parsed)
+    preserve_existing = settings_path.exists() and _load_settings_file(settings_path) is not None
+    atomic_write_text(settings_path, serialized, preserve_existing=preserve_existing)

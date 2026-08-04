@@ -147,7 +147,7 @@ class ReviewScreen(Screen[None]):
             if self.state.init_git:
                 init_git_repo(destination)
             save_workspace(workspace)
-        except (ProjectCreationError, WorkspaceStoreVersionError) as exc:
+        except (OSError, ProjectCreationError, WorkspaceStoreVersionError) as exc:
             detail = (
                 f" (the directory at {destination} was already created)" if created_dir else ""
             )
@@ -177,7 +177,7 @@ class ReviewScreen(Screen[None]):
 
         try:
             save_workspace(workspace)
-        except WorkspaceStoreVersionError as exc:
+        except (OSError, WorkspaceStoreVersionError) as exc:
             self._show_error(str(exc))
             return
 
