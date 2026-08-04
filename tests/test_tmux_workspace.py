@@ -100,7 +100,7 @@ class _FakeTmux:
 
 
 def _workspace(project_path: Path, *windows: WindowSpec) -> WorkspaceSpec:
-    return WorkspaceSpec(
+    return WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=project_path,
         session_name="demo",
@@ -229,7 +229,14 @@ def test_one_pane_has_no_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     create_workspace_session(workspace, {("main", 0): _plan()}, runner=fake)
 
     assert _first_command(fake.executed, "new-session")[:8] == [
-        "tmux", "new-session", "-d", "-s", "demo", "-n", "main", "-c",
+        "tmux",
+        "new-session",
+        "-d",
+        "-s",
+        "demo",
+        "-n",
+        "main",
+        "-c",
     ]
     assert not any(cmd[1] == "split-window" for cmd in fake.executed)
     assert not any(cmd[1] == "select-layout" for cmd in fake.executed)
@@ -325,7 +332,8 @@ def test_pane_targeting_is_independent_of_base_index(
     fake = _FakeTmux(window_start=start, pane_start=start)
 
     create_workspace_session(
-        workspace, {("main", 0): _plan(pane_title="left"), ("main", 1): _plan(pane_title="right")},
+        workspace,
+        {("main", 0): _plan(pane_title="left"), ("main", 1): _plan(pane_title="right")},
         runner=fake,
     )
 
@@ -387,9 +395,7 @@ def test_window_names_with_spaces_commas_and_punctuation(
     workspace = _workspace(tmp_path, WindowSpec(window_name=window_name, panes=(_pane(), _pane())))
     fake = _FakeTmux()
 
-    create_workspace_session(
-        workspace, {(window_name, i): _plan() for i in range(2)}, runner=fake
-    )
+    create_workspace_session(workspace, {(window_name, i): _plan() for i in range(2)}, runner=fake)
 
     new_session_argv = _first_command(fake.executed, "new-session")
     assert new_session_argv[new_session_argv.index("-n") + 1] == window_name
@@ -407,7 +413,7 @@ def test_shpe_connect_regression_tools_window_tree_pane(
     numbered 1, not 0. The fix must never guess -- it must select-pane on
     whatever pane id tmux actually reports back.
     """
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="SHPE-Connect",
         project_path=tmp_path,
         session_name="SHPE-Connect",
@@ -506,11 +512,17 @@ def test_create_workspace_session_raises_on_malformed_capture_output(
 
 def test_attach_outside_tmux() -> None:
     assert attach_or_switch_argv("demo", inside_tmux=False) == [
-        "tmux", "attach-session", "-t", "demo",
+        "tmux",
+        "attach-session",
+        "-t",
+        "demo",
     ]
 
 
 def test_switch_client_inside_tmux() -> None:
     assert attach_or_switch_argv("demo", inside_tmux=True) == [
-        "tmux", "switch-client", "-t", "demo"
+        "tmux",
+        "switch-client",
+        "-t",
+        "demo",
     ]

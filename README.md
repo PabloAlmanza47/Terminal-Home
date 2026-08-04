@@ -258,7 +258,7 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 681 pytest tests collected (680 passed and one optional Zsh
+Current status: 799 pytest tests collected (798 passed and one optional Zsh
 syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
 
 ```bash

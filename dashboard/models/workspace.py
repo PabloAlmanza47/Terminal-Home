@@ -14,6 +14,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from dashboard.models.project_location import (
+    LocalProjectLocation,
+    ProjectLocation,
+    SshProjectLocation,
+    project_location_from_dict,
+)
+
 MAX_PANES_PER_WINDOW = 4
 
 
@@ -127,7 +134,7 @@ class WorkspaceSpec:
     """One tmux session: a project, a session name, and 1+ ordered windows."""
 
     project_name: str
-    project_path: Path
+    project_location: ProjectLocation
     session_name: str
     windows: tuple[WindowSpec, ...]
 
@@ -136,9 +143,9 @@ class WorkspaceSpec:
             raise WorkspaceValidationError("Project name cannot be empty.")
         if not self.session_name.strip():
             raise WorkspaceValidationError("Session name cannot be empty.")
-        if not self.project_path.is_absolute():
+        if not isinstance(self.project_location, (LocalProjectLocation, SshProjectLocation)):
             raise WorkspaceValidationError(
-                f"Project path must be absolute after resolution, got: {self.project_path}"
+                "Project location must be a LocalProjectLocation or SshProjectLocation."
             )
         if not self.windows:
             raise WorkspaceValidationError("A workspace must contain at least one window.")
@@ -149,19 +156,51 @@ class WorkspaceSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_name": self.project_name,
-            "project_path": str(self.project_path),
+            "project_location": self.project_location.to_dict(),
             "session_name": self.session_name,
             "windows": [window.to_dict() for window in self.windows],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WorkspaceSpec:
+        expected = {"project_name", "project_location", "session_name", "windows"}
+        if set(data) != expected:
+            raise WorkspaceValidationError("Workspace data has invalid fields.")
+        location_data = data["project_location"]
+        if not isinstance(location_data, dict):
+            raise WorkspaceValidationError("Workspace project location must be an object.")
         return cls(
             project_name=data["project_name"],
-            project_path=Path(data["project_path"]),
+            project_location=project_location_from_dict(location_data),
             session_name=data["session_name"],
             windows=tuple(WindowSpec.from_dict(window) for window in data["windows"]),
         )
+
+    @classmethod
+    def for_local_project(
+        cls,
+        *,
+        project_name: str,
+        project_path: Path,
+        session_name: str,
+        windows: tuple[WindowSpec, ...],
+    ) -> WorkspaceSpec:
+        """Construct a workspace for an explicitly local project."""
+
+        return cls(
+            project_name=project_name,
+            project_location=LocalProjectLocation(project_path),
+            session_name=session_name,
+            windows=windows,
+        )
+
+    @property
+    def project_path(self) -> Path:
+        """Return the local path or fail before remote data reaches local services."""
+
+        if isinstance(self.project_location, LocalProjectLocation):
+            return self.project_location.path
+        raise WorkspaceValidationError("An SSH workspace does not have a local project path.")
 
 
 class LaunchAction(str, Enum):

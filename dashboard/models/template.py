@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from dashboard.models.project_location import ProjectLocation
 from dashboard.models.workspace import WindowSpec, WorkspaceSpec, WorkspaceValidationError
 
 MAX_TEMPLATE_NAME_LENGTH = 80
@@ -85,13 +85,13 @@ def workspace_from_template(
     template: WorkspaceTemplate,
     *,
     project_name: str,
-    project_path: Path,
+    project_location: ProjectLocation,
     session_name: str,
 ) -> WorkspaceSpec:
     try:
         return WorkspaceSpec(
             project_name=project_name,
-            project_path=project_path,
+            project_location=project_location,
             session_name=session_name,
             windows=_copy_windows(template.windows),
         )

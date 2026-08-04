@@ -487,7 +487,7 @@ def test_disambiguated_display_names_only_touches_the_duplicated_names(tmp_path:
 
 
 def _workspace(project_path: Path, session_name: str = "demo") -> WorkspaceSpec:
-    return WorkspaceSpec(
+    return WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=project_path,
         session_name=session_name,
@@ -574,31 +574,36 @@ def test_status_running_session_with_no_saved_workspace_uses_deterministic_name(
     assert status.session_running is True
 
 
-def test_status_normalizes_stale_project_path_in_saved_workspace(
+def test_status_isolates_legacy_key_payload_path_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(projects_module.tmux, "is_tmux_installed", lambda: True)
     project_path = tmp_path / "demo"
     project_path.mkdir()
     store_path = tmp_path / "workspaces.json"
-    # Saved under the real canonical path, but with a stale project_path
-    # field inside the record itself (as if hand-edited or moved).
+    # Legacy outer identity points at the project, while its payload points
+    # elsewhere. Migration isolates this rather than silently moving it.
     stale = _workspace(tmp_path / "old-location", session_name="demo-session")
-    save_workspace(stale, store_path=store_path)
     import json
 
-    data = json.loads(store_path.read_text())
-    workspaces = data["workspaces"]
-    workspaces[str(project_path.resolve())] = workspaces.pop(
-        str((tmp_path / "old-location").resolve())
+    store_path.write_text(
+        json.dumps(
+            {
+                str(project_path.resolve()): {
+                    "project_name": stale.project_name,
+                    "project_path": str(stale.project_path),
+                    "session_name": stale.session_name,
+                    "windows": [window.to_dict() for window in stale.windows],
+                }
+            }
+        )
     )
-    store_path.write_text(json.dumps(data))
 
     project = Project(name="demo", path=project_path)
     status = gather_project_status(project, store_path=store_path, running_sessions=set())
 
-    assert status.saved_workspace is not None
-    assert status.saved_workspace.project_path == project_path.resolve()
+    assert status.saved_workspace is None
+    assert status.workspace_metadata_error is not None
 
 
 def test_status_reports_malformed_metadata_without_crashing(

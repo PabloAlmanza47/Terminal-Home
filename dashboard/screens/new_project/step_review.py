@@ -78,9 +78,7 @@ class ReviewScreen(Screen[None]):
                 for window in self.state.windows:
                     labels = [pane.display_name for pane in window.panes]
                     yield Static(f"\nWindow: {window.window_name}", classes="field-label")
-                    yield Static(
-                        "\n".join(f"  {i + 1}. {label}" for i, label in enumerate(labels))
-                    )
+                    yield Static("\n".join(f"  {i + 1}. {label}" for i, label in enumerate(labels)))
                     yield Static(
                         "\n".join(render_pane_preview(labels, width=32, height=8)),
                         classes="preview-grid",
@@ -124,7 +122,7 @@ class ReviewScreen(Screen[None]):
             return
 
         try:
-            workspace = WorkspaceSpec(
+            workspace = WorkspaceSpec.for_local_project(
                 project_name=self.state.project_name.strip(),
                 project_path=destination,
                 session_name=self.state.session_name,
@@ -148,9 +146,7 @@ class ReviewScreen(Screen[None]):
                 init_git_repo(destination)
             save_workspace(workspace)
         except (OSError, ProjectCreationError, WorkspaceStoreVersionError) as exc:
-            detail = (
-                f" (the directory at {destination} was already created)" if created_dir else ""
-            )
+            detail = f" (the directory at {destination} was already created)" if created_dir else ""
             self._show_error(f"{exc}{detail}")
             return
 
@@ -165,7 +161,7 @@ class ReviewScreen(Screen[None]):
         assert self.state.existing_project_path is not None
 
         try:
-            workspace = WorkspaceSpec(
+            workspace = WorkspaceSpec.for_local_project(
                 project_name=self.state.project_name.strip(),
                 project_path=self.state.existing_project_path,
                 session_name=self.state.session_name,

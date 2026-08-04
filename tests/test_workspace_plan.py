@@ -51,7 +51,7 @@ def _status(
 
 
 def _workspace(project_path: Path, session_name: str = "demo") -> WorkspaceSpec:
-    return WorkspaceSpec(
+    return WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=project_path,
         session_name=session_name,
@@ -126,9 +126,7 @@ def test_structural_windows_and_panes_are_rendered(tmp_path: Path) -> None:
     assert "Pane 1: Dev Server — npm run dev" in rendered
 
 
-def test_default_plan_is_never_persisted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_default_plan_is_never_persisted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     saved = []
     monkeypatch.setattr(workspace_store, "save_workspace", lambda *a, **k: saved.append(1))
     status = _status(tmp_path, saved_workspace=None, expected_session_name="demo")
@@ -141,9 +139,7 @@ def test_default_plan_is_never_persisted(
 
 def test_saved_session_name_is_preserved(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path, session_name="custom-session")
-    status = _status(
-        tmp_path, saved_workspace=workspace, expected_session_name="custom-session"
-    )
+    status = _status(tmp_path, saved_workspace=workspace, expected_session_name="custom-session")
 
     plan = build_workspace_plan(status)
 
@@ -154,9 +150,7 @@ def test_saved_session_name_is_preserved(tmp_path: Path) -> None:
 
 def test_collision_derived_session_name_is_preserved_for_default_plan(tmp_path: Path) -> None:
     collision_name = "example-a1b2c3d4"
-    status = _status(
-        tmp_path, saved_workspace=None, expected_session_name=collision_name
-    )
+    status = _status(tmp_path, saved_workspace=None, expected_session_name=collision_name)
 
     plan = build_workspace_plan(status)
 

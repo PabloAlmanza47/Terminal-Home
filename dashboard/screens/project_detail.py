@@ -22,6 +22,7 @@ from textual.widgets import Button, Footer, Static
 from dashboard.models import (
     LaunchAction,
     LaunchRequest,
+    LocalProjectLocation,
     TemplateValidationError,
     template_from_workspace,
 )
@@ -225,7 +226,9 @@ class ProjectDetailScreen(Screen[None]):
         # and this action is only ever offered when that name isn't
         # currently running (see primary_actions), so it's always safe.
         workspace = build_default_workspace(
-            status.project.name, status.canonical_path, status.expected_session_name
+            status.project.name,
+            LocalProjectLocation(status.canonical_path),
+            status.expected_session_name,
         )
         try:
             save_workspace(workspace)
@@ -287,7 +290,9 @@ class ProjectDetailScreen(Screen[None]):
         if not confirmed:
             return
         workspace = build_default_workspace(
-            status.project.name, status.canonical_path, status.saved_workspace.session_name
+            status.project.name,
+            LocalProjectLocation(status.canonical_path),
+            status.saved_workspace.session_name,
         )
         try:
             save_workspace(workspace)

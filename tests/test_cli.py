@@ -18,6 +18,7 @@ import dashboard.services.project_launch as project_launch_module
 import dashboard.services.tmux as tmux_module
 import dashboard.services.workspace_launcher as workspace_launcher_module
 import dashboard.services.workspace_store as workspace_store_module
+from dashboard.models import LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.workspace_defaults import build_default_workspace
@@ -148,7 +149,7 @@ def test_list_shows_running_saved_and_default_status(
     _make_project(root, "default-proj")
     _configure_roots(root)
     workspace_store_module.save_workspace(
-        build_default_workspace("saved-proj", saved, "saved-proj")
+        build_default_workspace("saved-proj", LocalProjectLocation(saved), "saved-proj")
     )
     monkeypatch.setattr(tmux_module, "is_tmux_installed", lambda: True)
     monkeypatch.setattr(
@@ -301,7 +302,9 @@ def test_plan_saved_workspace(
     _isolate(monkeypatch, tmp_path)
     project = _make_project(tmp_path / "projects", "demo")
     _configure_roots(tmp_path / "projects")
-    workspace_store_module.save_workspace(build_default_workspace("demo", project, "demo"))
+    workspace_store_module.save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project), "demo")
+    )
     _assume_no_tmux_sessions(monkeypatch)
 
     exit_code = cli_module.run(["plan", "demo"])
@@ -461,7 +464,9 @@ def test_up_launches_backup_recovered_workspace_without_rewriting_store(
     _isolate(monkeypatch, tmp_path)
     project = _make_project(tmp_path / "projects", "demo")
     _configure_roots(tmp_path / "projects")
-    workspace_store_module.save_workspace(build_default_workspace("demo", project, "demo"))
+    workspace_store_module.save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project), "demo")
+    )
     store = workspace_store_module.default_store_path()
     store.rename(Path(f"{store}.bak"))
     store.write_text("broken")
@@ -530,9 +535,7 @@ def test_read_only_commands_never_mutate_anything(
         "create_workspace_session",
         lambda *a, **k: spies["create_workspace_session"].append(1),
     )
-    monkeypatch.setattr(
-        tmux_module, "exec_attach", lambda *a, **k: spies["exec_attach"].append(1)
-    )
+    monkeypatch.setattr(tmux_module, "exec_attach", lambda *a, **k: spies["exec_attach"].append(1))
     monkeypatch.setattr(
         workspace_store_module,
         "save_workspace",

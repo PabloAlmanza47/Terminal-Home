@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.models import LaunchAction
+from dashboard.models import LaunchAction, LocalProjectLocation
 from dashboard.services import project_launch
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
@@ -24,7 +24,9 @@ def _status(
     session_name: str = "demo",
 ) -> ProjectStatus:
     workspace = (
-        build_default_workspace("demo", project_path, session_name) if saved else None
+        build_default_workspace("demo", LocalProjectLocation(project_path), session_name)
+        if saved
+        else None
     )
     return ProjectStatus(
         project=Project("demo", project_path),

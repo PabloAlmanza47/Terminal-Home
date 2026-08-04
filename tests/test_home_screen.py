@@ -19,7 +19,7 @@ from textual.widgets import OptionList
 
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
-from dashboard.models import LaunchAction, LaunchRequest
+from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import (
@@ -382,7 +382,9 @@ def test_matched_session_selection_produces_attach_request_with_workspace(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(
         tmux_module,
@@ -721,7 +723,9 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
+    save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project_path.resolve()), "demo")
+    )
 
     async def scenario() -> tuple[bool, list[str], list[str]]:
         app = TerminalHomeApp()

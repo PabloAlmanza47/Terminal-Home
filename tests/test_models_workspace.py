@@ -10,8 +10,10 @@ from dashboard.models import (
     MAX_PANES_PER_WINDOW,
     LaunchAction,
     LaunchRequest,
+    LocalProjectLocation,
     PaneKind,
     PaneSpec,
+    SshProjectLocation,
     WindowSpec,
     WorkspaceSpec,
     WorkspaceValidationError,
@@ -95,13 +97,16 @@ def test_window_spec_round_trips_through_dict() -> None:
 def test_workspace_spec_requires_at_least_one_window(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceValidationError):
         WorkspaceSpec(
-            project_name="demo", project_path=tmp_path, session_name="demo", windows=()
+            project_name="demo",
+            project_location=LocalProjectLocation(tmp_path),
+            session_name="demo",
+            windows=(),
         )
 
 
 def test_workspace_spec_requires_absolute_path() -> None:
-    with pytest.raises(WorkspaceValidationError):
-        WorkspaceSpec(
+    with pytest.raises(ValueError):
+        WorkspaceSpec.for_local_project(
             project_name="demo",
             project_path=Path("relative/path"),
             session_name="demo",
@@ -111,7 +116,7 @@ def test_workspace_spec_requires_absolute_path() -> None:
 
 def test_workspace_spec_requires_project_name(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceValidationError):
-        WorkspaceSpec(
+        WorkspaceSpec.for_local_project(
             project_name="  ",
             project_path=tmp_path,
             session_name="demo",
@@ -121,7 +126,7 @@ def test_workspace_spec_requires_project_name(tmp_path: Path) -> None:
 
 def test_workspace_spec_rejects_duplicate_window_names(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceValidationError):
-        WorkspaceSpec(
+        WorkspaceSpec.for_local_project(
             project_name="demo",
             project_path=tmp_path,
             session_name="demo",
@@ -137,7 +142,7 @@ def test_workspace_spec_preserves_window_order(tmp_path: Path) -> None:
         WindowSpec(window_name="main", panes=(_pane(),)),
         WindowSpec(window_name="tests", panes=(_pane(),)),
     )
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo", project_path=tmp_path, session_name="demo", windows=windows
     )
     assert workspace.windows == windows
@@ -150,7 +155,7 @@ def test_workspace_spec_round_trips_through_dict(tmp_path: Path) -> None:
             panes=(_pane(PaneKind.CODE_EDITOR, "Code Editor"), _pane(PaneKind.GIT, "Git")),
         ),
     )
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo", project_path=tmp_path, session_name="demo", windows=windows
     )
     restored = WorkspaceSpec.from_dict(workspace.to_dict())
@@ -159,7 +164,7 @@ def test_workspace_spec_round_trips_through_dict(tmp_path: Path) -> None:
 
 
 def test_launch_request_bundles_workspace_and_git_flag(tmp_path: Path) -> None:
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=tmp_path,
         session_name="demo",
@@ -190,7 +195,7 @@ def test_launch_request_attach_without_workspace_uses_given_session_name() -> No
 
 
 def test_launch_request_attach_with_workspace_resolves_its_session_name(tmp_path: Path) -> None:
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=tmp_path,
         session_name="demo",
@@ -198,3 +203,44 @@ def test_launch_request_attach_with_workspace_resolves_its_session_name(tmp_path
     )
     request = LaunchRequest(workspace=workspace, init_git=False, action=LaunchAction.ATTACH)
     assert request.resolved_session_name == "demo"
+
+
+def test_workspace_spec_supports_ssh_and_rejects_local_path_access(tmp_path: Path) -> None:
+    location = SshProjectLocation("c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", "/srv/api server")
+    workspace = WorkspaceSpec(
+        project_name="API",
+        project_location=location,
+        session_name="api",
+        windows=(WindowSpec(window_name="main", panes=(_pane(),)),),
+    )
+    restored = WorkspaceSpec.from_dict(workspace.to_dict())
+    assert restored == workspace
+    assert isinstance(restored.project_location.remote_path, str)
+    with pytest.raises(WorkspaceValidationError, match="does not have a local"):
+        _ = workspace.project_path
+
+
+@pytest.mark.parametrize("location", [Path("/tmp/demo"), "/tmp/demo"])
+def test_workspace_spec_rejects_raw_location_values(location: object) -> None:
+    with pytest.raises(WorkspaceValidationError, match="Project location"):
+        WorkspaceSpec(
+            project_name="demo",
+            project_location=location,  # type: ignore[arg-type]
+            session_name="demo",
+            windows=(WindowSpec(window_name="main", panes=(_pane(),)),),
+        )
+
+
+@pytest.mark.parametrize("location", [{}, {"kind": "unknown", "path": "/tmp/demo"}])
+def test_workspace_spec_rejects_missing_or_unknown_location(
+    location: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        WorkspaceSpec.from_dict(
+            {
+                "project_name": "demo",
+                "project_location": location,
+                "session_name": "demo",
+                "windows": [WindowSpec("main", (_pane(),)).to_dict()],
+            }
+        )

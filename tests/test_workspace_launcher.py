@@ -32,7 +32,7 @@ from dashboard.services.workspace_launcher import LaunchError, execute_launch_re
 def _request(
     tmp_path: Path, *panes: PaneSpec, action: LaunchAction = LaunchAction.CREATE
 ) -> LaunchRequest:
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=tmp_path,
         session_name="demo",
@@ -224,7 +224,7 @@ def test_attach_without_workspace_attaches_when_session_is_running(
 def test_build_pane_plans_keys_by_window_and_pane_index(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    workspace = WorkspaceSpec(
+    workspace = WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=tmp_path,
         session_name="demo",

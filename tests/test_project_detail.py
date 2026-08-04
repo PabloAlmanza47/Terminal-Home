@@ -18,7 +18,7 @@ from textual.widgets import Button, Input, OptionList, Static
 
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
-from dashboard.models import LaunchAction, LaunchRequest
+from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
@@ -104,7 +104,9 @@ def test_save_as_template_uses_saved_metadata_and_leaves_workspace_unchanged(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -234,7 +236,9 @@ def test_shows_recreate_when_saved_workspace_not_running(
     project_path.mkdir()
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
-    save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
+    save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project_path.resolve()), "demo")
+    )
 
     async def scenario() -> bool:
         app = TerminalHomeApp()
@@ -273,7 +277,9 @@ def test_resume_exits_with_attach_launch_request(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: name == "demo")
@@ -301,7 +307,9 @@ def test_recreate_exits_with_attach_launch_request(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -444,7 +452,9 @@ def test_selecting_same_named_project_never_resumes_the_others_session(
     work_path.mkdir()
     save_projects_config(ProjectsConfig(roots=(projects_root, school_root, work_root)))
 
-    school_workspace = build_default_workspace("example", school_path.resolve(), "school-session")
+    school_workspace = build_default_workspace(
+        "example", LocalProjectLocation(school_path.resolve()), "school-session"
+    )
     save_workspace(school_workspace)
 
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
@@ -489,7 +499,9 @@ def test_edit_workspace_saves_without_launching(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
+    save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project_path.resolve()), "demo")
+    )
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
@@ -526,7 +538,7 @@ def test_reset_to_default_requires_confirmation(
     project_path.mkdir()
     from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
 
-    custom = WorkspaceSpec(
+    custom = WorkspaceSpec.for_local_project(
         project_name="demo",
         project_path=project_path.resolve(),
         session_name="demo",
@@ -579,7 +591,9 @@ def test_reset_to_default_against_future_version_store_does_not_overwrite_or_cra
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -620,7 +634,9 @@ def test_forget_workspace_removes_metadata_not_project_files(
     project_path = projects_root / "demo"
     project_path.mkdir()
     (project_path / "keep-me.txt").write_text("still here")
-    save_workspace(build_default_workspace("demo", project_path.resolve(), "demo"))
+    save_workspace(
+        build_default_workspace("demo", LocalProjectLocation(project_path.resolve()), "demo")
+    )
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
@@ -646,7 +662,9 @@ def test_forget_workspace_cancelled_keeps_metadata(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -671,7 +689,9 @@ def test_forget_workspace_against_future_version_store_does_not_overwrite_or_cra
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
@@ -756,7 +776,9 @@ def test_back_to_list_button_makes_no_metadata_changes(
     projects_root = _isolate(monkeypatch, tmp_path)
     project_path = projects_root / "demo"
     project_path.mkdir()
-    workspace = build_default_workspace("demo", project_path.resolve(), "demo")
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
     save_workspace(workspace)
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)

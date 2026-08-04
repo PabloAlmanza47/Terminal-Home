@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dashboard.models import PaneKind, PaneSpec, WorkspaceSpec
+from dashboard.models import LocalProjectLocation, PaneKind, PaneSpec, WorkspaceSpec
 from dashboard.services.projects import ProjectStatus
 from dashboard.services.workspace_defaults import build_default_workspace
 
@@ -29,9 +29,7 @@ SOURCE_DEFAULT = "generated default"
 SOURCE_INVALID = "invalid saved workspace metadata"
 SOURCE_MISSING_DIRECTORY = "missing project directory"
 
-_ATTACH_NOTE = (
-    "The running session is authoritative; no windows or panes would be recreated."
-)
+_ATTACH_NOTE = "The running session is authoritative; no windows or panes would be recreated."
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +109,9 @@ def build_workspace_plan(status: ProjectStatus) -> WorkspacePlan:
     # anything; build_default_workspace itself makes no filesystem or tmux
     # calls.
     default_workspace = build_default_workspace(
-        status.project.name, status.canonical_path, status.expected_session_name
+        status.project.name,
+        LocalProjectLocation(status.canonical_path),
+        status.expected_session_name,
     )
     return WorkspacePlan(
         project_name=status.project.name,

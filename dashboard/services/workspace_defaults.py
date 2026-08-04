@@ -8,9 +8,14 @@ same shape from one place.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from dashboard.models import PANE_KIND_LABELS, PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+from dashboard.models import (
+    PANE_KIND_LABELS,
+    PaneKind,
+    PaneSpec,
+    ProjectLocation,
+    WindowSpec,
+    WorkspaceSpec,
+)
 
 DEFAULT_WINDOW_NAME = "code"
 
@@ -35,7 +40,7 @@ def default_workspace_windows() -> tuple[WindowSpec, ...]:
 
 
 def build_default_workspace(
-    project_name: str, project_path: Path, session_name: str
+    project_name: str, project_location: ProjectLocation, session_name: str
 ) -> WorkspaceSpec:
     """A single "code" window with a Code Editor pane and a Blank Terminal
     pane, side by side (the two-pane layout rule in dashboard.models.layout
@@ -43,7 +48,7 @@ def build_default_workspace(
     """
     return WorkspaceSpec(
         project_name=project_name,
-        project_path=project_path,
+        project_location=project_location,
         session_name=session_name,
         windows=default_workspace_windows(),
     )

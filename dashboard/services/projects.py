@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec
+from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation, WorkspaceSpec
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux
 from dashboard.services.git_info import gather_git_info
@@ -463,7 +463,9 @@ def gather_project_status(
         # happens if the persisted record's own project_path field is
         # stale (e.g. hand-edited) -- correct it rather than let a launch
         # later `cd` into the wrong directory.
-        saved_workspace = replace(saved_workspace, project_path=canonical_path)
+        saved_workspace = replace(
+            saved_workspace, project_location=LocalProjectLocation(canonical_path)
+        )
 
     expected_session_name = (
         saved_workspace.session_name

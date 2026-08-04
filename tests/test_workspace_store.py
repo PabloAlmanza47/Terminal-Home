@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceSpec
+from dashboard.models import (
+    LocalProjectLocation,
+    PaneKind,
+    PaneSpec,
+    SshProjectLocation,
+    WindowSpec,
+    WorkspaceSpec,
+)
+from dashboard.services.atomic_file import backup_path_for
 from dashboard.services.load_result import LoadSource
 from dashboard.services.workspace_store import (
     WORKSPACE_STORE_SCHEMA_VERSION,
@@ -14,10 +23,13 @@ from dashboard.services.workspace_store import (
     default_store_path,
     ensure_workspace_store_writable,
     forget_workspace,
+    forget_workspace_for_location,
     load_all_workspaces,
     load_workspace,
+    load_workspace_for_location,
     load_workspace_result,
     save_workspace,
+    workspace_storage_key,
 )
 
 
@@ -43,9 +55,7 @@ def test_corrupt_primary_recovers_from_valid_legacy_backup(tmp_path: Path) -> No
     project = tmp_path / "demo"
     workspace = _make_workspace(project)
     path.write_text("broken")
-    Path(f"{path}.bak").write_text(
-        __import__("json").dumps({str(project.resolve()): workspace.to_dict()})
-    )
+    Path(f"{path}.bak").write_text(json.dumps({str(project.resolve()): _legacy_payload(workspace)}))
     result = load_workspace_result(project, path)
     assert result.workspace == workspace
     assert result.source is LoadSource.BACKUP
@@ -67,7 +77,7 @@ def test_future_primary_never_falls_back_to_backup(tmp_path: Path) -> None:
 
 
 def _make_workspace(project_path: Path, name: str = "demo") -> WorkspaceSpec:
-    return WorkspaceSpec(
+    return WorkspaceSpec.for_local_project(
         project_name=name,
         project_path=project_path,
         session_name=name,
@@ -279,7 +289,7 @@ def _write_legacy_store(store_path: Path, entries: dict[str, WorkspaceSpec]) -> 
     import json
 
     store_path.parent.mkdir(parents=True, exist_ok=True)
-    flat = {str(path): spec.to_dict() for path, spec in entries.items()}
+    flat = {str(path): _legacy_payload(spec) for path, spec in entries.items()}
     store_path.write_text(json.dumps(flat, indent=2))
 
 
@@ -291,9 +301,18 @@ def _write_versioned_store(
     store_path.parent.mkdir(parents=True, exist_ok=True)
     envelope = {
         "schema_version": schema_version,
-        "workspaces": {str(path): spec.to_dict() for path, spec in entries.items()},
+        "workspaces": {str(path): _legacy_payload(spec) for path, spec in entries.items()},
     }
     store_path.write_text(json.dumps(envelope, indent=2))
+
+
+def _legacy_payload(spec: WorkspaceSpec) -> dict[str, object]:
+    return {
+        "project_name": spec.project_name,
+        "project_path": str(spec.project_path),
+        "session_name": spec.session_name,
+        "windows": [window.to_dict() for window in spec.windows],
+    }
 
 
 def test_load_all_workspaces_reads_legacy_flat_store(tmp_path: Path) -> None:
@@ -312,7 +331,7 @@ def test_load_all_workspaces_reads_versioned_envelope(tmp_path: Path) -> None:
     _write_versioned_store(
         store_path,
         {project_path.resolve(): workspace},
-        schema_version=WORKSPACE_STORE_SCHEMA_VERSION,
+        schema_version=1,
     )
 
     assert load_all_workspaces(store_path=store_path) == {str(project_path.resolve()): workspace}
@@ -347,7 +366,11 @@ def test_save_workspace_writes_versioned_envelope(tmp_path: Path) -> None:
 
     on_disk = json.loads(store_path.read_text())
     assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
-    assert set(on_disk["workspaces"]) == {str((tmp_path / "demo").resolve())}
+    assert set(on_disk["workspaces"]) == {
+        workspace_storage_key(LocalProjectLocation(tmp_path / "demo"))
+    }
+    assert "project_location" in next(iter(on_disk["workspaces"].values()))
+    assert "project_path" not in next(iter(on_disk["workspaces"].values()))
 
 
 def test_loading_a_legacy_store_does_not_rewrite_it(tmp_path: Path) -> None:
@@ -384,11 +407,7 @@ def test_save_workspace_migrates_legacy_store_preserving_existing_entries(
 
     on_disk = json.loads(store_path.read_text())
     assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
-    assert set(on_disk["workspaces"]) == {
-        str((tmp_path / "first").resolve()),
-        str((tmp_path / "second").resolve()),
-        str((tmp_path / "third").resolve()),
-    }
+    assert len(on_disk["workspaces"]) == 3
     assert load_workspace(tmp_path / "first", store_path=store_path) == first
     assert load_workspace(tmp_path / "second", store_path=store_path) == second
     assert load_workspace(tmp_path / "third", store_path=store_path) == third
@@ -411,7 +430,9 @@ def test_forget_workspace_migrates_legacy_store_preserving_remaining_entries(
 
     on_disk = json.loads(store_path.read_text())
     assert on_disk["schema_version"] == WORKSPACE_STORE_SCHEMA_VERSION
-    assert set(on_disk["workspaces"]) == {str((tmp_path / "keep").resolve())}
+    assert set(on_disk["workspaces"]) == {
+        workspace_storage_key(LocalProjectLocation(tmp_path / "keep"))
+    }
     assert load_workspace(tmp_path / "keep", store_path=store_path) == keep
     assert load_workspace(tmp_path / "forget", store_path=store_path) is None
 
@@ -428,7 +449,7 @@ def test_load_workspace_result_returns_saved_workspace_from_versioned_store(
     _write_versioned_store(
         store_path,
         {project_path.resolve(): workspace},
-        schema_version=WORKSPACE_STORE_SCHEMA_VERSION,
+        schema_version=1,
     )
 
     result = load_workspace_result(project_path, store_path=store_path)
@@ -593,3 +614,76 @@ def test_ensure_workspace_store_writable_uses_default_store_path_when_omitted(
 
     with pytest.raises(WorkspaceStoreVersionError):
         ensure_workspace_store_writable()
+
+
+def test_schema_two_ssh_round_trip_and_location_forget(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    location = SshProjectLocation("c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", "/srv/api server")
+    workspace = WorkspaceSpec("API", location, "api", _make_workspace(tmp_path).windows)
+    save_workspace(workspace, store_path)
+
+    loaded = load_workspace_for_location(location, store_path)
+    assert loaded == workspace
+    assert isinstance(loaded.project_location.remote_path, str)
+    assert forget_workspace_for_location(location, store_path)
+    before = store_path.read_bytes()
+    assert forget_workspace_for_location(location, store_path) is False
+    assert store_path.read_bytes() == before
+
+
+def test_location_storage_keys_are_stable_and_discriminated(tmp_path: Path) -> None:
+    host_a = "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3"
+    host_b = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    local = LocalProjectLocation(tmp_path / "api")
+    ssh_a = SshProjectLocation(host_a, "/srv/api")
+    assert workspace_storage_key(ssh_a) == workspace_storage_key(
+        SshProjectLocation(host_a, "/srv/api")
+    )
+    assert len(workspace_storage_key(ssh_a)) == 68
+    assert workspace_storage_key(ssh_a) != workspace_storage_key(
+        SshProjectLocation(host_b, "/srv/api")
+    )
+    assert workspace_storage_key(ssh_a) != workspace_storage_key(local)
+
+
+def test_schema_two_key_payload_mismatch_is_isolated(tmp_path: Path) -> None:
+    import json
+
+    store_path = tmp_path / "workspaces.json"
+    workspace = _make_workspace(tmp_path / "demo")
+    store_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "workspaces": {"loc-" + "0" * 64: workspace.to_dict()},
+            }
+        )
+    )
+    result = load_workspace_result(tmp_path / "demo", store_path)
+    assert result.workspace is None
+    assert result.warning and "Skipped 1" in result.warning
+
+
+def test_schema_one_migration_rotates_exact_primary_to_backup(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    first = _make_workspace(tmp_path / "first", "first")
+    _write_versioned_store(store_path, {(tmp_path / "first").resolve(): first}, schema_version=1)
+    original = store_path.read_bytes()
+    save_workspace(_make_workspace(tmp_path / "second", "second"), store_path)
+    assert backup_path_for(store_path).read_bytes() == original
+    assert json.loads(store_path.read_text())["schema_version"] == 2
+
+
+def test_mutation_after_backup_recovery_retains_recovered_records(tmp_path: Path) -> None:
+    store_path = tmp_path / "workspaces.json"
+    first = _make_workspace(tmp_path / "first", "first")
+    _write_versioned_store(
+        backup_path_for(store_path),
+        {(tmp_path / "first").resolve(): first},
+        schema_version=1,
+    )
+    backup = backup_path_for(store_path).read_bytes()
+    store_path.write_text("corrupt")
+    save_workspace(_make_workspace(tmp_path / "second", "second"), store_path)
+    assert load_workspace(tmp_path / "first", store_path) == first
+    assert backup_path_for(store_path).read_bytes() == backup

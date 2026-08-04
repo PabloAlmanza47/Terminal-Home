@@ -8,8 +8,10 @@ import pytest
 
 from dashboard.models import (
     MAX_TEMPLATE_NAME_LENGTH,
+    LocalProjectLocation,
     PaneKind,
     PaneSpec,
+    SshProjectLocation,
     TemplateValidationError,
     WindowSpec,
     WorkspaceSpec,
@@ -61,22 +63,28 @@ def test_template_rejects_empty_windows_and_invalid_id() -> None:
 def test_workspace_template_conversions_drop_source_identity_and_preserve_intent(
     tmp_path: Path,
 ) -> None:
-    source = WorkspaceSpec("source", (tmp_path / "source").resolve(), "source-session", _windows())
+    source = WorkspaceSpec(
+        "source",
+        SshProjectLocation("c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", "/srv/source"),
+        "source-session",
+        _windows(),
+    )
     template = template_from_workspace(source, "Full Stack")
     first = workspace_from_template(
         template,
         project_name="destination",
-        project_path=(tmp_path / "destination").resolve(),
+        project_location=LocalProjectLocation((tmp_path / "destination").resolve()),
         session_name="destination-a1b2c3",
     )
     second = workspace_from_template(
         template,
         project_name="another",
-        project_path=(tmp_path / "another").resolve(),
+        project_location=SshProjectLocation("d84aeefb-7c29-4c63-b39c-766d559df977", "/srv/another"),
         session_name="another",
     )
     assert template.to_dict().keys() == {"id", "name", "windows"}
-    assert first.project_path != source.project_path
+    assert first.project_location != source.project_location
+    assert "project_location" not in template.to_dict()
     assert first.session_name != source.session_name
     assert first.windows == source.windows == second.windows
     assert first.windows is not template.windows
@@ -86,3 +94,4 @@ def test_workspace_template_conversions_drop_source_identity_and_preserve_intent
         PaneKind.DEV_SERVER,
         PaneKind.TEST_TERMINAL,
     ]
+    (SshProjectLocation,)
