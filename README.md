@@ -453,11 +453,11 @@ s  Settings           q  Quit outside editable fields
 `F5` refreshes screens that expose refreshable project or session data. The
 shortcut help overlay shows the global and current-screen bindings.
 
-The home screen adapts to split terminals: large terminals show the full
-Terminal Home artwork, medium terminals show a compact identity, and very
-short terminals hide artwork when needed to keep Primary Actions usable. The
-header contains a compact project/session/system summary; detailed disk,
-memory, shell, and host information remains on System Information.
+The home screen uses a compact, terminal-safe `Terminal Home` title at every
+supported size. Its header contains a compact project/session/system summary;
+detailed disk, memory, shell, and host information remains on System
+Information. Home sections are content-sized and only the focused section
+shows an active cursor.
 
 Settings includes a Coding Agent preference with None, Codex, and Claude Code.
 None opens a normal shell with a warning. Codex and Claude Code are used only
@@ -487,8 +487,7 @@ Deeper technical detail for anyone extending or reviewing the code.
 dashboard/
     app.py                     Textual App subclass; entry point; runs the tmux
                                  orchestration layer after Textual exits
-    app.tcss                    Theme and layout (dark, bordered panels)
-    art.py                      ASCII art + the fullwidth-text trick used for the title
+    app.tcss                    Transparent terminal-native theme and layout
     models/                     Plain dataclasses, no Textual imports, no subprocess calls
         workspace.py               PaneKind, PaneSpec, WindowSpec, WorkspaceSpec, LaunchAction, LaunchRequest
         template.py                WorkspaceTemplate, name validation, copy conversions

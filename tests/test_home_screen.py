@@ -196,8 +196,9 @@ def test_home_selection_of_either_same_named_project_resolves_its_own_path(
             await _wait_for_scan(pilot)
             recent = app.screen.query_one("#recent-projects-list", OptionList)
             ids = _option_ids(recent)
-            recent.highlighted = ids.index(target_id)
             recent.focus()
+            await pilot.pause()
+            recent.highlighted = ids.index(target_id)
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -275,8 +276,9 @@ def test_view_all_projects_opens_projects_screen(
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             recent = app.screen.query_one("#recent-projects-list", OptionList)
-            recent.highlighted = recent.option_count - 1  # "View All Projects" is last
             recent.focus()
+            await pilot.pause()
+            recent.highlighted = recent.option_count - 1  # "View All Projects" is last
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -575,21 +577,68 @@ def test_layout_class_matches_terminal_width_and_nothing_overflows(
     assert overflow is False
 
 
-def test_artwork_compacts_on_split_terminal_even_when_setting_enabled(
+def test_wide_home_sections_share_the_first_grid_row_height(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "alpha").mkdir()
+
+    async def scenario() -> tuple[int, int, int, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_WIDE) as pilot:
+            await _wait_for_scan(pilot)
+            actions = app.screen.query_one("#panel-actions").region
+            recent = app.screen.query_one("#panel-recent").region
+            return actions.y, recent.y, actions.y + actions.height, recent.y + recent.height
+
+    actions_y, recent_y, actions_bottom, recent_bottom = _run(scenario())
+    assert actions_y == recent_y
+    assert actions_bottom == recent_bottom
+
+
+def test_compact_terminal_header_has_one_plain_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> tuple[bool, str]:
         app = TerminalHomeApp()
-        async with app.run_test(size=_NARROW) as pilot:  # 24 rows: below the art threshold
+        async with app.run_test(size=_NARROW) as pilot:
             await _wait_for_scan(pilot)
             logo = app.screen.query_one("#home-logo")
             return bool(logo.display), str(logo.render())
 
-    displayed, artwork = _run(scenario())
+    displayed, title = _run(scenario())
     assert displayed is True
-    assert artwork.startswith("╭─>_─╮")
+    assert title == "Terminal Home"
+
+
+def test_home_sections_reset_cursor_when_focus_moves_between_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    (tmp_path / "projects" / "alpha").mkdir()
+
+    async def scenario() -> tuple[str, str, int | None]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            menu = app.screen.query_one("#main-menu", KeyboardActionList)
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            menu.selected_index = 1
+            menu.focus()
+            await pilot.press("right")
+            await pilot.pause()
+            recent_prompt_while_focused = str(recent.get_option_at_index(0).prompt)
+            await pilot.press("left")
+            await pilot.pause()
+            recent_prompt_after_blur = str(recent.get_option_at_index(0).prompt)
+            return recent_prompt_while_focused, recent_prompt_after_blur, menu.selected_index
+
+    focused, blurred, menu_index = _run(scenario())
+    assert focused.startswith("› ")
+    assert not blurred.startswith("› ")
+    assert menu_index == 0
 
 
 # --- Escape / q ----------------------------------------------------------------

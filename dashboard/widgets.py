@@ -38,11 +38,13 @@ class KeyboardActionList(Static):
         *actions: ActionItem,
         id: str | None = None,
         classes: str | None = None,
+        reset_on_blur: bool = False,
     ) -> None:
         super().__init__(id=id, classes=classes)
         self.actions: list[ActionItem] = list(actions)
         self.selected_index: int | None = None
         self._preferred_id: str | None = None
+        self.reset_on_blur = reset_on_blur
         self._select_first_safe()
 
     @property
@@ -89,6 +91,14 @@ class KeyboardActionList(Static):
         if not action.disabled:
             self.post_message(self.ActionSelected(self, action, self.selected_index))
 
+    def on_blur(self) -> None:
+        if self.reset_on_blur:
+            self._select_first_safe()
+            self.refresh()
+
+    def on_focus(self) -> None:
+        self.refresh()
+
     def on_key(self, event: events.Key) -> None:
         if event.key == "up":
             self._move(-1)
@@ -112,7 +122,7 @@ class KeyboardActionList(Static):
     def render(self) -> Text:
         rendered = Text()
         for index, action in enumerate(self.actions):
-            selected = index == self.selected_index and not action.disabled
+            selected = self.has_focus and index == self.selected_index and not action.disabled
             marker = "› " if selected else "  "
             style = "bold #72d7ff" if selected else ("#e08b9b" if action.dangerous else "#d4e2f2")
             if action.disabled:
@@ -131,6 +141,10 @@ class KeyboardOptionList(OptionList):
     selectable rows, and keeping it in one widget prevents screen drift.
     """
 
+    def __init__(self, *options, reset_on_blur: bool = False, **kwargs) -> None:
+        super().__init__(*options, **kwargs)
+        self.reset_on_blur = reset_on_blur
+
     async def handle_key(self, event: events.Key) -> bool:
         if event.key == "space" and self.highlighted is not None:
             option = self.get_option_at_index(self.highlighted)
@@ -142,11 +156,28 @@ class KeyboardOptionList(OptionList):
 
     def watch_highlighted(self, highlighted: int | None) -> None:
         super().watch_highlighted(highlighted)
+        self._update_prompt_markers(highlighted)
+
+    def _update_prompt_markers(self, highlighted: int | None = None) -> None:
+        highlighted = self.highlighted if highlighted is None else highlighted
         for option in self.options:
             original = getattr(option, "_terminal_home_prompt", None)
             if original is None:
                 original = str(option.prompt)
                 setattr(option, "_terminal_home_prompt", original)
-            marker = "› " if self.options.index(option) == highlighted else "  "
+            marker = "› " if self.options.index(option) == highlighted and self.has_focus else "  "
             option._set_prompt(marker + original)
         self.refresh()
+
+    def on_focus(self) -> None:
+        if self.reset_on_blur:
+            self.highlighted = next(
+                (index for index, option in enumerate(self.options) if not option.disabled),
+                None,
+            )
+        self.call_after_refresh(self._update_prompt_markers)
+
+    def on_blur(self) -> None:
+        if self.reset_on_blur:
+            self.highlighted = None
+        self.call_after_refresh(self._update_prompt_markers)

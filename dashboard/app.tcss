@@ -1,7 +1,7 @@
-/* Dark, bordered-panel theme shared by every screen in the dashboard. */
+/* Terminal-native styling shared by every screen in the dashboard. */
 
 Screen {
-    background: $surface;
+    background: transparent;
 }
 
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
@@ -10,7 +10,7 @@ Screen {
 VerticalScroll {
     scrollbar-size: 1 1;
     scrollbar-color: #087ea4;
-    scrollbar-background: #0b1220;
+    scrollbar-background: transparent;
     scrollbar-color-hover: #55d6ff;
 }
 
@@ -18,18 +18,19 @@ VerticalScroll {
    terminal; .screen-root is the full-size aligner, .panel is the content
    box itself. */
 .screen-root {
-    align: center middle;
+    align: center top;
     width: 100%;
-    height: 100%;
+    height: auto;
+    padding: 1 2;
 }
 
 .panel {
     width: 74;
     height: auto;
     max-height: 90%;
-    border: heavy $primary;
+    border: solid #30445f;
     padding: 1 3;
-    background: $panel;
+    background: transparent;
 }
 
 #screen-title {
@@ -43,29 +44,29 @@ VerticalScroll {
 
 #home {
     padding: 1 2;
-    height: 100%;
+    height: auto;
 }
 
 #home-shell {
     width: 100%;
-    height: 100%;
+    height: auto;
     layout: vertical;
 }
 
 #home-header {
     width: 100%;
     height: auto;
-    align: center middle;
+    align: left top;
     padding: 0 0 1 0;
 }
 
 #home-logo {
-    text-align: center;
+    text-align: left;
     color: $primary-lighten-2;
 }
 
 #home-meta {
-    text-align: center;
+    text-align: left;
     color: $text-muted;
     max-width: 100%;
 }
@@ -74,8 +75,8 @@ VerticalScroll {
    .layout-wide (>= _WIDE_BREAKPOINT columns) for a 2x2 grid instead, or
    .layout-narrow explicitly for the stacked form -- both driven from
    Python, never from a CSS media query (Textual has none). Panels use
-   height: 1fr (not auto) so, stacked or gridded, the three sections share
-   whatever vertical space is available without nested home scrolling. */
+   Both layouts remain content-sized so short lists do not create empty
+   terminal-sized panels. */
 #home-dashboard {
     width: 100%;
     height: auto;
@@ -88,6 +89,7 @@ VerticalScroll {
     grid-size: 2 2;
     grid-gutter: 1 2;
     grid-rows: auto auto;
+    align: left top;
     height: auto;
 }
 
@@ -105,6 +107,11 @@ VerticalScroll {
 
 #home-dashboard.layout-wide .home-panel {
     margin: 0;
+    height: 100%;
+}
+
+#home-dashboard.layout-narrow .home-panel {
+    height: auto;
 }
 
 /* The "compact" class comes from the user's Settings preference (layout
@@ -131,8 +138,7 @@ VerticalScroll {
 #main-menu,
 #recent-projects-list,
 #active-sessions-list {
-    height: 1fr;
-    max-height: 100%;
+    height: auto;
     margin: 0;
     border: none;
     background: transparent;
@@ -147,7 +153,7 @@ VerticalScroll {
 
 #home-dashboard OptionList > .option-list--option-highlighted {
     color: #72d7ff;
-    background: #172236 45%;
+    background: transparent;
     text-style: bold;
 }
 
@@ -163,7 +169,7 @@ VerticalScroll {
 
 #keyboard-footer {
     color: #b5c8df;
-    background: #0b1220;
+    background: transparent;
     text-align: center;
     height: 1;
 }
@@ -175,7 +181,7 @@ OptionList {
     max-height: 14;
     margin: 1 0 0 0;
     border: round $primary;
-    background: $panel-darken-1;
+    background: transparent;
 }
 
 OptionList:focus {
@@ -210,7 +216,7 @@ Input:focus {
 #info-rows {
     height: auto;
     border: round $primary;
-    background: $panel-darken-1;
+    background: transparent;
     padding: 1 2;
 }
 
@@ -257,7 +263,7 @@ Input:focus {
 #custom-command-fields {
     height: auto;
     border: round $primary;
-    background: $panel-darken-1;
+    background: transparent;
     padding: 1 1 0 1;
     margin: 1 0 0 0;
 }
@@ -267,7 +273,7 @@ SelectionList {
     max-height: 10;
     margin: 1 0 0 0;
     border: round $primary;
-    background: $panel-darken-1;
+    background: transparent;
 }
 
 SelectionList:focus {
@@ -275,7 +281,7 @@ SelectionList:focus {
 }
 
 .preview-grid {
-    background: $panel-darken-1;
+    background: transparent;
     border: round $primary;
     padding: 0 1;
     margin: 1 0;
@@ -304,7 +310,7 @@ ConfirmScreen {
     height: auto;
     border: heavy $error;
     padding: 1 3;
-    background: $panel;
+    background: transparent;
 }
 
 #template-name-panel {
@@ -353,10 +359,9 @@ ConfirmScreen {
     padding: 1 0 0 0;
 }
 
-/* Phase 12 visual and focus overrides. Keep the structural rules above
-   readable while centralizing the shared interaction treatment here. */
+/* Shared visual and focus treatment. */
 Screen {
-    background: #101827;
+    background: transparent;
     color: #e6edf7;
 }
 
@@ -366,7 +371,7 @@ Screen {
     max-height: 94%;
     border: solid #30445f;
     padding: 1 2;
-    background: #172236;
+    background: transparent;
 }
 
 #screen-title, .panel-heading {
@@ -375,17 +380,17 @@ Screen {
 
 OptionList, SelectionList {
     border: solid #30445f;
-    background: #121c2d;
+    background: transparent;
 }
 
 OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus {
     border: double #55d6ff;
-    background-tint: #55d6ff 12%;
+    background-tint: transparent;
 }
 
 KeyboardActionList {
     height: auto;
-    min-height: 1;
+    min-height: 0;
     padding: 0;
     background: transparent;
 }
@@ -404,27 +409,27 @@ KeyboardActionList:focus {
 Button {
     min-width: 12;
     border: solid #38506d;
-    background: #1c2c45;
+    background: transparent;
     color: #e6edf7;
 }
 
 Button:hover, Button:focus {
-    background: #164b68;
+    background: transparent;
     color: #ffffff;
 }
 
 Button.-primary {
-    background: #087ea4;
+    background: transparent;
     color: #ffffff;
 }
 
 Button.-error {
-    background: #843f51;
+    background: transparent;
     color: #ffffff;
 }
 
 Footer {
-    background: #0b1220;
+    background: transparent;
     color: #b5c8df;
 }
 

@@ -41,7 +41,7 @@ class SettingsScreen(Screen[None]):
                 )
                 yield Static("Appearance", classes="panel-heading")
                 yield Checkbox(
-                    "Show ASCII artwork",
+                        "Show Terminal Home title",
                     value=self.settings.artwork_enabled,
                     id="artwork-checkbox",
                 )

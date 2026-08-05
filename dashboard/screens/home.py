@@ -1,4 +1,4 @@
-"""The landing screen: a header (title, artwork, clock, greeting) plus a
+"""The landing screen: a compact title and status header plus a
 responsive three-section dashboard -- Primary Actions, Recent Projects, and
 Active Sessions.
 
@@ -21,7 +21,6 @@ from textual.screen import Screen
 from textual.widgets import Static
 from textual.widgets.option_list import Option
 
-from dashboard.art import artwork_for_size
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.new_project import NewProjectScreen
@@ -53,8 +52,7 @@ from dashboard.widgets import KeyboardOptionList as OptionList
 # A terminal at least this many columns wide gets the 2x2 panel grid;
 # narrower terminals get a single stacked column instead.
 _WIDE_BREAKPOINT = 100
-# Below the supported compact-art threshold, artwork is hidden to preserve
-# the primary action list.
+# Keep the Home lists bounded so ordinary content remains content-sized.
 _MAX_RECENT_PROJECTS = 5
 _MAX_ACTIVE_SESSIONS = 4
 
@@ -169,7 +167,7 @@ class HomeScreen(Screen[None]):
         with Container(id="home", classes="screen-root"):
             with Vertical(id="home-shell"):
                 with Vertical(id="home-header"):
-                    yield Static(id="home-logo")
+                    yield Static("Terminal Home", id="home-logo")
                     yield Static("Loading system summary...", id="home-meta")
                 with Container(id="home-dashboard"):
                     with Vertical(id="panel-actions", classes="home-panel"):
@@ -182,20 +180,25 @@ class HomeScreen(Screen[None]):
                                 for digit, label, option_id in _MENU_ITEMS
                             ],
                             id="main-menu",
+                            reset_on_blur=True,
                         )
                     with Vertical(id="panel-recent", classes="home-panel"):
                         yield Static(
                             "  Recent Projects", id="heading-recent", classes="panel-heading"
                         )
                         yield OptionList(
-                            id="recent-projects-list", classes="-textual-compact home-list"
+                            id="recent-projects-list",
+                            classes="-textual-compact home-list",
+                            reset_on_blur=True,
                         )
                     with Vertical(id="panel-sessions", classes="home-panel"):
                         yield Static(
                             "  Active Sessions", id="heading-sessions", classes="panel-heading"
                         )
                         yield OptionList(
-                            id="active-sessions-list", classes="-textual-compact home-list"
+                            id="active-sessions-list",
+                            classes="-textual-compact home-list",
+                            reset_on_blur=True,
                         )
         yield Static(
             "↑↓ Navigate   ←→ Sections   Enter Open   Esc Back   ? Help   q Quit",
@@ -250,15 +253,8 @@ class HomeScreen(Screen[None]):
         for panel_id in ("#panel-recent", "#panel-sessions"):
             self.query_one(panel_id).display = not compact_screen
 
-        # The artwork logo is the header's biggest line-count cost -- once
-        # the terminal is too short to comfortably fit it and the action list
-        # panels below, it's hidden regardless of the artwork_enabled
-        # setting (which only controls whether it CAN show, not whether a
-        # cramped terminal is forced to).
-        art = artwork_for_size(width, height, self.settings.artwork_enabled)
         logo = self.query_one("#home-logo", Static)
-        logo.update(art or "")
-        logo.display = art is not None
+        logo.display = self.settings.artwork_enabled
         self.query_one("#home-meta", Static).display = True
 
     def _update_clock(self) -> None:
@@ -283,6 +279,16 @@ class HomeScreen(Screen[None]):
                 f"{'▸' if name == section else ' '} {label}"
             )
             self.query_one(f"#{panel_id}").set_class(name == section, "active-section")
+
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        section_by_id = {
+            "main-menu": "actions",
+            "recent-projects-list": "recent",
+            "active-sessions-list": "sessions",
+        }
+        section = section_by_id.get(event.widget.id or "")
+        if section is not None:
+            self._set_active_section(section)
 
     def on_key(self, event: events.Key) -> None:
         if event.key not in {"left", "right"}:

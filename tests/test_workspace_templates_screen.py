@@ -128,7 +128,7 @@ def test_listing_summary_and_case_only_rename(
     assert option_id == template.id
     assert "1 window(s) · 2 pane(s)" in summary
     assert "code: Code Editor, Docs" in summary
-    assert label.removeprefix("› ") == "FULL STACK"
+    assert label.strip().removeprefix("› ") == "FULL STACK"
     assert load_all_templates()[0].id == template.id
 
 
