@@ -10,11 +10,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    import tomli as tomllib  # type: ignore[no-redef]
-
 
 class CommandSource(str, Enum):
     NODE_DEV = "package.json dev script"
@@ -140,6 +135,10 @@ def _pyproject_configures_pytest(project_path: Path) -> bool:
     if not _is_file(path):
         return False
     try:
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+            import tomli as tomllib  # type: ignore[no-redef]
         with path.open("rb") as handle:
             payload = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError):

@@ -19,6 +19,14 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _assert_console_command_succeeded(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 0, (
+        f"console command failed with status {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+
+
 def test_pyproject_has_runtime_metadata_and_console_scripts() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     project = data["project"]
@@ -84,27 +92,30 @@ def test_build_artifacts_and_isolated_wheel_install(tmp_path: Path) -> None:
         [str(scripts / "th"), "--help"],
         cwd=tmp_path,
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    _assert_console_command_succeeded(help_result)
     assert "Terminal Home" in help_result.stdout
     for command in ("th", "terminal-home", "dev"):
         version_result = subprocess.run(
             [str(scripts / command), "--version"],
             cwd=tmp_path,
             env=env,
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
         )
+        _assert_console_command_succeeded(version_result)
         assert version_result.stdout.strip().endswith(__version__)
     new_help_result = subprocess.run(
         [str(scripts / "th"), "new", "--help"],
         cwd=tmp_path,
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    _assert_console_command_succeeded(new_help_result)
     assert "--template" in new_help_result.stdout
