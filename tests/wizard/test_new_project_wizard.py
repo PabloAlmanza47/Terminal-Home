@@ -32,6 +32,7 @@ from dashboard.services import tmux as tmux_module
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.system_info import SystemInfo
 from dashboard.services.workspace_store import WORKSPACE_STORE_SCHEMA_VERSION, load_workspace
+from dashboard.widgets import KeyboardActionList
 
 _SIZE = (100, 100)
 
@@ -78,10 +79,34 @@ async def _fill_step1(pilot, project_name: str) -> None:
 
 
 async def _click(pilot, button_id: str) -> None:
-    await pilot.click(button_id)
+    action_id = {
+        "#next-button": "next",
+        "#back-button": "back",
+        "#cancel-button": "cancel",
+        "#continue-button": "continue",
+        "#create-button": "create",
+        "#finish-button": "finish",
+        "#add-window-button": "add",
+        "#edit-window-button": "edit",
+        "#remove-window-button": "remove",
+    }.get(button_id)
+    if action_id is None:
+        raise AssertionError(f"Unknown command selector: {button_id}")
+    actions = next(
+        action_list
+        for action_list in pilot.app.screen.query(KeyboardActionList)
+        if any(item.id == action_id for item in action_list.actions)
+    )
+    actions.selected_index = next(
+        i for i, item in enumerate(actions.actions) if item.id == action_id
+    )
+    actions.focus()
+    await pilot.press("enter")
     await pilot.pause()
     if button_id == "#next-button" and type(pilot.app.screen).__name__ == "WorkspaceStartScreen":
-        await pilot.click("#continue-button")
+        actions = pilot.app.screen.query_one("#workspace-start-actions", KeyboardActionList)
+        actions.focus()
+        await pilot.press("enter")
         await pilot.pause()
 
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Static
+
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class HelpScreen(ModalScreen[None]):
@@ -23,8 +25,7 @@ class HelpScreen(ModalScreen[None]):
             "  p  Projects          s  Settings",
             "",
             "NAVIGATION",
-            "  Tab / Shift+Tab  Move focus",
-            "  Arrow keys       Move in lists and choices",
+            "  Arrow keys       Move between controls and choices",
             "  Enter / Space    Activate the focused item",
             "  Esc              Back or close",
         ]
@@ -35,12 +36,14 @@ class HelpScreen(ModalScreen[None]):
         with Vertical(id="help-panel", classes="panel"):
             yield Static("Keyboard Shortcuts", id="help-title")
             yield Static("\n".join(lines), id="help-body", markup=False)
-            yield Button("Close", id="help-close", variant="primary")
+            yield KeyboardActionList(ActionItem("close", "Close"), id="help-actions")
 
     def on_mount(self) -> None:
-        self.query_one("#help-close", Button).focus()
+        self.query_one("#help-actions", KeyboardActionList).focus()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
         self.dismiss()
 
     def action_close(self) -> None:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import (
@@ -39,6 +39,7 @@ from dashboard.services.template_store import (
     load_templates_result,
     rename_template,
 )
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -68,13 +69,14 @@ class WorkspaceTemplatesScreen(Screen[None]):
                 yield OptionList(id="template-list")
                 yield Static("", id="template-summary")
                 yield Static("", id="template-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Import", id="import-template-button", variant="primary")
-                    yield Button("Export", id="export-template-button")
-                with Horizontal(classes="button-row"):
-                    yield Button("Rename", id="rename-template-button")
-                    yield Button("Delete", id="delete-template-button", variant="error")
-                    yield Button("Back", id="back-button")
+                yield KeyboardActionList(
+                    ActionItem("import", "Import"),
+                    ActionItem("export", "Export", disabled=True),
+                    ActionItem("rename", "Rename", disabled=True),
+                    ActionItem("delete", "Delete", disabled=True, dangerous=True),
+                    ActionItem("back", "Back"),
+                    id="template-actions",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -102,9 +104,17 @@ class WorkspaceTemplatesScreen(Screen[None]):
 
     def _update_action_buttons(self) -> None:
         disabled = self._selected() is None
-        self.query_one("#export-template-button", Button).disabled = disabled
-        self.query_one("#rename-template-button", Button).disabled = disabled
-        self.query_one("#delete-template-button", Button).disabled = disabled
+        actions = self.query_one("#template-actions", KeyboardActionList)
+        actions.set_actions(
+            [
+                ActionItem("import", "Import"),
+                ActionItem("export", "Export", disabled=disabled),
+                ActionItem("rename", "Rename", disabled=disabled),
+                ActionItem("delete", "Delete", disabled=disabled, dangerous=True),
+                ActionItem("back", "Back"),
+            ],
+            preferred_id=actions.selected_action_id,
+        )
 
     def _selected(self) -> WorkspaceTemplate | None:
         option_list = self.query_one("#template-list", OptionList)
@@ -130,14 +140,16 @@ class WorkspaceTemplatesScreen(Screen[None]):
             self._show_selected()
             self._update_action_buttons()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "import-template-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "import":
             self.action_import_template()
-        elif event.button.id == "export-template-button":
+        elif event.action_id == "export":
             self.action_export_selected()
-        elif event.button.id == "rename-template-button":
+        elif event.action_id == "rename":
             self.action_rename_selected()
-        elif event.button.id == "delete-template-button":
+        elif event.action_id == "delete":
             self.action_delete_selected()
         else:
             self.action_go_back()

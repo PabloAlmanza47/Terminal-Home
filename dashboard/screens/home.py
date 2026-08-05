@@ -1,6 +1,6 @@
 """The landing screen: a header (title, artwork, clock, greeting) plus a
-responsive 4-panel dashboard -- Primary Actions, Recent Projects, Active
-Sessions, and System Status.
+responsive three-section dashboard -- Primary Actions, Recent Projects, and
+Active Sessions.
 
 Project/session/system data is refreshed by a background worker (mount and
 F5 only, same pattern as ProjectsScreen); the per-second clock timer only
@@ -16,12 +16,12 @@ from datetime import datetime
 
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical, VerticalScroll
+from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, Static
+from textual.widgets import Static
 from textual.widgets.option_list import Option
 
-from dashboard.art import ASCII_ART
+from dashboard.art import artwork_for_size
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.new_project import NewProjectScreen
@@ -47,15 +47,16 @@ from dashboard.services.projects import (
 from dashboard.services.settings_store import load_settings
 from dashboard.services.system_info import SystemInfo, gather_system_info
 from dashboard.services.tmux import TmuxSession
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 # A terminal at least this many columns wide gets the 2x2 panel grid;
 # narrower terminals get a single stacked column instead.
 _WIDE_BREAKPOINT = 100
-# Below this many rows, the artwork logo is hidden regardless of the
-# artwork_enabled setting -- there isn't room for it and all four panels.
-_MIN_HEIGHT_FOR_ART = 28
+# Below the supported compact-art threshold, artwork is hidden to preserve
+# the primary action list.
 _MAX_RECENT_PROJECTS = 5
+_MAX_ACTIVE_SESSIONS = 4
 
 # Primary-menu option/action ids.
 CONTINUE_PROJECT = "continue_project"
@@ -67,6 +68,7 @@ WORKSPACE_TEMPLATES = "workspace_templates"
 EXIT = "exit"
 
 _VIEW_ALL_PROJECTS = "__view_all_projects__"
+_VIEW_ALL_SESSIONS = "__view_all_sessions__"
 _CREATE_PROJECT_FROM_EMPTY = "__create_project_from_empty__"
 
 # (digit shown, label, option/action id) -- shared by the menu's OptionList
@@ -124,6 +126,17 @@ def format_system_status(info: SystemInfo) -> str:
     return "\n".join(lines)
 
 
+def format_system_summary(info: SystemInfo, project_count: int, session_count: int) -> str:
+    """Render the compact, non-detailed home header summary."""
+    system = f"WSL {info.wsl_distro}" if info.wsl_distro else info.operating_system
+    tmux_version = info.tmux_version or "tmux unavailable"
+    session_word = "session" if session_count == 1 else "sessions"
+    return (
+        f"{project_count} projects • {session_count} active {session_word} • "
+        f"{system} • {tmux_version}"
+    )
+
+
 class HomeScreen(Screen[None]):
     """First screen shown on launch; every other screen is reached from here."""
 
@@ -149,41 +162,51 @@ class HomeScreen(Screen[None]):
         self._last_sessions: list[TmuxSession] = []
         self._last_scan_warning: str = ""
         self._wsl_distro: str | None = None
+        self._active_section = "actions"
+        self._system_summary = "Loading system summary..."
 
     def compose(self) -> ComposeResult:
         with Container(id="home", classes="screen-root"):
             with Vertical(id="home-shell"):
                 with Vertical(id="home-header"):
-                    yield Static(ASCII_ART, id="home-logo")
-                    yield Static("TERMINAL HOME", id="home-title")
-                    yield Static(id="home-subtitle")
+                    yield Static(id="home-logo")
+                    yield Static("Loading system summary...", id="home-meta")
                 with Container(id="home-dashboard"):
                     with Vertical(id="panel-actions", classes="home-panel"):
-                        yield Static("Primary Actions", classes="panel-heading")
-                        yield OptionList(
+                        yield Static(
+                            "▸ Primary Actions", id="heading-actions", classes="panel-heading"
+                        )
+                        yield KeyboardActionList(
                             *[
-                                Option(f"{digit}  {label}", id=option_id)
+                                ActionItem(option_id, f"{digit}  {label}")
                                 for digit, label, option_id in _MENU_ITEMS
                             ],
                             id="main-menu",
                         )
                     with Vertical(id="panel-recent", classes="home-panel"):
-                        yield Static("Recent Projects", classes="panel-heading")
-                        yield OptionList(id="recent-projects-list")
+                        yield Static(
+                            "  Recent Projects", id="heading-recent", classes="panel-heading"
+                        )
+                        yield OptionList(
+                            id="recent-projects-list", classes="-textual-compact home-list"
+                        )
                     with Vertical(id="panel-sessions", classes="home-panel"):
-                        yield Static("Active Sessions", classes="panel-heading")
-                        yield OptionList(id="active-sessions-list")
-                    with Vertical(id="panel-status", classes="home-panel"):
-                        yield Static("System Status", classes="panel-heading")
-                        with VerticalScroll(id="system-status-scroll"):
-                            yield Static("Loading...", id="system-status-body")
-        yield Footer()
+                        yield Static(
+                            "  Active Sessions", id="heading-sessions", classes="panel-heading"
+                        )
+                        yield OptionList(
+                            id="active-sessions-list", classes="-textual-compact home-list"
+                        )
+        yield Static(
+            "↑↓ Navigate   ←→ Sections   Enter Open   Esc Back   ? Help   q Quit",
+            id="keyboard-footer",
+        )
 
     def on_mount(self) -> None:
         self._apply_settings()
         self._update_clock()
         self.set_interval(1.0, self._update_clock)
-        self.query_one("#main-menu", OptionList).focus()
+        self.query_one("#main-menu", KeyboardActionList).focus()
         self._start_scan()
         recovery_warning = getattr(self.app, "_settings_recovery_warning", None)
         if recovery_warning:
@@ -223,25 +246,63 @@ class HomeScreen(Screen[None]):
         # dashboard panels remain available through their dedicated screens;
         # collapsing them here prevents the action list from being squeezed
         # to zero rows.
-        compact_screen = height < 24
-        for panel_id in ("#panel-recent", "#panel-sessions", "#panel-status"):
+        compact_screen = height <= 24
+        for panel_id in ("#panel-recent", "#panel-sessions"):
             self.query_one(panel_id).display = not compact_screen
 
         # The artwork logo is the header's biggest line-count cost -- once
-        # the terminal is too short to comfortably fit it *and* all four
+        # the terminal is too short to comfortably fit it and the action list
         # panels below, it's hidden regardless of the artwork_enabled
         # setting (which only controls whether it CAN show, not whether a
         # cramped terminal is forced to).
-        show_art = self.settings.artwork_enabled and height >= _MIN_HEIGHT_FOR_ART
-        self.query_one("#home-logo", Static).display = show_art
-        self.query_one("#home-subtitle", Static).display = self.settings.clock_visible
+        art = artwork_for_size(width, height, self.settings.artwork_enabled)
+        logo = self.query_one("#home-logo", Static)
+        logo.update(art or "")
+        logo.display = art is not None
+        self.query_one("#home-meta", Static).display = True
 
     def _update_clock(self) -> None:
         now = datetime.now()
-        parts = [now.strftime("%a %b %d %Y  ·  %H:%M:%S"), f"{greeting_for(now)}!"]
-        if self._wsl_distro:
-            parts.append(f"WSL: {self._wsl_distro}")
-        self.query_one("#home-subtitle", Static).update("   ·   ".join(parts))
+        clock = " • ".join((now.strftime("%a %b %d"), now.strftime("%H:%M"), greeting_for(now)))
+        text = (
+            f"{clock}   •   {self._system_summary}"
+            if self.settings.clock_visible
+            else self._system_summary
+        )
+        self.query_one("#home-meta", Static).update(text)
+
+    def _set_active_section(self, section: str) -> None:
+        labels = {
+            "actions": ("heading-actions", "panel-actions", "Primary Actions"),
+            "recent": ("heading-recent", "panel-recent", "Recent Projects"),
+            "sessions": ("heading-sessions", "panel-sessions", "Active Sessions"),
+        }
+        self._active_section = section
+        for name, (heading_id, panel_id, label) in labels.items():
+            self.query_one(f"#{heading_id}", Static).update(
+                f"{'▸' if name == section else ' '} {label}"
+            )
+            self.query_one(f"#{panel_id}").set_class(name == section, "active-section")
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key not in {"left", "right"}:
+            return
+        order = ["actions", "recent", "sessions"]
+        index = order.index(getattr(self, "_active_section", "actions"))
+        next_index = (index + (1 if event.key == "right" else -1)) % len(order)
+        section = order[next_index]
+        target = self.query_one(
+            {
+                "actions": "#main-menu",
+                "recent": "#recent-projects-list",
+                "sessions": "#active-sessions-list",
+            }[section],
+            KeyboardActionList if section == "actions" else OptionList,
+        )
+        if target.display:
+            self._set_active_section(section)
+            target.focus()
+            event.stop()
 
     # --- Scanning (mount + F5 only -- never on the clock tick) -------------
 
@@ -258,7 +319,8 @@ class HomeScreen(Screen[None]):
         recent_list.add_option(Option("Loading...", disabled=True))
         sessions_list.clear_options()
         sessions_list.add_option(Option("Loading...", disabled=True))
-        self.query_one("#system-status-body", Static).update("Loading...")
+        self._system_summary = "Loading system summary..."
+        self._update_clock()
         self.run_worker(self._scan, thread=True, exclusive=True)
 
     def _scan(self) -> None:
@@ -284,7 +346,10 @@ class HomeScreen(Screen[None]):
         self._wsl_distro = system_info.wsl_distro
         self._populate_recent_projects(self._last_statuses)
         self._populate_active_sessions(self._last_statuses, sessions)
-        self.query_one("#system-status-body", Static).update(format_system_status(system_info))
+        self._system_summary = format_system_summary(
+            system_info, len(scan_result.statuses), len(sessions)
+        )
+        self._update_clock()
 
     # --- Panel population ----------------------------------------------------
 
@@ -336,13 +401,15 @@ class HomeScreen(Screen[None]):
 
         compact = self.settings.layout_mode is LayoutMode.COMPACT
         by_session_name = {status.expected_session_name: status for status in statuses}
-        for session in sessions:
+        for session in sessions[:_MAX_ACTIVE_SESSIONS]:
             matched = by_session_name.get(session.name)
             if matched is not None:
                 self._session_lookup[session.name] = matched
             option_list.add_option(
                 Option(_session_label(session, matched, compact=compact), id=session.name)
             )
+        if len(sessions) > _MAX_ACTIVE_SESSIONS:
+            option_list.add_option(Option("View All Sessions", id=_VIEW_ALL_SESSIONS))
 
     # --- Selection handling ----------------------------------------------------
 
@@ -355,6 +422,12 @@ class HomeScreen(Screen[None]):
             self._handle_recent_project_selection(option_id)
         elif list_id == "active-sessions-list":
             self._handle_session_selection(option_id)
+
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_list.id == "main-menu":
+            self._handle_menu_selection(event.action_id)
 
     def _handle_menu_selection(self, option_id: str | None) -> None:
         if option_id == CONTINUE_PROJECT:
@@ -387,6 +460,9 @@ class HomeScreen(Screen[None]):
 
     def _handle_session_selection(self, option_id: str | None) -> None:
         if option_id is None:
+            return
+        if option_id == _VIEW_ALL_SESSIONS:
+            self.app.push_screen(TmuxSessionsScreen())
             return
         matched = self._session_lookup.get(option_id)
         if matched is not None:

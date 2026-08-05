@@ -6,9 +6,9 @@ from uuid import uuid4
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, Static
+from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import SshHost, SshModelValidationError
@@ -24,6 +24,7 @@ from dashboard.services.ssh_host_store import (
     load_all_ssh_hosts,
     update_ssh_host,
 )
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -51,13 +52,14 @@ class SshHostsScreen(Screen[None]):
                     placeholder="SSH destination (for example user@host)",
                     id="host-destination",
                 )
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Host", id="add-host-button", variant="primary")
-                    yield Button("Edit Selected", id="edit-host-button")
-                    yield Button("Remove Selected", id="remove-host-button")
+                yield KeyboardActionList(
+                    ActionItem("add", "Add Host"),
+                    ActionItem("edit", "Edit Selected"),
+                    ActionItem("remove", "Remove Selected", dangerous=True),
+                    ActionItem("back", "Back"),
+                    id="host-actions",
+                )
                 yield Static("", id="host-error", classes="wizard-hint")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back", id="back-button")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -96,8 +98,10 @@ class SshHostsScreen(Screen[None]):
             return None
         return name, destination
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "add-host-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "add":
             values = self._values()
             if values is None:
                 return
@@ -109,11 +113,11 @@ class SshHostsScreen(Screen[None]):
             self.selected_id = host.id
             self.query_one("#host-error", Static).update("Host added.")
             self._refresh()
-        elif event.button.id == "edit-host-button":
+        elif event.action_id == "edit":
             self._edit_selected()
-        elif event.button.id == "remove-host-button":
+        elif event.action_id == "remove":
             self._confirm_remove()
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             self.action_go_back()
 
     def _edit_selected(self) -> None:

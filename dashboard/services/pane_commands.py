@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dashboard.models import PaneKind, PaneSpec
+from dashboard.models.settings import CodingAgent
 from dashboard.services.project_commands import (
     DetectedProjectCommands,
     detect_project_commands,
@@ -48,6 +49,9 @@ def plan_for_pane(
     pane: PaneSpec,
     project_path: Path | str,
     detected_commands: DetectedProjectCommands | None = None,
+    coding_agent: CodingAgent = CodingAgent.CLAUDE_CODE,
+    *,
+    remote: bool = False,
 ) -> PaneLaunchPlan:
     """Decide the startup command, pane title, and any warning for *pane*,
     given the project directory it belongs to.
@@ -62,12 +66,23 @@ def plan_for_pane(
         )
 
     if pane.kind is PaneKind.CLAUDE_CODE:
-        if shutil.which("claude"):
-            return PaneLaunchPlan(startup_command="claude", pane_title="claude")
+        command = {
+            CodingAgent.NONE: None,
+            CodingAgent.CODEX: "codex",
+            CodingAgent.CLAUDE_CODE: "claude",
+        }[coding_agent]
+        if command is None:
+            return PaneLaunchPlan(
+                startup_command=None,
+                pane_title="agent",
+                warning="No Coding Agent is selected -- opened a shell instead.",
+            )
+        if remote or shutil.which(command):
+            return PaneLaunchPlan(startup_command=command, pane_title=command)
         return PaneLaunchPlan(
             startup_command=None,
-            pane_title="claude",
-            warning="Claude Code was not found on PATH -- opened a shell instead.",
+            pane_title=command,
+            warning=f"{command} was not found on PATH -- opened a shell instead.",
         )
 
     if pane.kind is PaneKind.GIT:

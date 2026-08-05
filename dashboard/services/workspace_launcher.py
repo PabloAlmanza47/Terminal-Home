@@ -8,6 +8,7 @@ dashboard.app.main() and the mutating ``th up`` CLI command are its callers.
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from typing import TextIO
@@ -19,6 +20,7 @@ from dashboard.models import (
     PaneKind,
     WorkspaceSpec,
 )
+from dashboard.models.settings import CodingAgent
 from dashboard.services import pane_commands, tmux
 from dashboard.services.project_commands import DetectedProjectCommands, detect_project_commands
 from dashboard.services.ssh import (
@@ -34,6 +36,7 @@ class LaunchError(Exception):
 
 def build_pane_plans(
     workspace: WorkspaceSpec,
+    coding_agent: CodingAgent | None = None,
 ) -> dict[tuple[str, int], pane_commands.PaneLaunchPlan]:
     """Resolve every pane in *workspace* into a PaneLaunchPlan, keyed by
     (window_name, pane_index).
@@ -57,10 +60,28 @@ def build_pane_plans(
         detected_commands = (
             DetectedProjectCommands(development=None, test=None) if needs_detection else None
         )
+    if coding_agent is None:
+        from dashboard.services.settings_store import load_settings
+
+        coding_agent = load_settings().coding_agent
+    planner = pane_commands.plan_for_pane
+    supports_agent = "coding_agent" in inspect.signature(planner).parameters
+
+    def make_plan(pane: object) -> pane_commands.PaneLaunchPlan:
+        if supports_agent:
+            return planner(
+                pane,  # type: ignore[arg-type]
+                project_path,
+                detected_commands,
+                coding_agent,
+                remote=not isinstance(workspace.project_location, LocalProjectLocation),
+            )
+        # Preserve the lightweight three-argument injection contract used by
+        # callers that provide a legacy planner implementation.
+        return planner(pane, project_path, detected_commands)  # type: ignore[arg-type]
+
     return {
-        (window.window_name, pane_index): pane_commands.plan_for_pane(
-            pane, project_path, detected_commands
-        )
+        (window.window_name, pane_index): make_plan(pane)
         for window in workspace.windows
         for pane_index, pane in enumerate(window.panes)
     }

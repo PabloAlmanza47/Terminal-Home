@@ -5,12 +5,13 @@ that the Step 2 selection/order will produce.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 
 from dashboard.models.layout import render_pane_preview
 from dashboard.screens.new_project.state import WizardState
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class LayoutPreviewScreen(Screen[None]):
@@ -37,22 +38,26 @@ class LayoutPreviewScreen(Screen[None]):
                     id="preview-pane-list",
                 )
                 yield Static("\n".join(preview_lines), id="preview-grid", classes="preview-grid")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back", id="back-button")
-                    yield Button("Continue", id="continue-button", variant="primary")
-                    yield Button("Cancel", id="cancel-button")
+                yield KeyboardActionList(
+                    ActionItem("back", "Back"),
+                    ActionItem("continue", "Continue"),
+                    ActionItem("cancel", "Cancel"),
+                    id="preview-actions",
+                )
         yield Footer()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "continue-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "continue":
             self._continue()
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             self.action_back()
-        elif event.button.id == "cancel-button":
+        elif event.action_id == "cancel":
             self.action_cancel()
 
     def on_mount(self) -> None:
-        self.query_one("#continue-button", Button).focus()
+        self.query_one("#preview-actions", KeyboardActionList).focus()
 
     def _continue(self) -> None:
         self.state.commit_pending_window()

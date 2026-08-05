@@ -5,14 +5,15 @@ git-init choice.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Input, Static
+from textual.widgets import Checkbox, Footer, Input, Static
 
 from dashboard.screens.new_project.state import WizardState
 from dashboard.services import project_creation
 from dashboard.services.project_creation import validate_new_project
 from dashboard.services.slug import slugify
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class NewProjectScreen(Screen[None]):
@@ -47,9 +48,11 @@ class NewProjectScreen(Screen[None]):
                     id="git-init-checkbox",
                 )
                 yield Static("", id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Next", id="next-button", variant="primary")
-                    yield Button("Cancel", id="cancel-button")
+                yield KeyboardActionList(
+                    ActionItem("next", "Next"),
+                    ActionItem("cancel", "Cancel"),
+                    id="project-info-actions",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -77,10 +80,12 @@ class NewProjectScreen(Screen[None]):
         destination = root / folder if folder else root
         self.query_one("#destination-preview", Static).update(f"Destination: {destination}")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "next-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "next":
             self._go_next()
-        elif event.button.id == "cancel-button":
+        elif event.action_id == "cancel":
             self.action_cancel()
 
     def _go_next(self) -> None:

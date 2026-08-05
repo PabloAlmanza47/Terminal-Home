@@ -5,9 +5,10 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 
 from dashboard.services.system_info import gather_system_info
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class SystemInfoScreen(Screen[None]):
@@ -39,14 +40,16 @@ class SystemInfoScreen(Screen[None]):
                 with Vertical(id="info-rows"):
                     for label, value in rows:
                         yield Static(f"{label:<20} {value}", classes="info-row")
-                yield Button("Back", id="back-button", variant="primary")
+                yield KeyboardActionList(ActionItem("back", "Back"), id="system-info-actions")
         yield Footer()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
         self.action_go_back()
 
     def on_mount(self) -> None:
-        self.query_one("#back-button", Button).focus()
+        self.query_one("#system-info-actions", KeyboardActionList).focus()
 
     def action_go_back(self) -> None:
         self.app.pop_screen()

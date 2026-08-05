@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from dashboard.models.settings import AppSettings
+from dashboard.models.settings import AppSettings, CodingAgent
 from dashboard.services.atomic_file import atomic_write_text, backup_path_for
 from dashboard.services.load_result import LoadSource
 
@@ -44,7 +44,13 @@ def _load_settings_file(path: Path) -> AppSettings | None:
         return None
     if not isinstance(data, dict):
         return None
-    return AppSettings.from_dict(data)
+    settings = AppSettings.from_dict(data)
+    # Before v0.2.0 the only coding-agent pane was explicitly Claude Code.
+    # Preserve that behavior for an existing settings file while a genuinely
+    # new installation gets AppSettings' safe NONE default.
+    if "coding_agent" not in data:
+        settings = replace(settings, coding_agent=CodingAgent.CLAUDE_CODE)
+    return settings
 
 
 def load_settings_result(settings_path: Path | None = None) -> SettingsLoadResult:

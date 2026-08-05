@@ -18,6 +18,7 @@ from textual.widgets import Input, OptionList, Static
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.services.projects_config_store import load_projects_config, save_projects_config
+from dashboard.widgets import KeyboardActionList
 
 _SIZE = (100, 100)
 
@@ -37,6 +38,16 @@ def _run(coro):
 
 def _option_ids(option_list: OptionList) -> list[str | None]:
     return [option_list.get_option_at_index(i).id for i in range(option_list.option_count)]
+
+
+async def _activate(pilot, action_list: str, action_id: str) -> None:
+    actions = pilot.app.screen.query_one(action_list, KeyboardActionList)
+    actions.selected_index = next(
+        i for i, item in enumerate(actions.actions) if item.id == action_id
+    )
+    actions.focus()
+    await pilot.press("enter")
+    await pilot.pause()
 
 
 # --- Viewing configured state ---------------------------------------------------
@@ -120,7 +131,7 @@ def test_add_root_persists_and_refreshes_list(
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#root-input", Input).value = str(new_root)
-            await pilot.click("#add-root-button")
+            await _activate(pilot, "#root-actions", "add-root")
             await pilot.pause()
             return _option_ids(app.screen.query_one("#roots-list", OptionList))
 
@@ -139,7 +150,7 @@ def test_add_root_expands_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#root-input", Input).value = "~/work"
-            await pilot.click("#add-root-button")
+            await _activate(pilot, "#root-actions", "add-root")
             await pilot.pause()
 
     _run(scenario())
@@ -158,7 +169,7 @@ def test_add_duplicate_root_shows_error_and_does_not_duplicate(
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#root-input", Input).value = str(root)
-            await pilot.click("#add-root-button")
+            await _activate(pilot, "#root-actions", "add-root")
             await pilot.pause()
             error = str(app.screen.query_one("#wizard-error", Static).render())
             ids = _option_ids(app.screen.query_one("#roots-list", OptionList))
@@ -178,7 +189,7 @@ def test_add_blank_root_shows_error(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#root-input", Input).value = "   "
-            await pilot.click("#add-root-button")
+            await _activate(pilot, "#root-actions", "add-root")
             await pilot.pause()
             return str(app.screen.query_one("#wizard-error", Static).render())
 
@@ -197,7 +208,7 @@ def test_remove_selected_root_persists(tmp_path: Path, monkeypatch: pytest.Monke
             await pilot.pause()
             option_list = app.screen.query_one("#roots-list", OptionList)
             option_list.highlighted = 0
-            await pilot.click("#remove-root-button")
+            await _activate(pilot, "#root-actions", "remove-root")
             await pilot.pause()
             return _option_ids(option_list)
 
@@ -216,7 +227,7 @@ def test_remove_root_with_nothing_selected_shows_error(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#remove-root-button")
+            await _activate(pilot, "#root-actions", "remove-root")
             await pilot.pause()
             return str(app.screen.query_one("#wizard-error", Static).render())
 
@@ -235,7 +246,7 @@ def test_apply_depth_persists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#depth-input", Input).value = "3"
-            await pilot.click("#apply-depth-button")
+            await _activate(pilot, "#depth-actions", "apply-depth")
             await pilot.pause()
 
     _run(scenario())
@@ -253,7 +264,7 @@ def test_apply_invalid_depth_shows_error_and_does_not_change_config(
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#depth-input", Input).value = "0"
-            await pilot.click("#apply-depth-button")
+            await _activate(pilot, "#depth-actions", "apply-depth")
             await pilot.pause()
             return str(app.screen.query_one("#wizard-error", Static).render())
 
@@ -273,7 +284,7 @@ def test_apply_non_numeric_depth_shows_error(
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#depth-input", Input).value = "abc"
-            await pilot.click("#apply-depth-button")
+            await _activate(pilot, "#depth-actions", "apply-depth")
             await pilot.pause()
             return str(app.screen.query_one("#wizard-error", Static).render())
 
@@ -294,12 +305,12 @@ def test_add_and_remove_excluded_name(tmp_path: Path, monkeypatch: pytest.Monkey
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#excluded-input", Input).value = "dist"
-            await pilot.click("#add-excluded-button")
+            await _activate(pilot, "#excluded-actions", "add-excluded")
             await pilot.pause()
             after_add = _option_ids(app.screen.query_one("#excluded-list", OptionList))
 
             app.screen.query_one("#excluded-list", OptionList).highlighted = 0
-            await pilot.click("#remove-excluded-button")
+            await _activate(pilot, "#excluded-actions", "remove-excluded")
             await pilot.pause()
             after_remove = _option_ids(app.screen.query_one("#excluded-list", OptionList))
         return after_add, after_remove
@@ -323,12 +334,12 @@ def test_add_and_remove_manual_project(tmp_path: Path, monkeypatch: pytest.Monke
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#manual-input", Input).value = str(manual_path)
-            await pilot.click("#add-manual-button")
+            await _activate(pilot, "#manual-actions", "add-manual")
             await pilot.pause()
             after_add = _option_ids(app.screen.query_one("#manual-list", OptionList))
 
             app.screen.query_one("#manual-list", OptionList).highlighted = 0
-            await pilot.click("#remove-manual-button")
+            await _activate(pilot, "#manual-actions", "remove-manual")
             await pilot.pause()
             after_remove = _option_ids(app.screen.query_one("#manual-list", OptionList))
         return after_add, after_remove
@@ -351,7 +362,7 @@ def test_add_manual_project_does_not_create_the_directory(
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#manual-input", Input).value = str(manual_path)
-            await pilot.click("#add-manual-button")
+            await _activate(pilot, "#manual-actions", "add-manual")
             await pilot.pause()
 
     _run(scenario())

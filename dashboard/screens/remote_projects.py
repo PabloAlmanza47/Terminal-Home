@@ -6,9 +6,9 @@ from uuid import uuid4
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, Static
+from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import RemoteProjectRegistration, SshModelValidationError
@@ -21,6 +21,7 @@ from dashboard.services.remote_registry import (
     remove_registered_remote_project,
     update_registered_remote_project,
 )
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -47,13 +48,14 @@ class RemoteProjectsScreen(Screen[None]):
                 yield Input(placeholder="Project name", id="remote-name")
                 yield Input(placeholder="SSH host ID", id="remote-host-id")
                 yield Input(placeholder="Absolute remote path", id="remote-path")
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Project", id="add-remote-button", variant="primary")
-                    yield Button("Edit Selected", id="edit-remote-button")
-                    yield Button("Remove Selected", id="remove-remote-button")
+                yield KeyboardActionList(
+                    ActionItem("add", "Add Project"),
+                    ActionItem("edit", "Edit Selected"),
+                    ActionItem("remove", "Remove Selected", dangerous=True),
+                    ActionItem("back", "Back"),
+                    id="remote-actions",
+                )
                 yield Static("", id="remote-error", classes="wizard-hint")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back", id="back-button")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -101,8 +103,10 @@ class RemoteProjectsScreen(Screen[None]):
             return None
         return values
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "add-remote-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "add":
             values = self._values()
             if values is None:
                 return
@@ -116,11 +120,11 @@ class RemoteProjectsScreen(Screen[None]):
             self.selected_id = project.id
             self.query_one("#remote-error", Static).update("Remote project added.")
             self._refresh()
-        elif event.button.id == "edit-remote-button":
+        elif event.action_id == "edit":
             self._edit_selected()
-        elif event.button.id == "remove-remote-button":
+        elif event.action_id == "remove":
             self._confirm_remove()
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             self.action_go_back()
 
     def _edit_selected(self) -> None:

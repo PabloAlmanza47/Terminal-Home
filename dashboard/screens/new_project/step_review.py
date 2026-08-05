@@ -15,9 +15,9 @@ button is pressed.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 
 from dashboard.models import LaunchAction, LaunchRequest, WorkspaceSpec, WorkspaceValidationError
 from dashboard.models.layout import render_pane_preview
@@ -30,6 +30,7 @@ from dashboard.services.project_creation import (
     resolve_destination,
 )
 from dashboard.services.workspace_store import WorkspaceStoreVersionError, save_workspace
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class ReviewScreen(Screen[None]):
@@ -80,27 +81,31 @@ class ReviewScreen(Screen[None]):
                         classes="preview-grid",
                     )
                 yield Static("", id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    primary_label = (
-                        "Save Workspace" if mode is WizardMode.EXISTING_EDIT else "Create and Open"
-                    )
-                    yield Button(primary_label, id="create-button", variant="primary")
-                    yield Button("Go Back", id="back-button")
-                    yield Button("Cancel", id="cancel-button")
+                primary_label = (
+                    "Save Workspace" if mode is WizardMode.EXISTING_EDIT else "Create and Open"
+                )
+                yield KeyboardActionList(
+                    ActionItem("create", primary_label),
+                    ActionItem("back", "Go Back"),
+                    ActionItem("cancel", "Cancel"),
+                    id="review-actions",
+                )
         yield Footer()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "create-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "create":
             self._create()
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 
             self.app.switch_screen(WindowSummaryScreen(self.state))
-        elif event.button.id == "cancel-button":
+        elif event.action_id == "cancel":
             self.action_cancel()
 
     def on_mount(self) -> None:
-        self.query_one("#create-button", Button).focus()
+        self.query_one("#review-actions", KeyboardActionList).focus()
 
     def _create(self) -> None:
         if self.state.mode is WizardMode.NEW_PROJECT:

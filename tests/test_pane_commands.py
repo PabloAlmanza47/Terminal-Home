@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from dashboard.models import PaneKind, PaneSpec
+from dashboard.models.settings import CodingAgent
 from dashboard.services import pane_commands as pane_commands_module
 from dashboard.services.pane_commands import plan_for_pane
 
@@ -20,6 +21,17 @@ def _which_only(*available: str):
         return f"/usr/bin/{name}" if name in available else None
 
     return fake_which
+
+
+def test_coding_agent_preference_resolves_codex_and_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pane_commands_module.shutil, "which", _which_only("codex"))
+    pane = PaneSpec(kind=PaneKind.CLAUDE_CODE, display_name="Coding Agent")
+    assert plan_for_pane(pane, tmp_path, coding_agent=CodingAgent.CODEX).startup_command == "codex"
+    none_plan = plan_for_pane(pane, tmp_path, coding_agent=CodingAgent.NONE)
+    assert none_plan.startup_command is None
+    assert none_plan.warning and "No Coding Agent" in none_plan.warning
 
 
 # --- Code Editor ---------------------------------------------------------------

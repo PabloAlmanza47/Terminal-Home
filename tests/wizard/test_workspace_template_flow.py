@@ -11,6 +11,7 @@ from dashboard.models import PaneKind, PaneSpec, WindowSpec, WorkspaceTemplate
 from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.services.template_store import create_template, default_template_store_path
+from dashboard.widgets import KeyboardActionList
 
 
 class _WizardApp(App[None]):
@@ -46,7 +47,9 @@ def test_saved_template_prepopulates_independent_wizard_drafts(
             await pilot.pause()
             option_list = app.screen.query_one("#workspace-start-list", OptionList)
             option_list.highlighted = 2
-            await pilot.click("#continue-button")
+            actions = app.screen.query_one("#workspace-start-actions", KeyboardActionList)
+            actions.focus()
+            await pilot.press("enter")
             await pilot.pause()
             assert type(app.screen).__name__ == "WindowSummaryScreen"
             assert [window.window_name for window in state.windows] == ["web", "tests"]
@@ -78,7 +81,9 @@ def test_selecting_blank_or_default_does_not_write(
                 app.push_screen(WorkspaceStartScreen(state))
                 await pilot.pause()
                 app.screen.query_one("#workspace-start-list", OptionList).highlighted = index
-                await pilot.click("#continue-button")
+                actions = app.screen.query_one("#workspace-start-actions", KeyboardActionList)
+                actions.focus()
+                await pilot.press("enter")
                 await pilot.pause()
 
         asyncio.run(scenario())

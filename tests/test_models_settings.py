@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
-from dashboard.models.settings import AppSettings, LayoutMode
+import pytest
+
+from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode
 
 
 def test_defaults() -> None:
@@ -13,6 +15,7 @@ def test_defaults() -> None:
     assert settings.layout_mode is LayoutMode.EXPANDED
     assert settings.clock_visible is True
     assert settings.theme is None
+    assert settings.coding_agent is CodingAgent.NONE
 
 
 def test_round_trips_through_dict() -> None:
@@ -34,6 +37,7 @@ def test_to_dict_uses_plain_json_safe_values() -> None:
         "layout_mode": "compact",
         "clock_visible": True,
         "theme": "nord",
+        "coding_agent": "none",
     }
 
 
@@ -83,3 +87,13 @@ def test_from_dict_accepts_valid_theme_string() -> None:
         {"artwork_enabled": True, "layout_mode": "expanded", "clock_visible": True, "theme": "nord"}
     )
     assert settings.theme == "nord"
+
+
+@pytest.mark.parametrize("agent", list(CodingAgent))
+def test_coding_agent_values_round_trip(agent: CodingAgent) -> None:
+    assert AppSettings(coding_agent=agent).to_dict()["coding_agent"] == agent.value
+    assert AppSettings.from_dict({"coding_agent": agent.value}).coding_agent is agent
+
+
+def test_malformed_coding_agent_falls_back_to_none() -> None:
+    assert AppSettings.from_dict({"coding_agent": "not-an-agent"}).coding_agent is CodingAgent.NONE

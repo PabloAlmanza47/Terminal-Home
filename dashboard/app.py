@@ -15,7 +15,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import Input, TextArea
+from textual.widgets import Button, Checkbox, Input, TextArea
 
 from dashboard.models import LaunchRequest
 from dashboard.models.settings import AppSettings
@@ -23,6 +23,7 @@ from dashboard.screens.home import HomeScreen
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
+from dashboard.widgets import KeyboardActionList
 
 
 class TerminalHomeApp(App[LaunchRequest | None]):
@@ -75,6 +76,56 @@ class TerminalHomeApp(App[LaunchRequest | None]):
 
     def _editing(self) -> bool:
         return isinstance(self.focused, (Input, TextArea))
+
+    def on_key(self, event) -> None:
+        """Provide spatial arrows for simple controls without disturbing
+        text cursor movement or list/radio widgets' native arrow behavior.
+
+        Tab is intentionally inert; command screens use terminal action rows
+        and forms use arrows, preserving normal Input cursor movement.
+        """
+        if event.key in {"tab", "shift+tab"}:
+            event.stop()
+            return
+        focused = self.focused
+        if isinstance(focused, Checkbox) and event.key in {"enter", "space"}:
+            focused.value = not focused.value
+            event.stop()
+            return
+        if not isinstance(focused, (Button, Checkbox)):
+            return
+        if event.key not in {"up", "down", "left", "right"}:
+            return
+        candidates = [
+            widget
+            for widget in [
+                *self.screen.query(Button),
+                *self.screen.query(Checkbox),
+                *self.screen.query(KeyboardActionList),
+            ]
+            if widget.display and widget is not focused and widget.can_focus
+        ]
+        if not candidates:
+            return
+        current = focused.region
+        cx, cy = current.x + current.width / 2, current.y + current.height / 2
+        directional = []
+        for widget in candidates:
+            region = widget.region
+            wx, wy = region.x + region.width / 2, region.y + region.height / 2
+            dx, dy = wx - cx, wy - cy
+            if event.key == "left" and dx < 0:
+                directional.append((abs(dx) + abs(dy), widget))
+            elif event.key == "right" and dx > 0:
+                directional.append((abs(dx) + abs(dy), widget))
+            elif event.key == "up" and dy < 0:
+                directional.append((abs(dy) + abs(dx), widget))
+            elif event.key == "down" and dy > 0:
+                directional.append((abs(dy) + abs(dx), widget))
+        if directional:
+            directional.sort(key=lambda item: item[0])
+            directional[0][1].focus()
+            event.stop()
 
     def action_quit_app(self) -> None:
         if not self._editing() and not isinstance(self.screen, ModalScreen):

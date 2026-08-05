@@ -10,15 +10,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Static
+from textual.widgets import Checkbox, Footer, RadioButton, RadioSet, Static
 
-from dashboard.models.settings import AppSettings, LayoutMode
+from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode
 from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class SettingsScreen(Screen[None]):
@@ -38,6 +39,7 @@ class SettingsScreen(Screen[None]):
                     "These preferences control the home screen's appearance.",
                     classes="wizard-hint",
                 )
+                yield Static("Appearance", classes="panel-heading")
                 yield Checkbox(
                     "Show ASCII artwork",
                     value=self.settings.artwork_enabled,
@@ -53,22 +55,43 @@ class SettingsScreen(Screen[None]):
                     value=self.settings.layout_mode is LayoutMode.COMPACT,
                     id="compact-checkbox",
                 )
-                with Horizontal(classes="button-row"):
-                    yield Button("Project Discovery...", id="project-discovery-button")
-                    yield Button("SSH Hosts...", id="ssh-hosts-button")
-                    yield Button("Remote Projects...", id="remote-projects-button")
+                yield Static("Coding Agent", classes="panel-heading")
+                with RadioSet(id="coding-agent-set"):
+                    yield RadioButton(
+                        "None",
+                        id="agent-none",
+                        value=self.settings.coding_agent is CodingAgent.NONE,
+                    )
+                    yield RadioButton(
+                        "Codex",
+                        id="agent-codex",
+                        value=self.settings.coding_agent is CodingAgent.CODEX,
+                    )
+                    yield RadioButton(
+                        "Claude Code",
+                        id="agent-claude",
+                        value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
+                    )
+                yield Static("Project Management", classes="panel-heading")
+                yield KeyboardActionList(
+                    ActionItem("project-discovery", "Project Discovery..."),
+                    ActionItem("ssh-hosts", "SSH Hosts..."),
+                    ActionItem("remote-projects", "Remote Projects..."),
+                    id="settings-actions",
+                )
                 yield Static(
                     "Theme: open the command palette (ctrl+p) and search\n"
                     "\"theme\" -- your choice is applied immediately and\n"
                     "persists across launches.\n\n"
-                    "Shortcut remapping is planned for a future version.\n\n"
+                    "Remote access actions do not probe or install anything on remote hosts.\n\n"
+                    "Coding agents are never installed or authenticated by Terminal Home.\n\n"
                     "Press Escape to go back.",
                     id="placeholder-body",
                 )
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#artwork-checkbox", Checkbox).focus()
+        self.query_one("#settings-actions", KeyboardActionList).focus()
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         if event.checkbox.id == "artwork-checkbox":
@@ -89,12 +112,33 @@ class SettingsScreen(Screen[None]):
                 severity="error",
             )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "project-discovery-button":
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        selected_id = event.pressed.id
+        selected = {
+            "agent-none": CodingAgent.NONE,
+            "agent-codex": CodingAgent.CODEX,
+            "agent-claude": CodingAgent.CLAUDE_CODE,
+        }.get(selected_id or "")
+        if selected is None:
+            return
+        self.settings = replace(self.settings, coding_agent=selected)
+        try:
+            save_settings(self.settings)
+        except OSError as exc:
+            self.app.notify(
+                f"Coding Agent changed for this session, but couldn't be saved: {exc}",
+                title="Settings",
+                severity="error",
+            )
+
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "project-discovery":
             self.app.push_screen(ProjectDiscoveryScreen())
-        elif event.button.id == "ssh-hosts-button":
+        elif event.action_id == "ssh-hosts":
             self.app.push_screen(SshHostsScreen())
-        elif event.button.id == "remote-projects-button":
+        elif event.action_id == "remote-projects":
             self.app.push_screen(RemoteProjectsScreen())
 
     def action_go_back(self) -> None:

@@ -18,9 +18,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, Static
+from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models.projects_config import ProjectsConfig, ProjectsConfigValidationError
@@ -28,6 +28,7 @@ from dashboard.services.projects_config_store import (
     load_projects_config_result,
     save_projects_config,
 )
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -86,32 +87,38 @@ class ProjectDiscoveryScreen(Screen[None]):
                 yield Static("Project roots", classes="field-label")
                 yield OptionList(id="roots-list")
                 yield Input(placeholder="e.g. ~/work", id="root-input")
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Root", id="add-root-button")
-                    yield Button("Remove Selected Root", id="remove-root-button")
+                yield KeyboardActionList(
+                    ActionItem("add-root", "Add Root"),
+                    ActionItem("remove-root", "Remove Selected Root", dangerous=True),
+                    id="root-actions",
+                )
 
                 yield Static("Max scan depth (levels below each root)", classes="field-label")
                 yield Input(value=str(self.config.max_depth), id="depth-input")
-                with Horizontal(classes="button-row"):
-                    yield Button("Apply Depth", id="apply-depth-button")
+                yield KeyboardActionList(
+                    ActionItem("apply-depth", "Apply Depth"), id="depth-actions"
+                )
 
                 yield Static("Excluded directory names", classes="field-label")
                 yield OptionList(id="excluded-list")
                 yield Input(placeholder="e.g. dist", id="excluded-input")
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Excluded Name", id="add-excluded-button")
-                    yield Button("Remove Selected", id="remove-excluded-button")
+                yield KeyboardActionList(
+                    ActionItem("add-excluded", "Add Excluded Name"),
+                    ActionItem("remove-excluded", "Remove Selected", dangerous=True),
+                    id="excluded-actions",
+                )
 
                 yield Static("Manually registered projects", classes="field-label")
                 yield OptionList(id="manual-list")
                 yield Input(placeholder="e.g. ~/elsewhere/side-project", id="manual-input")
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Project", id="add-manual-button")
-                    yield Button("Remove Selected", id="remove-manual-button")
+                yield KeyboardActionList(
+                    ActionItem("add-manual", "Add Project"),
+                    ActionItem("remove-manual", "Remove Selected", dangerous=True),
+                    id="manual-actions",
+                )
 
                 yield Static("", id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back", id="back-button")
+                yield KeyboardActionList(ActionItem("back", "Back"), id="discovery-actions")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -161,20 +168,22 @@ class ProjectDiscoveryScreen(Screen[None]):
         self.config = new_config
         self._show_error("")
 
-    # --- Button handling -------------------------------------------------------
+    # --- Action handling -------------------------------------------------------
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
         handlers = {
-            "add-root-button": self._add_root,
-            "remove-root-button": self._remove_root,
-            "apply-depth-button": self._apply_depth,
-            "add-excluded-button": self._add_excluded,
-            "remove-excluded-button": self._remove_excluded,
-            "add-manual-button": self._add_manual,
-            "remove-manual-button": self._remove_manual,
-            "back-button": self.action_go_back,
+            "add-root": self._add_root,
+            "remove-root": self._remove_root,
+            "apply-depth": self._apply_depth,
+            "add-excluded": self._add_excluded,
+            "remove-excluded": self._remove_excluded,
+            "add-manual": self._add_manual,
+            "remove-manual": self._remove_manual,
+            "back": self.action_go_back,
         }
-        handler = handlers.get(event.button.id or "")
+        handler = handlers.get(event.action_id)
         if handler is not None:
             handler()
 

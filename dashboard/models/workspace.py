@@ -43,7 +43,7 @@ class PaneKind(str, Enum):
 
 PANE_KIND_LABELS: dict[PaneKind, str] = {
     PaneKind.CODE_EDITOR: "Code Editor",
-    PaneKind.CLAUDE_CODE: "Claude Code",
+    PaneKind.CLAUDE_CODE: "Coding Agent",
     PaneKind.GIT: "Git",
     PaneKind.FILE_TREE: "File Tree",
     PaneKind.TEST_TERMINAL: "Test Terminal",

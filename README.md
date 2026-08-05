@@ -35,7 +35,7 @@ dashboard.
 - Saved workspace persistence — layouts survive tmux restarts and WSL reboots
 - Reusable local workspace templates with stable identity and independent copies
 - Resume-if-running, recreate-if-not launch behavior with no duplicate sessions
-- Neovim, Claude Code, Git (lazygit), file tree, test, dev server, blank shell,
+- Neovim, Coding Agent, Git (lazygit), file tree, test, dev server, blank shell,
   and custom-command pane types
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
@@ -48,7 +48,7 @@ terminal-home
   -> Continue Project
     -> SHPE-Connect
       -> Resume Session   (or Recreate Workspace, if nothing's running)
-        -> Neovim + Claude Code + dev server, tiled and ready
+        -> Neovim + Coding Agent + dev server, tiled and ready
 ```
 
 ## Normal user installation
@@ -440,9 +440,9 @@ will and won't do to a running session or a saved workspace — see
 
 ## Keyboard controls
 
-`Tab` / `Shift+Tab` move focus through controls. Arrow keys navigate
-collections, `Enter` activates or confirms, `Space` toggles or selects, and
-`Esc` goes back or cancels. The contextual shortcuts are:
+Arrow keys move between controls and collections. `Enter` activates or
+confirms, `Space` toggles or selects, and `Esc` goes back or cancels. `/`
+focuses search where available and `?` opens help. The contextual shortcuts are:
 
 ```text
 /  Focus search       ?  Keyboard help
@@ -452,6 +452,18 @@ s  Settings           q  Quit outside editable fields
 
 `F5` refreshes screens that expose refreshable project or session data. The
 shortcut help overlay shows the global and current-screen bindings.
+
+The home screen adapts to split terminals: large terminals show the full
+Terminal Home artwork, medium terminals show a compact identity, and very
+short terminals hide artwork when needed to keep Primary Actions usable. The
+header contains a compact project/session/system summary; detailed disk,
+memory, shell, and host information remains on System Information.
+
+Settings includes a Coding Agent preference with None, Codex, and Claude Code.
+None opens a normal shell with a warning. Codex and Claude Code are used only
+when their commands are already available; a missing command falls back to a
+shell. Terminal Home never installs, authenticates, or stores credentials for
+either agent.
 
 ## Roadmap
 
@@ -525,7 +537,7 @@ tests/                       Unit tests for models/ and services/, plus Pilot te
 | Pane            | Preferred command | Fallback                                   |
 |-----------------|--------------------|--------------------------------------------|
 | Code Editor     | `nvim .`           | interactive shell (Neovim not found)        |
-| Claude Code     | `claude`           | interactive shell (Claude Code not found)   |
+| Coding Agent    | selected command   | interactive shell with a nonfatal warning   |
 | Git             | `lazygit`          | `git status` then a shell; or, if the project isn't a git repo yet, a plain shell |
 | File Tree       | `tree -C .`        | `find`-based listing, then a shell          |
 | Test Terminal   | detected Node `test` script, otherwise `pytest` for supported Python indicators | interactive shell titled "tests" |
@@ -533,7 +545,7 @@ tests/                       Unit tests for models/ and services/, plus Pilot te
 | Blank Terminal  | (none — a plain shell)                                                         |
 | Custom Command  | the exact command you enter                                                     |
 
-Editor, Claude Code, Git, and file-tree tool availability is checked at
+Editor, Coding Agent, Git, and file-tree tool availability is checked at
 *launch* time (`dashboard/services/pane_commands.py`), not wizard time. Every
 pane's shell starts in the project's directory regardless of which command
 (if any) runs in it. Falling back to a shell is always nonfatal: a short note

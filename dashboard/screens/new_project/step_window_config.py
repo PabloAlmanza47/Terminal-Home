@@ -10,15 +10,16 @@ avoids a circular import at module load time.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, SelectionList, Static
+from textual.widgets import Footer, Input, SelectionList, Static
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
 from dashboard.models import PANE_KIND_LABELS, PaneKind
 from dashboard.models.workspace import PANE_KIND_ORDER
 from dashboard.screens.new_project.state import PaneDraft, WizardState
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 MAX_PANES_PER_WINDOW = 4
@@ -62,9 +63,11 @@ class WindowConfigScreen(Screen[None]):
                 )
                 yield Static("Pane order (first = leftmost/topmost)", classes="field-label")
                 yield OptionList(id="pane-order-list")
-                with Horizontal(classes="button-row"):
-                    yield Button("Move Up", id="move-up-button")
-                    yield Button("Move Down", id="move-down-button")
+                yield KeyboardActionList(
+                    ActionItem("move-up", "Move Up"),
+                    ActionItem("move-down", "Move Down"),
+                    id="pane-order-actions",
+                )
                 with Vertical(id="custom-command-fields"):
                     yield Static("Custom pane display name", classes="field-label")
                     yield Input(
@@ -83,10 +86,12 @@ class WindowConfigScreen(Screen[None]):
                         classes="wizard-hint",
                     )
                 yield Static("", id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back", id="back-button")
-                    yield Button("Next", id="next-button", variant="primary")
-                    yield Button("Cancel", id="cancel-button")
+                yield KeyboardActionList(
+                    ActionItem("back", "Back"),
+                    ActionItem("next", "Next"),
+                    ActionItem("cancel", "Cancel"),
+                    id="window-config-actions",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -151,16 +156,18 @@ class WindowConfigScreen(Screen[None]):
     def _show_error(self, message: str) -> None:
         self.query_one("#wizard-error", Static).update(message)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "move-up-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "move-up":
             self._move_selected(-1)
-        elif event.button.id == "move-down-button":
+        elif event.action_id == "move-down":
             self._move_selected(1)
-        elif event.button.id == "next-button":
+        elif event.action_id == "next":
             self._go_next()
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             self.action_back()
-        elif event.button.id == "cancel-button":
+        elif event.action_id == "cancel":
             self.action_cancel()
 
     def _move_selected(self, delta: int) -> None:

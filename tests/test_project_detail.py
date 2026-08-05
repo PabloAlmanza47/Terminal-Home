@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, Input, OptionList, Static
+from textual.widgets import Input, OptionList, Static
 
 import dashboard.screens.home as home_module
 from dashboard.app import TerminalHomeApp
@@ -31,6 +31,7 @@ from dashboard.services.workspace_store import (
     load_workspace,
     save_workspace,
 )
+from dashboard.widgets import KeyboardActionList
 
 _SIZE = (100, 100)
 
@@ -79,6 +80,20 @@ def _future_version_store_path(tmp_path: Path) -> Path:
     return tmp_path / "xdg-data" / "terminal-home" / "workspaces.json"
 
 
+def _has_action(screen, action_id: str) -> bool:
+    actions = screen.query_one("#project-actions", KeyboardActionList)
+    return any(action.id == action_id and not action.disabled for action in actions.actions)
+
+
+async def _activate_action(pilot, action_id: str) -> None:
+    actions = pilot.app.screen.query_one("#project-actions", KeyboardActionList)
+    actions.selected_index = next(
+        index for index, action in enumerate(actions.actions) if action.id == action_id
+    )
+    await pilot.press("enter")
+    await pilot.pause()
+
+
 def _write_future_version_store(tmp_path: Path, workspaces: dict[str, object] | None = None) -> str:
     """Overwrite the store with a schema version one newer than this build
     understands, simulating a newer Terminal Home having written (or
@@ -115,11 +130,11 @@ def test_save_as_template_uses_saved_metadata_and_leaves_workspace_unchanged(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            assert app.screen.query("#action-save_template").first(Button) is not None
-            await pilot.click("#action-save_template")
+            assert _has_action(app.screen, "action-save_template")
+            await _activate_action(pilot, "action-save_template")
             await pilot.pause()
             app.screen.query_one("#template-name-input", Input).value = "Full Stack"
-            await pilot.click("#template-name-submit")
+            await pilot.press("enter")
             await app.workers.wait_for_complete()
             await pilot.pause()
             feedback = str(app.screen.query_one("#detail-error", Static).render())
@@ -145,7 +160,7 @@ def test_unconfigured_project_cannot_save_as_template(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            return bool(app.screen.query("#action-save_template"))
+            return _has_action(app.screen, "action-save_template")
 
     assert _run(scenario()) is False
 
@@ -223,7 +238,7 @@ def test_shows_resume_when_session_is_running(
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             assert type(app.screen).__name__ == "ProjectDetailScreen"
-            return app.screen.query("#action-resume").first(Button) is not None
+            return _has_action(app.screen, "action-resume")
 
     assert _run(scenario()) is True
 
@@ -244,7 +259,7 @@ def test_shows_recreate_when_saved_workspace_not_running(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            return app.screen.query("#action-recreate").first(Button) is not None
+            return _has_action(app.screen, "action-recreate")
 
     assert _run(scenario()) is True
 
@@ -263,8 +278,8 @@ def test_shows_default_and_configure_when_nothing_saved(
             await _open_project_detail(pilot, "demo")
             screen = app.screen
             return (
-                screen.query("#action-open_default").first(Button) is not None,
-                screen.query("#action-configure").first(Button) is not None,
+                _has_action(screen, "action-open_default"),
+                _has_action(screen, "action-configure"),
             )
 
     has_default, has_configure = _run(scenario())
@@ -288,7 +303,7 @@ def test_resume_exits_with_attach_launch_request(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-resume")
+            await _activate_action(pilot, "action-resume")
             await pilot.pause()
         return app.return_value
 
@@ -318,7 +333,7 @@ def test_recreate_exits_with_attach_launch_request(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-recreate")
+            await _activate_action(pilot, "action-recreate")
             await pilot.pause()
         return app.return_value
 
@@ -345,7 +360,7 @@ def test_open_default_workspace_saves_and_exits_with_create_launch_request(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-open_default")
+            await _activate_action(pilot, "action-open_default")
             await pilot.pause()
         return app.return_value
 
@@ -373,11 +388,11 @@ def test_open_default_workspace_against_future_version_store_does_not_save_or_cr
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            assert app.screen.query("#action-open_default").first(Button) is not None
+            assert _has_action(app.screen, "action-open_default")
 
             future_text = _write_future_version_store(tmp_path)
 
-            await pilot.click("#action-open_default")
+            await _activate_action(pilot, "action-open_default")
             await pilot.pause()
             await app.workers.wait_for_complete()
 
@@ -418,7 +433,7 @@ def test_open_default_workspace_for_same_named_projects_uses_distinct_session_na
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail_by_path(pilot, project_path)
-            await pilot.click("#action-open_default")
+            await _activate_action(pilot, "action-open_default")
             await pilot.pause()
         return app.return_value
 
@@ -464,12 +479,12 @@ def test_selecting_same_named_project_never_resumes_the_others_session(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail_by_path(pilot, project_path)
-            button_id = next(
+            action_id = next(
                 candidate
-                for candidate in ("#action-resume", "#action-recreate", "#action-open_default")
-                if list(app.screen.query(candidate))
+                for candidate in ("action-resume", "action-recreate", "action-open_default")
+                if _has_action(app.screen, candidate)
             )
-            await pilot.click(button_id)
+            await _activate_action(pilot, action_id)
             await pilot.pause()
         return app.return_value
 
@@ -509,15 +524,18 @@ def test_edit_workspace_saves_without_launching(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-edit")
+            await _activate_action(pilot, "action-edit")
             await pilot.pause()
             assert type(app.screen).__name__ == "WindowSummaryScreen"
 
-            await pilot.click("#finish-button")
+            actions = app.screen.query_one("#window-summary-actions", KeyboardActionList)
+            actions.selected_index = 3
+            actions.focus()
+            await pilot.press("enter")
             await pilot.pause()
             assert type(app.screen).__name__ == "ReviewScreen"
 
-            await pilot.click("#create-button")
+            await pilot.press("enter")
             await pilot.pause()
             screen_name = type(app.screen).__name__
         return screen_name, app.return_value
@@ -557,10 +575,10 @@ def test_reset_to_default_requires_confirmation(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-reset")
+            await _activate_action(pilot, "action-reset")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.click("#cancel-button")
+            await pilot.press("enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
         return load_workspace(project_path)
@@ -572,9 +590,9 @@ def test_reset_to_default_requires_confirmation(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-reset")
+            await _activate_action(pilot, "action-reset")
             await pilot.pause()
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
         return load_workspace(project_path)
@@ -602,16 +620,16 @@ def test_reset_to_default_against_future_version_store_does_not_overwrite_or_cra
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            assert app.screen.query("#action-reset").first(Button) is not None
+            assert _has_action(app.screen, "action-reset")
 
             future_text = _write_future_version_store(
                 tmp_path, {str(project_path.resolve()): workspace.to_dict()}
             )
 
-            await pilot.click("#action-reset")
+            await _activate_action(pilot, "action-reset")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
 
@@ -644,9 +662,9 @@ def test_forget_workspace_removes_metadata_not_project_files(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-forget")
+            await _activate_action(pilot, "action-forget")
             await pilot.pause()
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
         return load_workspace(project_path)
@@ -673,7 +691,7 @@ def test_forget_workspace_cancelled_keeps_metadata(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#action-forget")
+            await _activate_action(pilot, "action-forget")
             await pilot.pause()
             await pilot.press("escape")
             await pilot.pause()
@@ -700,16 +718,16 @@ def test_forget_workspace_against_future_version_store_does_not_overwrite_or_cra
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            assert app.screen.query("#action-forget").first(Button) is not None
+            assert _has_action(app.screen, "action-forget")
 
             future_text = _write_future_version_store(
                 tmp_path, {str(project_path.resolve()): workspace.to_dict()}
             )
 
-            await pilot.click("#action-forget")
+            await _activate_action(pilot, "action-forget")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
 
@@ -743,8 +761,8 @@ def test_malformed_metadata_offers_forget_and_configure(
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             screen = app.screen
-            has_forget = screen.query("#action-forget").first(Button) is not None
-            has_configure = screen.query("#action-configure").first(Button) is not None
+            has_forget = _has_action(screen, "action-forget")
+            has_configure = _has_action(screen, "action-configure")
             error_text = str(screen.query_one("#detail-metadata-error").render())
         return has_forget, has_configure, error_text
 
@@ -787,7 +805,7 @@ def test_back_to_list_button_makes_no_metadata_changes(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
-            await pilot.click("#back-to-list-button")
+            await _activate_action(pilot, "back-to-list")
             await pilot.pause()
             return type(app.screen).__name__, app.return_value
 

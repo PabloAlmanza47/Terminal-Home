@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 
 from dashboard.models import (
     LaunchAction,
@@ -56,6 +56,7 @@ from dashboard.services.workspace_store import (
     load_workspace_result_for_location,
     save_workspace,
 )
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.RESUME: "Resume Session",
@@ -175,13 +176,13 @@ class ProjectDetailScreen(Screen[None]):
                 secondary = secondary_actions(status)
 
                 if primary:
-                    with Horizontal(classes="button-row"):
-                        for index, action in enumerate(primary):
-                            yield Button(
-                                _ACTION_LABELS[action],
-                                id=_action_id(action),
-                                variant="primary" if index == 0 else "default",
-                            )
+                    actions = [
+                        ActionItem(_action_id(action), _ACTION_LABELS[action])
+                        for action in (*primary, *secondary)
+                    ]
+                    actions.append(ActionItem("back-to-list", "Back to Project List"))
+                    yield Static("Actions", classes="panel-heading")
+                    yield KeyboardActionList(*actions, id="project-actions")
                 else:
                     yield Static(
                         "No actions are available for this project right now.",
@@ -189,20 +190,14 @@ class ProjectDetailScreen(Screen[None]):
                         classes="wizard-hint",
                     )
 
-                if secondary:
-                    for start in range(0, len(secondary), 3):
-                        with Horizontal(classes="button-row"):
-                            for action in secondary[start : start + 3]:
-                                yield Button(_ACTION_LABELS[action], id=_action_id(action))
-
-                with Horizontal(classes="button-row"):
-                    yield Button("Back to Project List", id="back-to-list-button")
+                if not primary:
+                    yield KeyboardActionList(
+                        ActionItem("back-to-list", "Back to Project List"), id="project-actions"
+                    )
         yield Footer()
 
     def on_mount(self) -> None:
-        buttons = [button for button in self.query(Button) if not button.disabled]
-        if buttons:
-            buttons[0].focus()
+        self.query_one("#project-actions", KeyboardActionList).focus()
 
     def _compose_remote(self, project: RegisteredRemoteProject) -> ComposeResult:
         with Container(classes="screen-root"):
@@ -228,10 +223,12 @@ class ProjectDetailScreen(Screen[None]):
                     id="detail-remote-status",
                 )
                 yield Static(self._feedback, id="detail-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Launch Remote Workspace", id="action-resume", variant="primary")
-                with Horizontal(classes="button-row"):
-                    yield Button("Back to Project List", id="back-to-list-button")
+                yield Static("Actions", classes="panel-heading")
+                yield KeyboardActionList(
+                    ActionItem("action-resume", "Launch Remote Workspace"),
+                    ActionItem("back-to-list", "Back to Project List"),
+                    id="project-actions",
+                )
 
     async def on_screen_resume(self) -> None:
         await self._refresh_status()
@@ -243,24 +240,34 @@ class ProjectDetailScreen(Screen[None]):
         self.app.pop_screen()
 
     async def _refresh_status(self) -> None:
+        preferred_id: str | None = None
+        try:
+            preferred_id = self.query_one("#project-actions", KeyboardActionList).selected_action_id
+        except Exception:
+            pass
         if self.remote_project is not None:
             self.remote_workspace = load_workspace_result_for_location(
                 self.remote_project.location
             ).workspace
             await self.recompose()
-            return
-        assert isinstance(self.project, Project)
-        self.status = gather_single_project_status(self.project)
-        await self.recompose()
+        else:
+            assert isinstance(self.project, Project)
+            self.status = gather_single_project_status(self.project)
+            await self.recompose()
+        actions = self.query_one("#project-actions", KeyboardActionList)
+        actions.set_actions(actions.actions, preferred_id)
+        actions.focus()
 
     def _show_error(self, message: str) -> None:
         self._feedback = message
         self.query_one("#detail-error", Static).update(message)
 
     @work
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id or ""
-        if button_id == "back-to-list-button":
+    async def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        button_id = event.action_id
+        if button_id == "back-to-list":
             self.app.pop_screen()
         elif button_id in (_action_id(ProjectAction.RESUME), _action_id(ProjectAction.RECREATE)):
             self._resume_or_recreate()

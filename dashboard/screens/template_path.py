@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Static
+from textual.widgets import Input, Static
+
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class TemplatePathScreen(ModalScreen[str | None]):
@@ -25,9 +27,11 @@ class TemplatePathScreen(ModalScreen[str | None]):
                 placeholder="path/to/template.json",
                 id="template-path-input",
             )
-            with Horizontal(classes="button-row"):
-                yield Button(self.submit_label, id="template-path-submit", variant="primary")
-                yield Button("Cancel", id="template-path-cancel")
+            yield KeyboardActionList(
+                ActionItem("submit", self.submit_label),
+                ActionItem("cancel", "Cancel"),
+                id="template-path-actions",
+            )
 
     def on_mount(self) -> None:
         self.query_one("#template-path-input", Input).focus()
@@ -35,8 +39,10 @@ class TemplatePathScreen(ModalScreen[str | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "template-path-submit":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "submit":
             self.dismiss(self.query_one("#template-path-input", Input).value)
         else:
             self.dismiss(None)

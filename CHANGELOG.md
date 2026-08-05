@@ -13,6 +13,9 @@
 - Redesigned the TUI with a dark navy/slate visual system and stronger focus states.
 - Standardized keyboard navigation and shared TUI/CLI project creation behavior.
 - Improved the home screen at small terminal sizes and added contextual shortcuts.
+- Refined split-screen layout with responsive full/compact artwork and a compact status header.
+- Standardized arrow-key navigation, added the Coding Agent preference, and stabilized CI.
+- Updated setuptools license metadata while preserving LICENSE in distributions.
 
 ### Fixed
 

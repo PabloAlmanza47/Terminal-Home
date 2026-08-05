@@ -1,5 +1,4 @@
-"""Textual-independent model for the dashboard's own presentation
-preferences (not project data) -- artwork, clock, and layout density.
+"""Textual-independent model for dashboard presentation and agent preferences.
 
 Kept alongside the workspace models for the same reason: plain, validated
 dataclasses with no Textual imports and no subprocess calls, so they can be
@@ -25,6 +24,14 @@ class LayoutMode(str, Enum):
     EXPANDED = "expanded"
 
 
+class CodingAgent(str, Enum):
+    """The optional command used by legacy coding-agent panes."""
+
+    NONE = "none"
+    CODEX = "codex"
+    CLAUDE_CODE = "claude_code"
+
+
 @dataclass(frozen=True, slots=True)
 class AppSettings:
     """Home screen presentation preferences.
@@ -38,6 +45,7 @@ class AppSettings:
     layout_mode: LayoutMode = LayoutMode.EXPANDED
     clock_visible: bool = True
     theme: str | None = None
+    coding_agent: CodingAgent = CodingAgent.NONE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +53,7 @@ class AppSettings:
             "layout_mode": self.layout_mode.value,
             "clock_visible": self.clock_visible,
             "theme": self.theme,
+            "coding_agent": self.coding_agent.value,
         }
 
     @classmethod
@@ -75,9 +84,18 @@ class AppSettings:
         if theme is not None and not isinstance(theme, str):
             theme = defaults.theme
 
+        coding_agent = defaults.coding_agent
+        raw_agent = data.get("coding_agent")
+        if isinstance(raw_agent, str):
+            try:
+                coding_agent = CodingAgent(raw_agent)
+            except ValueError:
+                coding_agent = defaults.coding_agent
+
         return cls(
             artwork_enabled=artwork_enabled,
             layout_mode=layout_mode,
             clock_visible=clock_visible,
             theme=theme,
+            coding_agent=coding_agent,
         )

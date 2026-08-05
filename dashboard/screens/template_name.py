@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Static
+from textual.widgets import Input, Static
 
 from dashboard.models import MAX_TEMPLATE_NAME_LENGTH
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class TemplateNameScreen(ModalScreen[str | None]):
@@ -28,9 +29,11 @@ class TemplateNameScreen(ModalScreen[str | None]):
                 max_length=MAX_TEMPLATE_NAME_LENGTH,
                 id="template-name-input",
             )
-            with Horizontal(classes="button-row"):
-                yield Button(self.submit_label, id="template-name-submit", variant="primary")
-                yield Button("Cancel", id="template-name-cancel")
+            yield KeyboardActionList(
+                ActionItem("submit", self.submit_label),
+                ActionItem("cancel", "Cancel"),
+                id="template-name-actions",
+            )
 
     def on_mount(self) -> None:
         self.query_one("#template-name-input", Input).focus()
@@ -38,8 +41,10 @@ class TemplateNameScreen(ModalScreen[str | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "template-name-submit":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "submit":
             self.dismiss(self.query_one("#template-name-input", Input).value)
         else:
             self.dismiss(None)

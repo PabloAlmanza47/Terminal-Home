@@ -5,13 +5,14 @@ with controls to add, edit, or remove one, or move on to the final review.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.new_project.state import WizardState
 from dashboard.services import tmux
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -30,13 +31,14 @@ class WindowSummaryScreen(Screen[None]):
                 yield Static(self.state.step_label(4, "Windows"), id="screen-title")
                 yield OptionList(id="window-list")
                 yield Static("", id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Add Another Window", id="add-window-button")
-                    yield Button("Edit Selected", id="edit-window-button")
-                    yield Button("Remove Selected", id="remove-window-button")
-                with Horizontal(classes="button-row"):
-                    yield Button("Finish Workspace", id="finish-button", variant="primary")
-                    yield Button("Cancel", id="cancel-button")
+                yield KeyboardActionList(
+                    ActionItem("add", "Add Another Window"),
+                    ActionItem("edit", "Edit Selected"),
+                    ActionItem("remove", "Remove Selected", dangerous=True),
+                    ActionItem("finish", "Finish Workspace"),
+                    ActionItem("cancel", "Cancel"),
+                    id="window-summary-actions",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -58,16 +60,18 @@ class WindowSummaryScreen(Screen[None]):
     def _selected_index(self) -> int | None:
         return self.query_one("#window-list", OptionList).highlighted
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "add-window-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "add":
             self._add_window()
-        elif event.button.id == "edit-window-button":
+        elif event.action_id == "edit":
             self._edit_selected()
-        elif event.button.id == "remove-window-button":
+        elif event.action_id == "remove":
             self._remove_selected()
-        elif event.button.id == "finish-button":
+        elif event.action_id == "finish":
             self._finish()
-        elif event.button.id == "cancel-button":
+        elif event.action_id == "cancel":
             self.action_cancel()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:

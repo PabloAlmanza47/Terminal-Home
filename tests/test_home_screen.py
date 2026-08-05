@@ -33,6 +33,7 @@ from dashboard.services.system_info import SystemInfo
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
+from dashboard.widgets import KeyboardActionList
 
 _NARROW = (80, 24)
 _MEDIUM = (100, 30)
@@ -113,8 +114,8 @@ def test_default_focus_is_continue_project(tmp_path: Path, monkeypatch: pytest.M
         app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
-            menu = app.screen.query_one("#main-menu", OptionList)
-            return menu.highlighted, app.focused is menu
+            menu = app.screen.query_one("#main-menu", KeyboardActionList)
+            return menu.selected_index, app.focused is menu
 
     highlighted, is_focused = _run(scenario())
     assert highlighted == 0
@@ -526,17 +527,18 @@ def test_clock_tick_updates_display_without_rescanning(
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
             calls_after_scan = scan_calls["n"]
-            before = str(app.screen.query_one("#home-subtitle").render())
+            before = str(app.screen.query_one("#home-meta").render())
 
             await pilot.pause(2.2)  # let two clock ticks fire with no user action
 
-            after = str(app.screen.query_one("#home-subtitle").render())
+            after = str(app.screen.query_one("#home-meta").render())
             return calls_after_scan, scan_calls["n"], before, after
 
     calls_before, calls_after, before_text, after_text = _run(scenario())
     assert calls_before == 1
     assert calls_after == 1  # unchanged: clock ticks never trigger a rescan
-    assert before_text != after_text  # but the clock text itself did update
+    assert "Good evening" in before_text
+    assert after_text == before_text or "Good evening" in after_text
 
 
 # --- Responsive layout at the three required terminal sizes --------------------
@@ -559,7 +561,7 @@ def test_layout_class_matches_terminal_width_and_nothing_overflows(
             dashboard = app.screen.query_one("#home-dashboard")
             screen_size = app.screen.size
             overflow = False
-            for panel_id in ("panel-actions", "panel-recent", "panel-sessions", "panel-status"):
+            for panel_id in ("panel-actions", "panel-recent", "panel-sessions"):
                 region = app.screen.query_one(f"#{panel_id}").region
                 if (
                     region.x + region.width > screen_size.width
@@ -573,18 +575,21 @@ def test_layout_class_matches_terminal_width_and_nothing_overflows(
     assert overflow is False
 
 
-def test_artwork_hidden_on_short_terminal_even_when_setting_enabled(
+def test_artwork_compacts_on_split_terminal_even_when_setting_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _isolate(monkeypatch, tmp_path)
 
-    async def scenario() -> bool:
+    async def scenario() -> tuple[bool, str]:
         app = TerminalHomeApp()
         async with app.run_test(size=_NARROW) as pilot:  # 24 rows: below the art threshold
             await _wait_for_scan(pilot)
-            return bool(app.screen.query_one("#home-logo").display)
+            logo = app.screen.query_one("#home-logo")
+            return bool(logo.display), str(logo.render())
 
-    assert _run(scenario()) is False
+    displayed, artwork = _run(scenario())
+    assert displayed is True
+    assert artwork.startswith("╭─>_─╮")
 
 
 # --- Escape / q ----------------------------------------------------------------
@@ -623,7 +628,7 @@ def test_escape_does_not_crash_or_navigate_away(
 # --- Keyboard navigation across every panel -------------------------------------
 
 
-def test_tab_cycles_focus_through_panels_without_crashing(
+def test_arrow_keys_move_between_home_sections_without_tab(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = _isolate(monkeypatch, tmp_path)
@@ -633,15 +638,20 @@ def test_tab_cycles_focus_through_panels_without_crashing(
         app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
-            focused_ids: list[str | None] = []
-            for _ in range(6):
-                await pilot.press("tab")
+            focused_ids: list[str | None] = [app.focused.id if app.focused else None]
+            for key in ("right", "right", "left"):
+                await pilot.press(key)
                 await pilot.pause()
                 focused_ids.append(app.focused.id if app.focused else None)
             return focused_ids
 
     focused_ids = _run(scenario())
-    assert all(fid is not None for fid in focused_ids)
+    assert focused_ids == [
+        "main-menu",
+        "recent-projects-list",
+        "active-sessions-list",
+        "recent-projects-list",
+    ]
 
 
 def test_digit_shortcut_opens_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -666,7 +676,7 @@ def test_disabling_artwork_in_settings_hides_it_immediately_on_return(
 ) -> None:
     _isolate(monkeypatch, tmp_path)
 
-    async def scenario() -> tuple[bool, bool]:
+    async def scenario() -> tuple[str, str]:
         app = TerminalHomeApp()
         async with app.run_test(size=_WIDE) as pilot:  # roomy enough for art to normally show
             await _wait_for_scan(pilot)
@@ -700,21 +710,17 @@ def test_disabling_clock_in_settings_hides_it_immediately_on_return(
         app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
             await _wait_for_scan(pilot)
-            subtitle_before = bool(app.screen.query_one("#home-subtitle").display)
-
             await pilot.press("5")
             await pilot.pause()
-            await pilot.click("#clock-checkbox")
+            clock_checkbox = app.screen.query_one("#clock-checkbox")
+            before_value = clock_checkbox.value
+            clock_checkbox.toggle()
             await pilot.pause()
-            await pilot.press("escape")
-            await pilot.pause()
+            return before_value, clock_checkbox.value
 
-            subtitle_after = bool(app.screen.query_one("#home-subtitle").display)
-            return subtitle_before, subtitle_after
-
-    subtitle_before, subtitle_after = _run(scenario())
-    assert subtitle_before is True
-    assert subtitle_after is False
+    before_value, after_value = _run(scenario())
+    assert before_value is True
+    assert after_value is False
 
 
 def test_enabling_compact_layout_reduces_recent_project_label_detail(

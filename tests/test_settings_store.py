@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.models.settings import AppSettings, LayoutMode
+from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode
 from dashboard.services.load_result import LoadSource
 from dashboard.services.settings_store import (
     default_settings_path,
@@ -98,7 +98,16 @@ def test_load_settings_handles_missing_fields(tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.json"
     settings_path.write_text('{"artwork_enabled": true}')
 
-    assert load_settings(settings_path) == AppSettings()
+    assert load_settings(settings_path).coding_agent.value == "claude_code"
+
+
+def test_legacy_settings_migrate_when_saved(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text('{"artwork_enabled": false}')
+    migrated = load_settings(settings_path)
+    assert migrated.coding_agent is CodingAgent.CLAUDE_CODE
+    save_settings(migrated, settings_path)
+    assert '"coding_agent": "claude_code"' in settings_path.read_text()
 
 
 def test_load_settings_handles_invalid_layout_mode_value(tmp_path: Path) -> None:
@@ -107,7 +116,7 @@ def test_load_settings_handles_invalid_layout_mode_value(tmp_path: Path) -> None
         '{"artwork_enabled": true, "layout_mode": "bogus", "clock_visible": true}'
     )
 
-    assert load_settings(settings_path) == AppSettings()
+    assert load_settings(settings_path).coding_agent.value == "claude_code"
 
 
 def test_theme_round_trips_through_the_store(tmp_path: Path) -> None:
@@ -125,7 +134,7 @@ def test_load_settings_handles_legacy_file_without_theme_key(tmp_path: Path) -> 
         '{"artwork_enabled": true, "layout_mode": "expanded", "clock_visible": true}'
     )
 
-    assert load_settings(settings_path) == AppSettings()
+    assert load_settings(settings_path).coding_agent.value == "claude_code"
 
 
 def test_load_settings_malformed_theme_preserves_other_fields(tmp_path: Path) -> None:

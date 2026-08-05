@@ -51,7 +51,7 @@ def test_confirm_button_resolves_true() -> None:
             await pilot.pause()
             assert isinstance(app.screen, ConfirmScreen)
 
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
 
@@ -67,7 +67,7 @@ def test_cancel_button_resolves_false() -> None:
             await pilot.click("#open-button")
             await pilot.pause()
 
-            await pilot.click("#cancel-button")
+            await pilot.press("enter")
             await pilot.pause()
             await app.workers.wait_for_complete()
 

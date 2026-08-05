@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.new_project.state import WizardMode, WizardState
 from dashboard.services.template_store import load_templates_result
 from dashboard.services.workspace_defaults import default_workspace_windows
+from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 BLANK_WORKSPACE = "blank"
@@ -50,10 +51,12 @@ class WorkspaceStartScreen(Screen[None]):
                 yield OptionList(*options, id="workspace-start-list")
                 message = self._result.error or self._result.warning or ""
                 yield Static(message, id="wizard-error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Continue", id="continue-button", variant="primary")
-                    yield Button("Back", id="back-button")
-                    yield Button("Cancel", id="cancel-button")
+                yield KeyboardActionList(
+                    ActionItem("continue", "Continue"),
+                    ActionItem("back", "Back"),
+                    ActionItem("cancel", "Cancel"),
+                    id="workspace-start-actions",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -65,12 +68,14 @@ class WorkspaceStartScreen(Screen[None]):
         if event.option_list.id == "workspace-start-list":
             self._apply(event.option.id)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "continue-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "continue":
             option_list = self.query_one("#workspace-start-list", OptionList)
             if option_list.highlighted is not None:
                 self._apply(option_list.get_option_at_index(option_list.highlighted).id)
-        elif event.button.id == "back-button":
+        elif event.action_id == "back":
             self.action_back()
         else:
             self.action_cancel()

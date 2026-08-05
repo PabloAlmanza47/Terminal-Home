@@ -9,9 +9,11 @@ Escape, then resumes with a plain bool.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Static
+
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -32,16 +34,20 @@ class ConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-panel", classes="panel"):
             yield Static(self.message, id="confirm-message")
-            with Horizontal(classes="button-row"):
-                yield Button(self.confirm_label, id="confirm-button", variant="error")
-                yield Button(self.cancel_label, id="cancel-button")
+            yield KeyboardActionList(
+                ActionItem("cancel", self.cancel_label),
+                ActionItem("confirm", self.confirm_label, dangerous=True),
+                id="confirm-actions",
+            )
 
     def on_mount(self) -> None:
         # Cancellation is the safe default for every destructive confirmation.
-        self.query_one("#cancel-button", Button).focus()
+        self.query_one("#confirm-actions", KeyboardActionList).focus()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "confirm-button":
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        if event.action_id == "confirm":
             self.dismiss(True)
         else:
             self.dismiss(False)

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Static
 
 from dashboard.models import PaneKind
 from dashboard.services.template_portability import PortableWorkspaceTemplate
+from dashboard.widgets import ActionItem, KeyboardActionList
 
 
 def format_import_review(template: PortableWorkspaceTemplate, local_name: str) -> str:
@@ -46,15 +47,19 @@ class ImportTemplateReviewScreen(ModalScreen[bool]):
                 id="template-import-review-body",
                 markup=False,
             )
-            with Horizontal(classes="button-row"):
-                yield Button("Import", id="template-import-confirm", variant="primary")
-                yield Button("Cancel", id="template-import-cancel")
+            yield KeyboardActionList(
+                ActionItem("confirm", "Import"),
+                ActionItem("cancel", "Cancel"),
+                id="template-import-actions",
+            )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "template-import-confirm")
+    def on_keyboard_action_list_action_selected(
+        self, event: KeyboardActionList.ActionSelected
+    ) -> None:
+        self.dismiss(event.action_id == "confirm")
 
     def on_mount(self) -> None:
-        self.query_one("#template-import-confirm", Button).focus()
+        self.query_one("#template-import-actions", KeyboardActionList).focus()
 
     def action_cancel(self) -> None:
         self.dismiss(False)

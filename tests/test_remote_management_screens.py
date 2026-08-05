@@ -14,6 +14,7 @@ from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.remote_project_store import create_remote_project
 from dashboard.services.ssh_host_store import create_ssh_host, load_all_ssh_hosts
+from dashboard.widgets import KeyboardActionList
 
 _HOST_ID = "d84aeefb-7c29-4c63-b39c-766d559df977"
 _PROJECT_ID = "c27c7b67-8e3f-4ebc-8dce-d66d559df977"
@@ -38,6 +39,16 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+async def _activate(pilot, list_id: str, action_id: str) -> None:
+    actions = pilot.app.screen.query_one(list_id, KeyboardActionList)
+    actions.selected_index = next(
+        i for i, item in enumerate(actions.actions) if item.id == action_id
+    )
+    actions.focus()
+    await pilot.press("enter")
+    await pilot.pause()
+
+
 def test_ssh_host_screen_adds_and_confirms_unreferenced_removal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -48,12 +59,12 @@ def test_ssh_host_screen_adds_and_confirms_unreferenced_removal(
         async with app.run_test(size=(100, 30)) as pilot:
             app.screen.query_one("#host-name", Input).value = "build"
             app.screen.query_one("#host-destination", Input).value = "builder"
-            await pilot.click("#add-host-button")
+            await _activate(pilot, "#host-actions", "add")
             await pilot.pause()
             assert len(load_all_ssh_hosts()) == 1
-            await pilot.click("#remove-host-button")
+            await _activate(pilot, "#host-actions", "remove")
             await pilot.pause()
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
 
     _run(scenario())
@@ -71,9 +82,9 @@ def test_host_screen_explains_referenced_host_and_remote_screen_labels_orphan(
         app = _HostApp()
         async with app.run_test(size=(100, 30)) as pilot:
             app.screen.query_one("#host-list", OptionList).highlighted = 0
-            await pilot.click("#remove-host-button")
+            await _activate(pilot, "#host-actions", "remove")
             await pilot.pause()
-            await pilot.click("#confirm-button")
+            await pilot.press("down", "enter")
             await pilot.pause()
             return str(app.screen.query_one("#host-error", Static).render())
 

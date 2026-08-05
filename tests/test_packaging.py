@@ -24,7 +24,9 @@ def test_pyproject_has_runtime_metadata_and_console_scripts() -> None:
     project = data["project"]
     assert project["dynamic"] == ["version"]
     assert project["readme"] == "README.md"
-    assert project["license"]["file"] == "LICENSE"
+    assert project["license"] == "MIT"
+    assert project["license-files"] == ["LICENSE"]
+    assert "License :: OSI Approved :: MIT License" not in project["classifiers"]
     assert project["requires-python"] == ">=3.10"
     assert project["scripts"]["th"] == "dashboard.cli:main"
     assert project["scripts"]["terminal-home"] == "dashboard.cli:main"
@@ -56,6 +58,11 @@ def test_build_artifacts_and_isolated_wheel_install(tmp_path: Path) -> None:
     assert "dashboard/cli.py" in names
     assert "dashboard/app.tcss" in names
     assert any(name.endswith("entry_points.txt") for name in names)
+    import tarfile
+
+    with tarfile.open(sdists[0]) as sdist:
+        assert any(name.endswith("/LICENSE") for name in sdist.getnames())
+    assert any(name.endswith("/LICENSE") for name in names)
 
     venv_dir = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)

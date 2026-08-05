@@ -16,6 +16,7 @@ from textual.screen import Screen
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.settings import SettingsScreen
 from dashboard.services.settings_store import default_settings_path, load_settings, save_settings
+from dashboard.widgets import KeyboardActionList
 
 _SIZE = (80, 24)
 
@@ -167,7 +168,7 @@ def test_escape_returns_to_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert _run(scenario()) == "_Host"
 
 
-def test_project_discovery_button_opens_project_discovery_screen(
+def test_project_discovery_action_opens_project_discovery_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _isolate(monkeypatch, tmp_path)
@@ -176,7 +177,10 @@ def test_project_discovery_button_opens_project_discovery_screen(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#project-discovery-button")
+            actions = app.screen.query_one("#settings-actions", KeyboardActionList)
+            actions.selected_index = 0
+            actions.focus()
+            await pilot.press("enter")
             await pilot.pause()
             return type(app.screen).__name__
 
