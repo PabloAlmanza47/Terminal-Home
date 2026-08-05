@@ -13,7 +13,7 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.services import project_creation
 from dashboard.services.project_creation import validate_new_project
 from dashboard.services.slug import slugify
-from dashboard.widgets import ActionItem, KeyboardActionList
+from dashboard.widgets import ActionItem, CircularCheckbox, KeyboardActionList
 
 
 class NewProjectScreen(Screen[None]):
@@ -42,7 +42,7 @@ class NewProjectScreen(Screen[None]):
                     id="folder-name-input",
                 )
                 yield Static("", id="destination-preview")
-                yield Checkbox(
+                yield CircularCheckbox(
                     "Initialize an empty Git repository",
                     value=self.state.init_git,
                     id="git-init-checkbox",

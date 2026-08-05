@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Grid, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
@@ -37,9 +37,10 @@ class SystemInfoScreen(Screen[None]):
         with VerticalScroll(classes="screen-root system-info-scroll"):
             with Vertical(classes="panel system-info-panel"):
                 yield Static("System Information", id="screen-title")
-                with Vertical(id="info-rows"):
+                with Grid(id="info-rows"):
                     for label, value in rows:
-                        yield Static(f"{label:<20} {value}", classes="info-row")
+                        yield Static(label, classes="info-label")
+                        yield Static(value, classes="info-value", markup=False)
                 yield KeyboardActionList(ActionItem("back", "Back"), id="system-info-actions")
         yield Footer()
 

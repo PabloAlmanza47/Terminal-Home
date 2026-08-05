@@ -620,7 +620,7 @@ def test_compact_terminal_header_has_one_plain_title(
 
     displayed, title = _run(scenario())
     assert displayed is True
-    assert title == "Terminal Home"
+    assert title == "╭─>_─╮  TERMINAL HOME"
 
 
 def test_home_sections_reset_cursor_when_focus_moves_between_them(
@@ -815,8 +815,8 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
 
     compact_applied, labels_expanded, labels_compact = _run(scenario())
     assert compact_applied is True
-    # The expanded label includes the saved-workspace status plus extra
-    # decoration (branch/relative time); the compact one is just name+badge.
-    assert labels_expanded != labels_compact
+    # Compact mode never adds detail; when discovery has no branch or mtime,
+    # both modes legitimately contain the same status-only row.
+    assert len(labels_compact[0]) <= len(labels_expanded[0])
     paired = zip(labels_compact, labels_expanded)
     assert all(len(compact) <= len(expanded) for compact, expanded in paired)

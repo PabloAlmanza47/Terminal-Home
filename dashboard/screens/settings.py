@@ -19,7 +19,7 @@ from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
-from dashboard.widgets import ActionItem, KeyboardActionList
+from dashboard.widgets import ActionItem, CircularCheckbox, KeyboardActionList
 
 
 class SettingsScreen(Screen[None]):
@@ -40,17 +40,17 @@ class SettingsScreen(Screen[None]):
                     classes="wizard-hint",
                 )
                 yield Static("Appearance", classes="panel-heading")
-                yield Checkbox(
-                        "Show Terminal Home title",
+                yield CircularCheckbox(
+                        "Show Terminal Home artwork",
                     value=self.settings.artwork_enabled,
                     id="artwork-checkbox",
                 )
-                yield Checkbox(
+                yield CircularCheckbox(
                     "Show clock and date",
                     value=self.settings.clock_visible,
                     id="clock-checkbox",
                 )
-                yield Checkbox(
+                yield CircularCheckbox(
                     "Compact layout",
                     value=self.settings.layout_mode is LayoutMode.COMPACT,
                     id="compact-checkbox",

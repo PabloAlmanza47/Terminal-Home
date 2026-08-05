@@ -21,6 +21,7 @@ from textual.screen import Screen
 from textual.widgets import Static
 from textual.widgets.option_list import Option
 
+from dashboard.art import artwork_for_size
 from dashboard.models import LaunchAction, LaunchRequest
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.new_project import NewProjectScreen
@@ -32,6 +33,7 @@ from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
 from dashboard.services.formatting import format_relative_time, greeting_for
+from dashboard.services.project_rows import RecentProjectRow, format_recent_project_rows
 from dashboard.services.projects import (
     Project,
     ProjectScanResult,
@@ -80,18 +82,6 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
     ("6", "Workspace Templates", WORKSPACE_TEMPLATES),
     ("7", "Exit", EXIT),
 ]
-
-
-def _recent_project_label(status: ProjectStatus, display_name: str, *, compact: bool) -> str:
-    badge = status_badge(status)
-    if compact:
-        return f"{display_name}  [{badge}]"
-    parts = [f"{display_name}  [{badge}]"]
-    if status.git_branch:
-        parts.append(f"({status.git_branch})")
-    if status.last_modified is not None:
-        parts.append(f"· {format_relative_time(status.last_modified)}")
-    return "  ".join(parts)
 
 
 def _session_label(session: TmuxSession, matched: ProjectStatus | None, *, compact: bool) -> str:
@@ -167,7 +157,7 @@ class HomeScreen(Screen[None]):
         with Container(id="home", classes="screen-root"):
             with Vertical(id="home-shell"):
                 with Vertical(id="home-header"):
-                    yield Static("Terminal Home", id="home-logo")
+                    yield Static(id="home-logo")
                     yield Static("Loading system summary...", id="home-meta")
                 with Container(id="home-dashboard"):
                     with Vertical(id="panel-actions", classes="home-panel"):
@@ -254,7 +244,9 @@ class HomeScreen(Screen[None]):
             self.query_one(panel_id).display = not compact_screen
 
         logo = self.query_one("#home-logo", Static)
-        logo.display = self.settings.artwork_enabled
+        artwork = artwork_for_size(width, height, self.settings.artwork_enabled)
+        logo.update(artwork or "")
+        logo.display = artwork is not None
         self.query_one("#home-meta", Static).display = True
 
     def _update_clock(self) -> None:
@@ -382,10 +374,29 @@ class HomeScreen(Screen[None]):
         # suffix; a uniquely-named project never does, even if some other
         # project sharing its name exists elsewhere but didn't make the cut.
         display_names = disambiguated_display_names(visible)
-        for status, display_name in zip(visible, display_names):
+        rows = [
+            RecentProjectRow(
+                name=display_name,
+                status=status_badge(status),
+                branch=status.git_branch,
+                detail=(
+                    f"· {format_relative_time(status.last_modified)}"
+                    if status.last_modified is not None
+                    else None
+                ),
+            )
+            for status, display_name in zip(visible, display_names)
+        ]
+        content_width = option_list.content_region.width or option_list.size.width
+        labels = format_recent_project_rows(
+            rows,
+            max(1, content_width - 2),
+            compact=compact,
+        )
+        for status, label in zip(visible, labels):
             option_list.add_option(
                 Option(
-                    _recent_project_label(status, display_name, compact=compact),
+                    label,
                     id=project_option_id(status),
                 )
             )

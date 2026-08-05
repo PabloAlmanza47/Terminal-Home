@@ -16,7 +16,7 @@ from textual.screen import Screen
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.settings import SettingsScreen
 from dashboard.services.settings_store import default_settings_path, load_settings, save_settings
-from dashboard.widgets import KeyboardActionList
+from dashboard.widgets import CircularCheckbox, KeyboardActionList
 
 _SIZE = (80, 24)
 
@@ -52,6 +52,28 @@ def test_defaults_shown_when_nothing_saved(tmp_path: Path, monkeypatch: pytest.M
     assert artwork is True
     assert clock is True
     assert compact is False
+
+
+def test_independent_settings_use_circular_indicators(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+
+    async def scenario() -> tuple[str, str, bool, bool]:
+        app = _HostApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            artwork = app.screen.query_one("#artwork-checkbox", CircularCheckbox)
+            clock = app.screen.query_one("#clock-checkbox", CircularCheckbox)
+            await pilot.click("#artwork-checkbox")
+            await pilot.pause()
+            return str(artwork.render()), str(clock.render()), artwork.value, clock.value
+
+    artwork, clock, artwork_value, clock_value = _run(scenario())
+    assert "○" in artwork and "X" not in artwork
+    assert "◉" in clock and "X" not in clock
+    assert artwork_value is False
+    assert clock_value is True
 
 
 def test_toggling_artwork_checkbox_persists(

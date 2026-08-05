@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Generic, TypeVar
 
+from rich.style import Style
 from rich.text import Text
 from textual import events
+from textual.content import Content
 from textual.message import Message
+from textual.strip import Segment, Strip
 from textual.visual import VisualType
-from textual.widgets import OptionList, Static
+from textual.widgets import Checkbox, OptionList, SelectionList, Static
 from textual.widgets.option_list import Option
 
 
@@ -222,3 +226,54 @@ class KeyboardOptionList(OptionList):
         if self.reset_on_blur:
             self.highlighted = None
         self.call_after_refresh(self._update_prompt_markers)
+
+
+class CircularCheckbox(Checkbox):
+    """Checkbox with a circular indicator, preserving Checkbox semantics."""
+
+    def render(self) -> Content:
+        button_style = self.get_visual_style("toggle--button")
+        label_style = self.get_visual_style("toggle--label")
+        indicator = "◉" if self.value else "○"
+        label = self._label.pad(1, 1).stylize_before(label_style)
+        return Content.assemble((indicator, button_style), " ", label)
+
+
+SelectionType = TypeVar("SelectionType")
+
+
+class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]):
+    """SelectionList with circular multi-select indicators.
+
+    Textual 8.2.8 renders SelectionList's square marker directly in its
+    public ``render_line`` implementation. This small subclass mirrors that
+    layout while retaining SelectionList's public selection and message API.
+    """
+
+    def render_line(self, y: int) -> Strip:
+        line = OptionList.render_line(self, y)
+        _, scroll_y = self.scroll_offset
+        selection_index = scroll_y + y
+        if selection_index >= self.option_count:
+            return line
+
+        selection = self.get_option_at_index(selection_index)
+        component = "selection-list--button"
+        if selection.value in self._selected:
+            component += "-selected"
+        if self.highlighted == selection_index:
+            component += "-highlighted"
+        underlying_style = next(iter(line)).style or self.rich_style
+        button_style = self.get_component_rich_style(component)
+        indicator_style = Style(
+            color=button_style.color,
+            bgcolor=underlying_style.bgcolor,
+            meta={"option": selection_index},
+        )
+        return Strip(
+            [
+                Segment("◉" if selection.value in self._selected else "○", indicator_style),
+                Segment(" ", style=underlying_style),
+                *line,
+            ]
+        )

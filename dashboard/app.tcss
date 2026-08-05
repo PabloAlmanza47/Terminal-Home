@@ -50,6 +50,13 @@ OptionList {
     background: transparent;
 }
 
+/* System Information needs a little more value-column room than ordinary
+   panels, but remains bounded by the screen and its outer scroll container. */
+.panel.system-info-panel {
+    width: 94;
+    max-width: 100%;
+}
+
 /* System Information owns the available area above Footer. Its content is
    allowed to scroll on short terminals instead of being clipped by the
    shared panel cap. */
@@ -245,13 +252,24 @@ Input:focus {
 
 #info-rows {
     height: auto;
+    width: 100%;
+    grid-size: 2;
+    grid-columns: 20 1fr;
+    grid-rows: auto;
     border: round $primary;
     background: transparent;
     padding: 1 2;
 }
 
-.info-row {
-    padding: 0 1;
+.info-label {
+    height: auto;
+    color: $text-muted;
+}
+
+.info-value {
+    min-width: 0;
+    height: auto;
+    text-wrap: wrap;
 }
 
 /* --- Placeholder screens --- */
@@ -327,6 +345,29 @@ SelectionList:focus {
 
 Checkbox {
     margin: 1 0 0 0;
+}
+
+CircularCheckbox {
+    margin: 1 0 0 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+CircularCheckbox:focus {
+    border: double #55d6ff;
+    background-tint: transparent;
+}
+
+CircularSelectionList {
+    height: auto;
+    max-height: 10;
+    border: round $primary;
+    background: transparent;
+}
+
+CircularSelectionList:focus {
+    border: round $accent;
 }
 
 /* --- Confirm dialog --- */

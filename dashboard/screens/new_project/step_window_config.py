@@ -19,7 +19,7 @@ from textual.widgets.selection_list import Selection
 from dashboard.models import PANE_KIND_LABELS, PaneKind
 from dashboard.models.workspace import PANE_KIND_ORDER
 from dashboard.screens.new_project.state import PaneDraft, WizardState
-from dashboard.widgets import ActionItem, KeyboardActionList
+from dashboard.widgets import ActionItem, CircularSelectionList, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 MAX_PANES_PER_WINDOW = 4
@@ -54,7 +54,7 @@ class WindowConfigScreen(Screen[None]):
                     id="window-name-input",
                 )
                 yield Static(f"Panes (choose 1-{MAX_PANES_PER_WINDOW})", classes="field-label")
-                yield SelectionList[PaneKind](
+                yield CircularSelectionList(
                     *[
                         Selection(PANE_KIND_LABELS[kind], kind, kind in selected_kinds)
                         for kind in PANE_KIND_ORDER

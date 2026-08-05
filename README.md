@@ -48,6 +48,9 @@ dashboard.
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
 - Keyboard-first [Textual](https://textual.textualize.io/) interface
+- Responsive Terminal Home identity artwork appears above the home summary and
+  collapses or hides cleanly on constrained terminals; it can be disabled in
+  Settings as “Show Terminal Home artwork”.
 - Resume tmux Session lists running local sessions; Enter or Space exits the dashboard,
   rechecks the selection, and then attaches (or switches clients from inside tmux).
 - `th list` headings support a persisted color preference in Settings. The Theme

@@ -16,6 +16,10 @@
 - Open Project rows align status and branch columns on wide terminals and use
   deliberate ellipsis/compact layouts on narrow terminals.
 - Scrollbars now use one-cell, transparent-track, restrained theme-aware styling.
+- Restored responsive Terminal Home artwork, aligned Recent Projects badges, and
+  tightened Open Project status-to-branch spacing.
+- System Information now uses a wider screen-specific panel and circular
+  indicators consistently across independent settings and pane selection.
 
 ## [0.2.0] - 2026-08-04
 
