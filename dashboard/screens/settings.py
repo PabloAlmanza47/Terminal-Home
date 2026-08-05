@@ -12,14 +12,15 @@ from dataclasses import replace
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Checkbox, Footer, RadioButton, RadioSet, Static
+from textual.widgets import Footer, RadioButton, RadioSet, SelectionList, Static
+from textual.widgets.selection_list import Selection
 
 from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode, TableHeaderColor
 from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
-from dashboard.widgets import ActionItem, CircularCheckbox, KeyboardActionList
+from dashboard.widgets import ActionItem, CircularSelectionList, KeyboardActionList
 
 
 class SettingsScreen(Screen[None]):
@@ -40,23 +41,23 @@ class SettingsScreen(Screen[None]):
                     classes="wizard-hint",
                 )
                 yield Static("Appearance", classes="panel-heading")
-                yield CircularCheckbox(
+                yield CircularSelectionList(
+                    Selection(
                         "Show Terminal Home artwork",
-                    value=self.settings.artwork_enabled,
-                    id="artwork-checkbox",
-                )
-                yield CircularCheckbox(
-                    "Show clock and date",
-                    value=self.settings.clock_visible,
-                    id="clock-checkbox",
-                )
-                yield CircularCheckbox(
-                    "Compact layout",
-                    value=self.settings.layout_mode is LayoutMode.COMPACT,
-                    id="compact-checkbox",
+                        "artwork",
+                        self.settings.artwork_enabled,
+                    ),
+                    Selection("Show clock and date", "clock", self.settings.clock_visible),
+                    Selection(
+                        "Compact layout",
+                        "compact",
+                        self.settings.layout_mode is LayoutMode.COMPACT,
+                    ),
+                    id="appearance-settings",
+                    classes="settings-choice-group",
                 )
                 yield Static("Coding Agent", classes="panel-heading")
-                with RadioSet(id="coding-agent-set"):
+                with RadioSet(id="coding-agent-set", classes="settings-choice-group"):
                     yield RadioButton(
                         "None",
                         id="agent-none",
@@ -73,7 +74,9 @@ class SettingsScreen(Screen[None]):
                         value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
                     )
                 yield Static("CLI table header color", classes="panel-heading")
-                with RadioSet(id="table-header-color-set"):
+                with RadioSet(
+                    id="table-header-color-set", classes="settings-choice-group"
+                ):
                     for color, label in (
                         (TableHeaderColor.THEME, "Theme accent (default)"),
                         (TableHeaderColor.BLUE, "Blue"),
@@ -110,18 +113,22 @@ class SettingsScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#settings-actions", KeyboardActionList).focus()
+        self.query_one("#appearance-settings", CircularSelectionList).focus()
 
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "artwork-checkbox":
-            self.settings = replace(self.settings, artwork_enabled=event.value)
-        elif event.checkbox.id == "clock-checkbox":
-            self.settings = replace(self.settings, clock_visible=event.value)
-        elif event.checkbox.id == "compact-checkbox":
-            new_mode = LayoutMode.COMPACT if event.value else LayoutMode.EXPANDED
-            self.settings = replace(self.settings, layout_mode=new_mode)
-        else:
+    def on_selection_list_selection_toggled(
+        self, event: SelectionList.SelectionToggled
+    ) -> None:
+        if event.selection_list.id != "appearance-settings":
             return
+        selected = set(event.selection_list.selected)
+        self.settings = replace(
+            self.settings,
+            artwork_enabled="artwork" in selected,
+            clock_visible="clock" in selected,
+            layout_mode=(
+                LayoutMode.COMPACT if "compact" in selected else LayoutMode.EXPANDED
+            ),
+        )
         try:
             save_settings(self.settings)
         except OSError as exc:

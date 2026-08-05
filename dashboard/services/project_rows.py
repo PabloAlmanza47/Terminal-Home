@@ -157,37 +157,61 @@ def format_remote_project_row(
 def format_recent_project_rows(
     rows: list[RecentProjectRow], width: int, *, compact: bool
 ) -> list[str]:
-    """Align Recent Projects columns within a marker-excluded width."""
+    """Align Recent Projects columns within a marker-excluded width.
+
+    Compact mode omits secondary detail, but keeps the three useful columns
+    whenever the actual list content region can accommodate them.
+    """
     width = max(1, width)
     if not rows:
         return []
-    if compact or width < 48:
+
+    gap = 2
+    status_width = max(cell_len(_status_token(row.status)) for row in rows)
+    branch_rows = [row for row in rows if row.branch]
+    branch_width = (
+        min(22, max(5, max(cell_len(f"({row.branch})") for row in branch_rows)))
+        if branch_rows
+        else 0
+    )
+    name_width = min(28, max(8, max(cell_len(row.name) for row in rows)))
+
+    # Keep the status token and a useful branch column first. Let the name
+    # absorb the remaining room, then shorten it before falling back to the
+    # genuinely narrow inline representation.
+    required = name_width + gap + status_width + (gap + branch_width if branch_width else 0)
+    if required > width:
+        name_width = max(
+            4,
+            width - gap - status_width - (gap + branch_width if branch_width else 0),
+        )
+    if name_width + gap + status_width + (gap + branch_width if branch_width else 0) > width:
+        branch_width = max(3, width - name_width - gap - status_width - gap)
+    if name_width + gap + status_width + (gap + branch_width if branch_width else 0) > width:
         return [
             _ellipsis(
                 f"{row.name} {_status_token(row.status)}"
-                + (f" ({row.branch})" if row.branch else ""),
+                + (
+                    f" ({_ellipsis(row.branch or '', max(1, width // 3) - 2)})"
+                    if row.branch
+                    else ""
+                ),
                 width,
             )
             for row in rows
         ]
 
-    name_width = min(30, max(12, max(cell_len(row.name) for row in rows)))
-    status_width = max(
-        _STATUS_COLUMN_WIDTH,
-        max(cell_len(_status_token(row.status)) for row in rows),
-    )
-    gap = 2
-    detail_width = width - name_width - gap - status_width - gap
-    if detail_width < 8:
-        return format_recent_project_rows(rows, width, compact=True)
-
     result = []
     for row in rows:
-        detail = f"({row.branch})" if row.branch else ""
-        if row.detail:
+        detail = ""
+        if row.branch:
+            branch_budget = max(1, branch_width - 2)
+            detail = f"({_ellipsis(row.branch, branch_budget)})"
+        if row.detail and not compact:
             detail = f"{detail}  {row.detail}".strip()
         name = _pad_right(_ellipsis(row.name, name_width), name_width)
         token = _status_token(row.status)
         line = f"{name}{' ' * gap}{_pad_right(token, status_width)}{' ' * gap}"
+        detail_width = max(0, width - cell_len(line))
         result.append((line + _ellipsis(detail, detail_width)).rstrip())
     return result

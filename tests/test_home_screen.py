@@ -34,7 +34,7 @@ from dashboard.services.system_info import SystemInfo
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
-from dashboard.widgets import KeyboardActionList
+from dashboard.widgets import CircularSelectionList, KeyboardActionList
 
 _NARROW = (80, 24)
 _MEDIUM = (100, 30)
@@ -745,7 +745,8 @@ def test_disabling_artwork_in_settings_hides_it_immediately_on_return(
             await pilot.pause()
             assert type(app.screen).__name__ == "SettingsScreen"
 
-            await pilot.click("#artwork-checkbox")
+            appearance = app.screen.query_one("#appearance-settings", CircularSelectionList)
+            appearance.toggle("artwork")
             await pilot.pause()
 
             await pilot.press("escape")
@@ -771,11 +772,11 @@ def test_disabling_clock_in_settings_hides_it_immediately_on_return(
             await _wait_for_scan(pilot)
             await pilot.press("5")
             await pilot.pause()
-            clock_checkbox = app.screen.query_one("#clock-checkbox")
-            before_value = clock_checkbox.value
-            clock_checkbox.toggle()
+            appearance = app.screen.query_one("#appearance-settings", CircularSelectionList)
+            before_value = "clock" in appearance.selected
+            appearance.toggle("clock")
             await pilot.pause()
-            return before_value, clock_checkbox.value
+            return before_value, "clock" in appearance.selected
 
     before_value, after_value = _run(scenario())
     assert before_value is True
@@ -802,7 +803,7 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
 
             await pilot.press("5")
             await pilot.pause()
-            await pilot.click("#compact-checkbox")
+            app.screen.query_one("#appearance-settings", CircularSelectionList).toggle("compact")
             await pilot.pause()
             await pilot.press("escape")
             await pilot.pause()

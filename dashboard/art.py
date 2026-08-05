@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-FULL_ARTWORK = "╭──────╮   TERMINAL HOME\n│ >_   │   Projects, workspaces, and tmux\n╰──────╯"
+FULL_ARTWORK = "╭──────╮\n│ >_   │   TERMINAL HOME\n╰──────╯   Projects, workspaces, and tmux"
 COMPACT_ARTWORK = "╭─>_─╮  TERMINAL HOME"
 
 

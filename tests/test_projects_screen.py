@@ -86,7 +86,11 @@ async def _open_projects_screen(pilot) -> None:
 
 def _option_ids(pilot) -> list[str]:
     option_list = pilot.app.screen.query_one("#project-list", OptionList)
-    return [str(option_list.get_option_at_index(i).id) for i in range(option_list.option_count)]
+    return [
+        str(option_list.get_option_at_index(i).id)
+        for i in range(option_list.option_count)
+        if option_list.get_option_at_index(i).id is not None
+    ]
 
 
 def _project_id(path: Path) -> str:
@@ -95,6 +99,14 @@ def _project_id(path: Path) -> str:
     project_option_id, not project.name.
     """
     return str(path.resolve())
+
+
+def _option_index(option_list: OptionList, option_id: str) -> int:
+    return next(
+        index
+        for index, option in enumerate(option_list.options)
+        if option.id == option_id
+    )
 
 
 def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,7 +149,7 @@ def test_lists_registered_remote_projects_and_opens_offline_detail(
                 str(option_list.get_option_at_index(i).prompt)
                 for i in range(option_list.option_count)
             ]
-            option_list.highlighted = 0
+            option_list.highlighted = 1
             option_list.focus()
             await pilot.press("enter")
             await pilot.pause()
@@ -152,8 +164,8 @@ def test_lists_registered_remote_projects_and_opens_offline_detail(
     ids, labels, host_text, status_text = _run(scenario())
     selector = f"ssh:{host_id}:/srv/Project With Spaces"
     assert ids == [selector]
-    assert "[Remote]" in labels[0]
-    assert "/srv/Project With Spaces" in labels[0]
+    remote_label = next(label for label in labels if "[Remote]" in label)
+    assert "/srv/Project With Spaces" in remote_label
     assert host_id in host_text
     assert "metadata only" in status_text
 
@@ -237,7 +249,7 @@ def test_enter_opens_project_detail(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             option_list = app.screen.query_one("#project-list", OptionList)
-            option_list.highlighted = 0
+            option_list.highlighted = 1
             option_list.focus()
             await pilot.pause()
             await pilot.press("enter")
@@ -346,31 +358,30 @@ def test_same_named_projects_under_different_roots_both_appear_distinguishably(
     projects_root = _isolate(monkeypatch, tmp_path)
     school_example, work_example = _setup_duplicate_named_projects(tmp_path, projects_root)
 
-    async def scenario() -> tuple[list[str], list[str]]:
+    async def scenario() -> dict[str, str]:
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             option_list = app.screen.query_one("#project-list", OptionList)
-            ids = _option_ids(pilot)
-            labels = [
-                str(option_list.get_option_at_index(i).prompt)
-                for i in range(option_list.option_count)
-            ]
-        return ids, labels
+            return {
+                str(option.id): str(option.prompt)
+                for option in option_list.options
+                if option.id is not None
+            }
 
-    ids, labels = _run(scenario())
+    labels = _run(scenario())
     school_id = _project_id(school_example)
     work_id = _project_id(work_example)
 
     # Requirement 1: both appear, and neither overwrote the other.
-    assert school_id in ids
-    assert work_id in ids
+    assert school_id in labels
+    assert work_id in labels
     assert school_id != work_id
 
     # Requirement 5: distinguishable, concise labels -- not identical, and
     # each names the root that makes it distinct.
-    school_label = labels[ids.index(school_id)]
-    work_label = labels[ids.index(work_id)]
+    school_label = labels[school_id]
+    work_label = labels[work_id]
     assert school_label != work_label
     assert "school" in school_label
     assert "work" in work_label
@@ -389,8 +400,7 @@ def test_selecting_either_same_named_project_opens_its_own_canonical_path(
         async with app.run_test(size=_SIZE) as pilot:
             await _open_projects_screen(pilot)
             option_list = app.screen.query_one("#project-list", OptionList)
-            ids = _option_ids(pilot)
-            option_list.highlighted = ids.index(target_id)
+            option_list.highlighted = _option_index(option_list, target_id)
             option_list.focus()
             await pilot.pause()
             await pilot.press("enter")

@@ -19,6 +19,7 @@ from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
+from dashboard.services.project_categories import ProjectEntry, group_project_entries
 from dashboard.services.project_rows import (
     format_project_row,
     format_remote_project_row,
@@ -89,8 +90,9 @@ class ProjectsScreen(Screen[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._all_entries: list[ProjectStatus | RegisteredRemoteProject] = []
-        self._entries_by_id: dict[str, ProjectStatus | RegisteredRemoteProject] = {}
+        self._all_entries: list[ProjectEntry] = []
+        self._entries_by_id: dict[str, ProjectEntry] = {}
+        self._preferred_entry_id: str | None = None
         self._scanning = False
 
     def compose(self) -> ComposeResult:
@@ -113,23 +115,16 @@ class ProjectsScreen(Screen[None]):
     def on_resize(self, event: events.Resize) -> None:
         if not self._all_entries or self._scanning:
             return
-        option_list = self.query_one("#project-list", OptionList)
-        selected_id = None
-        if option_list.highlighted is not None:
-            option = option_list.get_option_at_index(option_list.highlighted)
-            selected_id = str(option.id) if option.id else None
+        selected_id = self._highlighted_entry_id()
         query = self.query_one("#project-filter", Input).value.strip().lower()
         self._populate(self._filtered(query))
-        if selected_id:
-            for index, option in enumerate(option_list.options):
-                if option.id == selected_id:
-                    option_list.highlighted = index
-                    break
+        self._restore_highlight(selected_id)
 
     def _start_scan(self) -> None:
         if self._scanning:
             return
         self._scanning = True
+        self._preferred_entry_id = self._highlighted_entry_id()
         self.query_one("#project-list", OptionList).clear_options()
         self.query_one("#project-path", Static).update("Scanning projects...")
         self.run_worker(self._scan, thread=True, exclusive=True)
@@ -180,6 +175,7 @@ class ProjectsScreen(Screen[None]):
 
     def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
         option_list = self.query_one("#project-list", OptionList)
+        preferred_id = self._highlighted_entry_id() or self._preferred_entry_id
         option_list.clear_options()
         path_widget = self.query_one("#project-path", Static)
 
@@ -195,36 +191,47 @@ class ProjectsScreen(Screen[None]):
             return
         local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
         display_names = disambiguated_display_names(local_statuses)
+        display_names_by_id = {
+            project_option_id(entry): display_name
+            for entry, display_name in zip(local_statuses, display_names)
+        }
         content_width = option_list.content_region.width or option_list.size.width
         row_width = project_row_width(content_width)
-        local_index = 0
-        for entry in entries:
-            if isinstance(entry, ProjectStatus):
-                display_name = display_names[local_index]
-                local_index += 1
-                label = format_project_row(
-                    display_name,
-                    _status_label(entry),
-                    entry.git_branch if entry.is_git_repo else None,
-                    row_width,
-                )
-                option_id = project_option_id(entry)
-            else:
-                host = get_ssh_host(entry.location.host_id)
-                host_label = (
-                    host.display_name
-                    if host is not None
-                    else f"{entry.location.host_id} [missing host]"
-                )
-                label = format_remote_project_row(entry, host_label, row_width)
-                option_id = entry.selector
-            option_list.add_option(
-                Option(label, id=option_id)
-            )
-        first = entries[0]
-        self._show_details(
-            project_option_id(first) if isinstance(first, ProjectStatus) else first.selector
+        for category in group_project_entries(entries):
+            option_list.add_option(Option(f"── {category.title} ──", disabled=True))
+            for entry in category.entries:
+                if isinstance(entry, ProjectStatus):
+                    option_id = project_option_id(entry)
+                    label = format_project_row(
+                        display_names_by_id[option_id],
+                        _status_label(entry),
+                        entry.git_branch if entry.is_git_repo else None,
+                        row_width,
+                    )
+                else:
+                    host = get_ssh_host(entry.location.host_id)
+                    host_label = (
+                        host.display_name
+                        if host is not None
+                        else f"{entry.location.host_id} [missing host]"
+                    )
+                    label = format_remote_project_row(entry, host_label, row_width)
+                    option_id = entry.selector
+                option_list.add_option(Option(label, id=option_id))
+        visible_ids = {
+            project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
+            for entry in entries
+        }
+        self._restore_highlight(preferred_id if preferred_id in visible_ids else None)
+        first_id = preferred_id if preferred_id in visible_ids else next(
+            (
+                project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
+                for entry in entries
+            ),
+            None,
         )
+        self._preferred_entry_id = first_id
+        self._show_details(first_id)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate(self._filtered(event.value.strip().lower()))
@@ -239,6 +246,22 @@ class ProjectsScreen(Screen[None]):
             self.app.push_screen(ProjectDetailScreen(entry.project))
         elif isinstance(entry, RegisteredRemoteProject):
             self.app.push_screen(ProjectDetailScreen(entry))
+
+    def _highlighted_entry_id(self) -> str | None:
+        option_list = self.query_one("#project-list", OptionList)
+        if option_list.highlighted is None:
+            return None
+        option = option_list.get_option_at_index(option_list.highlighted)
+        return str(option.id) if option.id in self._entries_by_id else None
+
+    def _restore_highlight(self, entry_id: str | None) -> None:
+        if not entry_id:
+            return
+        option_list = self.query_one("#project-list", OptionList)
+        for index, option in enumerate(option_list.options):
+            if option.id == entry_id:
+                option_list.highlighted = index
+                return
 
     def _show_details(self, option_id: str | None) -> None:
         path_widget = self.query_one("#project-path", Static)

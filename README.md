@@ -51,6 +51,10 @@ dashboard.
 - Responsive Terminal Home identity artwork appears above the home summary and
   collapses or hides cleanly on constrained terminals; it can be disabled in
   Settings as “Show Terminal Home artwork”.
+- Continue Project groups configured, unconfigured, and remote projects, while
+  Recent Projects keeps project, status, and branch columns aligned.
+- Appearance settings share one keyboard-friendly multi-select group, with
+  consistent focus styling across Settings choice groups.
 - Resume tmux Session lists running local sessions; Enter or Space exits the dashboard,
   rechecks the selection, and then attaches (or switches clients from inside tmux).
 - `th list` headings support a persisted color preference in Settings. The Theme

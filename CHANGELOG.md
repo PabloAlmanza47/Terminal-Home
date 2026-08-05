@@ -20,6 +20,11 @@
   tightened Open Project status-to-branch spacing.
 - System Information now uses a wider screen-specific panel and circular
   indicators consistently across independent settings and pane selection.
+- Continue Project is grouped by configured state, while Recent Projects keeps
+  aligned columns in compact and expanded layouts.
+- Appearance settings are now one keyboard-toggleable multi-select group, with
+  the same purple focus treatment as the other Settings choice groups.
+- Full artwork now places its title beside the icon row and its subtitle below.
 
 ## [0.2.0] - 2026-08-04
 

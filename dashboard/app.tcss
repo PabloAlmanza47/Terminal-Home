@@ -354,11 +354,6 @@ CircularCheckbox {
     border: none;
 }
 
-CircularCheckbox:focus {
-    border: double #55d6ff;
-    background-tint: transparent;
-}
-
 CircularSelectionList {
     height: auto;
     max-height: 10;
@@ -457,6 +452,30 @@ OptionList, SelectionList {
 OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus {
     border: double #55d6ff;
     background-tint: transparent;
+}
+
+/* The three Settings choice groups share one focus treatment and geometry. */
+.settings-choice-group {
+    width: 100%;
+    max-width: 100%;
+    min-height: 3;
+    height: auto;
+    margin: 1 0;
+    padding: 0 1;
+    border: solid #30445f;
+    background: transparent;
+}
+
+.settings-choice-group:focus {
+    border: round $accent;
+    background: transparent;
+}
+
+.settings-choice-group RadioButton,
+.settings-choice-group CircularSelectionList {
+    width: 100%;
+    padding: 0;
+    margin: 0;
 }
 
 KeyboardActionList {

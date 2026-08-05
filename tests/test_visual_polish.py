@@ -5,6 +5,7 @@ from textual.app import App, ComposeResult
 from textual.widgets.selection_list import Selection
 
 from dashboard.art import COMPACT_ARTWORK, FULL_ARTWORK, artwork_for_size
+from dashboard.services.project_categories import group_project_entries, project_category
 from dashboard.services.project_rows import (
     RecentProjectRow,
     format_project_row,
@@ -15,6 +16,11 @@ from dashboard.widgets import CircularSelectionList
 
 def test_artwork_is_responsive_and_setting_aware() -> None:
     assert artwork_for_size(120, 35, True) == FULL_ARTWORK
+    assert FULL_ARTWORK.splitlines() == [
+        "╭──────╮",
+        "│ >_   │   TERMINAL HOME",
+        "╰──────╯   Projects, workspaces, and tmux",
+    ]
     assert artwork_for_size(80, 24, True) == COMPACT_ARTWORK
     assert artwork_for_size(80, 11, True) is None
     assert artwork_for_size(120, 35, False) is None
@@ -54,6 +60,22 @@ def test_recent_project_rows_align_badges_and_branches() -> None:
     assert all("  ]" not in row and cell_len(row) <= 76 for row in rows)
 
 
+def test_recent_project_rows_stay_columnar_in_compact_half_width() -> None:
+    rows = format_recent_project_rows(
+        [
+            RecentProjectRow("Terminal-Home", "Saved Workspace", "feature/ui"),
+            RecentProjectRow("portfolio", "Not Configured", "main"),
+            RecentProjectRow("x", "Running", None),
+        ],
+        44,
+        compact=True,
+    )
+    assert len({row.index("[") for row in rows}) == 1
+    branch_rows = [row for row in rows if "(" in row]
+    assert len({row.index("(") for row in branch_rows}) == 1
+    assert all(cell_len(row) <= 44 for row in rows)
+
+
 def test_recent_project_rows_use_compact_fallback_without_wrapping() -> None:
     rows = format_recent_project_rows(
         [RecentProjectRow("非常に長いプロジェクト名", "Saved Workspace", "feature/ui")],
@@ -85,3 +107,41 @@ def test_pane_selection_renders_circular_markers() -> None:
     selected, unselected = asyncio.run(scenario())
     assert "◉" in selected and "X" not in selected
     assert "○" in unselected and "X" not in unselected
+
+
+def test_project_categories_have_stable_order_and_remote_is_separate(tmp_path) -> None:
+    from dashboard.models import RemoteProjectRegistration, SshProjectLocation
+    from dashboard.services.project_selection import RegisteredRemoteProject
+    from dashboard.services.projects import Project, ProjectStatus
+
+    configured = ProjectStatus(
+        project=Project("configured", tmp_path / "configured"),
+        canonical_path=tmp_path / "configured",
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=object(),  # type: ignore[arg-type]
+        workspace_metadata_error=None,
+        expected_session_name="configured",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+    # The pure helper's contract is also covered with the real status shape;
+    # the remaining fields are intentionally irrelevant to classification.
+    assert project_category(configured) == "Configured Projects"
+    remote = RegisteredRemoteProject(
+        "remote",
+        SshProjectLocation("d84aeefb-7c29-4c63-b39c-766d559df977", "/srv/remote"),
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+            "d84aeefb-7c29-4c63-b39c-766d559df977",
+            "remote",
+            "/srv/remote",
+        ),
+    )
+    assert project_category(remote) == "Remote Projects"
+    assert [group.title for group in group_project_entries([remote, configured])] == [
+        "Configured Projects",
+        "Remote Projects",
+    ]

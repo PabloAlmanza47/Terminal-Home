@@ -16,7 +16,7 @@ from textual.screen import Screen
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.settings import SettingsScreen
 from dashboard.services.settings_store import default_settings_path, load_settings, save_settings
-from dashboard.widgets import CircularCheckbox, KeyboardActionList
+from dashboard.widgets import CircularSelectionList, KeyboardActionList
 
 _SIZE = (80, 24)
 
@@ -37,21 +37,17 @@ def _run(coro):
 def test_defaults_shown_when_nothing_saved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate(monkeypatch, tmp_path)
 
-    async def scenario() -> tuple[bool, bool, bool]:
+    async def scenario() -> tuple[set[str], bool]:
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
-            return (
-                screen.query_one("#artwork-checkbox").value,
-                screen.query_one("#clock-checkbox").value,
-                screen.query_one("#compact-checkbox").value,
-            )
+            appearance = screen.query_one("#appearance-settings", CircularSelectionList)
+            return set(appearance.selected), appearance.has_focus
 
-    artwork, clock, compact = _run(scenario())
-    assert artwork is True
-    assert clock is True
-    assert compact is False
+    selected, focused = _run(scenario())
+    assert selected == {"artwork", "clock"}
+    assert focused is True
 
 
 def test_independent_settings_use_circular_indicators(
@@ -63,17 +59,47 @@ def test_independent_settings_use_circular_indicators(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            artwork = app.screen.query_one("#artwork-checkbox", CircularCheckbox)
-            clock = app.screen.query_one("#clock-checkbox", CircularCheckbox)
-            await pilot.click("#artwork-checkbox")
+            appearance = app.screen.query_one("#appearance-settings", CircularSelectionList)
+            await pilot.press("space")
             await pilot.pause()
-            return str(artwork.render()), str(clock.render()), artwork.value, clock.value
+            return (
+                str(appearance.render_line(0)),
+                str(appearance.render_line(1)),
+                "artwork" in appearance.selected,
+                "clock" in appearance.selected,
+            )
 
     artwork, clock, artwork_value, clock_value = _run(scenario())
     assert "○" in artwork and "X" not in artwork
     assert "◉" in clock and "X" not in clock
     assert artwork_value is False
     assert clock_value is True
+
+
+def test_settings_choice_groups_share_focused_border(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+
+    async def scenario() -> tuple[object, object, object]:
+        app = _HostApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            appearance = app.screen.query_one("#appearance-settings")
+            coding = app.screen.query_one("#coding-agent-set")
+            header = app.screen.query_one("#table-header-color-set")
+            appearance.focus()
+            await pilot.pause()
+            appearance_border = appearance.styles.border
+            coding.focus()
+            await pilot.pause()
+            coding_border = coding.styles.border
+            header.focus()
+            await pilot.pause()
+            return appearance_border, coding_border, header.styles.border
+
+    appearance_border, coding_border, header_border = _run(scenario())
+    assert appearance_border == coding_border == header_border
 
 
 def test_toggling_artwork_checkbox_persists(
@@ -85,7 +111,7 @@ def test_toggling_artwork_checkbox_persists(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#artwork-checkbox")
+            app.screen.query_one("#appearance-settings", CircularSelectionList).toggle("artwork")
             await pilot.pause()
 
     _run(scenario())
@@ -102,7 +128,7 @@ def test_toggling_compact_checkbox_persists_layout_mode(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#compact-checkbox")
+            app.screen.query_one("#appearance-settings", CircularSelectionList).toggle("compact")
             await pilot.pause()
 
     _run(scenario())
@@ -117,7 +143,7 @@ def test_toggling_clock_checkbox_persists(tmp_path: Path, monkeypatch: pytest.Mo
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#clock-checkbox")
+            app.screen.query_one("#appearance-settings", CircularSelectionList).toggle("clock")
             await pilot.pause()
 
     _run(scenario())
@@ -133,21 +159,17 @@ def test_existing_settings_are_loaded_on_open(
         AppSettings(artwork_enabled=False, layout_mode=LayoutMode.COMPACT, clock_visible=False)
     )
 
-    async def scenario() -> tuple[bool, bool, bool]:
+    async def scenario() -> tuple[set[str], bool]:
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
-            return (
-                screen.query_one("#artwork-checkbox").value,
-                screen.query_one("#clock-checkbox").value,
-                screen.query_one("#compact-checkbox").value,
-            )
+            appearance = screen.query_one("#appearance-settings", CircularSelectionList)
+            return set(appearance.selected), appearance.has_focus
 
-    artwork, clock, compact = _run(scenario())
-    assert artwork is False
-    assert clock is False
-    assert compact is True
+    selected, focused = _run(scenario())
+    assert selected == {"compact"}
+    assert focused is True
 
 
 def test_malformed_settings_file_falls_back_to_defaults_without_crashing(
@@ -162,7 +184,9 @@ def test_malformed_settings_file_falls_back_to_defaults_without_crashing(
         app = _HostApp()
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            return app.screen.query_one("#artwork-checkbox").value
+            return "artwork" in app.screen.query_one(
+                "#appearance-settings", CircularSelectionList
+            ).selected
 
     assert _run(scenario()) is True  # default, no traceback
 
