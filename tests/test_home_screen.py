@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime as RealDateTime
 from pathlib import Path
 
 import pytest
@@ -524,6 +525,15 @@ def test_clock_tick_updates_display_without_rescanning(
 
     monkeypatch.setattr(home_module, "scan_all_projects", counting_scan_all)
 
+    class FixedDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 5, 18, 0, 0, tzinfo=tz)
+
+    # This test controls the datetime name used by HomeScreen so it does not
+    # depend on the machine's clock or timezone.
+    monkeypatch.setattr(home_module, "datetime", FixedDateTime)
+
     async def scenario() -> tuple[int, int, str, str]:
         app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
@@ -539,8 +549,8 @@ def test_clock_tick_updates_display_without_rescanning(
     calls_before, calls_after, before_text, after_text = _run(scenario())
     assert calls_before == 1
     assert calls_after == 1  # unchanged: clock ticks never trigger a rescan
-    assert "Good evening" in before_text
-    assert after_text == before_text or "Good evening" in after_text
+    assert before_text == after_text
+    assert "Wed Aug 05 • 18:00 • Good evening" in before_text
 
 
 # --- Responsive layout at the three required terminal sizes --------------------

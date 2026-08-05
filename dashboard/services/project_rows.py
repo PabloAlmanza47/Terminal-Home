@@ -8,6 +8,11 @@ _STATUS_WIDTH = 22
 _NAME_WIDTH = 24
 
 
+def project_row_width(available_width: int) -> int:
+    """Reserve the list's border/padding without letting rows overflow."""
+    return max(20, available_width - 12)
+
+
 def _ellipsis(value: str, width: int) -> str:
     if width <= 0:
         return ""

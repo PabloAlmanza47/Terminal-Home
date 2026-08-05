@@ -48,7 +48,8 @@ dashboard.
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
 - Keyboard-first [Textual](https://textual.textualize.io/) interface
-- Resume tmux Session attaches to the selected local session after the dashboard exits.
+- Resume tmux Session lists running local sessions; Enter or Space exits the dashboard,
+  rechecks the selection, and then attaches (or switches clients from inside tmux).
 - `th list` headings support a persisted color preference in Settings. The Theme
   accent is the default; Blue, Cyan, Green, Magenta, Yellow, White, and No color
   are also available. Headers stay plain when output is redirected, `NO_COLOR` is
@@ -472,7 +473,10 @@ detailed disk, memory, shell, and host information remains on System
 Information. Home sections are content-sized and only the focused section
 shows an active cursor.
 
-Settings includes a Coding Agent preference with None, Codex, and Claude Code.
+Settings includes a Coding Agent preference with None, Codex, and Claude Code. It also
+includes the persisted `th list` table-header colors: Theme default, Blue, Cyan, Green,
+Magenta, Yellow, White, and No color. CLI output stays plain when piped, when `NO_COLOR`
+is set, or when No color is selected.
 None opens a normal shell with a warning. Codex and Claude Code are used only
 when their commands are already available; a missing command falls back to a
 shell. Terminal Home never installs, authenticates, or stores credentials for

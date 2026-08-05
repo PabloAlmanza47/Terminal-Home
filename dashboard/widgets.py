@@ -153,9 +153,13 @@ class KeyboardOptionList(OptionList):
 
     def add_option(self, option: Option | VisualType | None = None) -> KeyboardOptionList:
         super().add_option(option)
-        if isinstance(option, Option):
-            self._original_prompts[id(option)] = (
-                option.prompt.copy() if isinstance(option.prompt, Text) else option.prompt
+        # Textual normalizes strings, VisualTypes, and None into Option
+        # objects inside OptionList.add_option. Capture that actual object so
+        # marker refreshes always rebuild from the unmarked prompt.
+        if self.options:
+            actual = self.options[-1]
+            self._original_prompts[id(actual)] = (
+                actual.prompt.copy() if isinstance(actual.prompt, Text) else actual.prompt
             )
         return self
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 from pathlib import Path
 
@@ -7,12 +8,14 @@ import pytest
 from rich.text import Text
 from textual.widgets.option_list import Option
 
+import dashboard.screens.tmux_sessions as tmux_screen_module
 from dashboard.models.settings import AppSettings, TableHeaderColor
 from dashboard.models.workspace import TmuxSessionAttachRequest
 from dashboard.services import tmux
 from dashboard.services.cli_colors import style_table_header
 from dashboard.services.project_rows import format_project_row
 from dashboard.services.settings_store import load_settings, save_settings
+from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_launcher import LaunchError, execute_tmux_session_attach
 from dashboard.widgets import KeyboardOptionList
 
@@ -23,6 +26,45 @@ def test_project_rows_fit_wide_and_narrow_limits() -> None:
             "a very long project name", "Saved Workspace", "feature/long", width
         )
         assert len(row) <= width
+
+
+@pytest.mark.parametrize("width", [20, 31, 40, 61, 80])
+def test_tmux_rows_fit_available_width(width: int) -> None:
+    row = tmux_screen_module.format_tmux_session_row(
+        TmuxSession("a-session-with-a-long-name", 3, "Mon Aug  1 09:00:00 2026", True),
+        width,
+    )
+    assert len(row) <= max(12, width)
+
+
+def test_resume_screen_returns_immutable_request_after_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tmux_screen_module, "is_tmux_installed", lambda: True)
+    monkeypatch.setattr(
+        tmux_screen_module,
+        "list_tmux_sessions",
+        lambda: [TmuxSession("dev", 2, "created", False)],
+    )
+
+    async def scenario():
+        from textual.app import App
+
+        class Host(App[object]):
+            def on_mount(self) -> None:
+                self.push_screen(tmux_screen_module.TmuxSessionsScreen())
+
+        app = Host()
+        async with app.run_test(size=(48, 16)) as pilot:
+            await pilot.pause()
+            session_list = app.screen.query_one("#tmux-list", tmux_screen_module.OptionList)
+            session_list.highlighted = 0
+            session_list.focus()
+            await pilot.press("space")
+        return app.return_value
+
+    result = asyncio.run(scenario())
+    assert result == TmuxSessionAttachRequest("dev")
 
 
 def test_shared_option_marker_updates_do_not_accumulate_or_flatten_rich_prompt() -> None:

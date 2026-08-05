@@ -11,6 +11,7 @@ loading indicator while a scan is in progress.
 
 from __future__ import annotations
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
@@ -18,7 +19,11 @@ from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
-from dashboard.services.project_rows import format_project_row, format_remote_project_row
+from dashboard.services.project_rows import (
+    format_project_row,
+    format_remote_project_row,
+    project_row_width,
+)
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
     SelectableProject,
@@ -105,6 +110,22 @@ class ProjectsScreen(Screen[None]):
     def action_refresh(self) -> None:
         self._start_scan()
 
+    def on_resize(self, event: events.Resize) -> None:
+        if not self._all_entries or self._scanning:
+            return
+        option_list = self.query_one("#project-list", OptionList)
+        selected_id = None
+        if option_list.highlighted is not None:
+            option = option_list.get_option_at_index(option_list.highlighted)
+            selected_id = str(option.id) if option.id else None
+        query = self.query_one("#project-filter", Input).value.strip().lower()
+        self._populate(self._filtered(query))
+        if selected_id:
+            for index, option in enumerate(option_list.options):
+                if option.id == selected_id:
+                    option_list.highlighted = index
+                    break
+
     def _start_scan(self) -> None:
         if self._scanning:
             return
@@ -174,7 +195,7 @@ class ProjectsScreen(Screen[None]):
             return
         local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
         display_names = disambiguated_display_names(local_statuses)
-        row_width = max(20, option_list.content_region.width or self.size.width - 12)
+        row_width = project_row_width(option_list.content_region.width or self.size.width)
         local_index = 0
         for entry in entries:
             if isinstance(entry, ProjectStatus):
