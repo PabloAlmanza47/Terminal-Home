@@ -24,16 +24,12 @@ from dashboard.models.layout import render_pane_preview
 from dashboard.screens.new_project.state import WizardMode, WizardState
 from dashboard.services.project_creation import (
     ProjectCreationError,
-    create_project_directory,
-    init_git_repo,
+    ProjectCreationRequest,
+    create_project,
+    init_git_repo,  # noqa: F401 - compatibility seam for existing wizard tests
     resolve_destination,
-    validate_new_project,
 )
-from dashboard.services.workspace_store import (
-    WorkspaceStoreVersionError,
-    ensure_workspace_store_writable,
-    save_workspace,
-)
+from dashboard.services.workspace_store import WorkspaceStoreVersionError, save_workspace
 
 
 class ReviewScreen(Screen[None]):
@@ -113,47 +109,24 @@ class ReviewScreen(Screen[None]):
             self._save_existing_project()
 
     def _create_new_project(self) -> None:
-        validation = validate_new_project(self.state.project_name, self.state.folder_name)
-        if not validation.is_valid:
-            self._show_error("\n".join(validation.errors))
-            return
-
         try:
             destination = resolve_destination(self.state.folder_name)
-        except ProjectCreationError as exc:
-            self._show_error(str(exc))
-            return
-
-        try:
-            workspace = WorkspaceSpec.for_local_project(
-                project_name=self.state.project_name.strip(),
-                project_path=destination,
-                session_name=self.state.session_name,
-                windows=tuple(window.to_window_spec() for window in self.state.windows),
+            result = create_project(
+                ProjectCreationRequest(
+                    project_name=self.state.project_name,
+                    destination=destination,
+                    init_git=self.state.init_git,
+                    launch=True,
+                    session_name=self.state.session_name,
+                    windows=tuple(window.to_window_spec() for window in self.state.windows),
+                )
             )
-        except WorkspaceValidationError as exc:
-            self._show_error(str(exc))
-            return
-
-        try:
-            ensure_workspace_store_writable()
-        except WorkspaceStoreVersionError as exc:
-            self._show_error(str(exc))
-            return
-
-        created_dir = False
-        try:
-            create_project_directory(destination)
-            created_dir = True
-            if self.state.init_git:
-                init_git_repo(destination)
-            save_workspace(workspace)
         except (OSError, ProjectCreationError, WorkspaceStoreVersionError) as exc:
-            detail = f" (the directory at {destination} was already created)" if created_dir else ""
-            self._show_error(f"{exc}{detail}")
+            self._show_error(str(exc))
             return
 
-        self.app.exit(LaunchRequest(workspace=workspace, init_git=self.state.init_git))
+        assert result.launch_request is not None
+        self.app.exit(result.launch_request)
 
     def _save_existing_project(self) -> None:
         """EXISTING_CREATE ("Configure Workspace") and EXISTING_EDIT ("Edit

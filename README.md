@@ -125,13 +125,18 @@ The output is written to `dist/`. The package has one authoritative version in
 ## Command-line interface
 
 Plain `th` (or `terminal-home` / `dev`) opens the dashboard described below.
-The CLI also provides inspection commands and one mutating launch command:
+The CLI also provides inspection commands, project creation, and workspace launch:
 
 ```bash
 th              # open the dashboard
 th list         # list discovered projects and their status
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
+th new my-project  # create a local project with safe defaults
+th new my-project --no-git
+th new my-project --path ~/school/csce331/my-project
+th new my-project --template web-development
+th new my-project --template python --no-launch
 th doctor       # check local tools, stores, config paths, and project roots
 th doctor --remote  # additionally inspect registered remote projects
 th completion bash  # print Bash completion setup
@@ -150,6 +155,28 @@ unique registered remote name, or an exact remote selector. Remote selectors
 have the form `ssh:<host-id>:<remote-path>`. Duplicate names require an exact
 path or remote selector. An explicit local path outside configured roots works,
 but is not automatically registered in `projects.json`.
+
+### Non-TUI project creation
+
+`th new <project-name>` creates a local project without opening the Textual
+dashboard. By default it derives a folder with the same slug behavior as the
+wizard, creates it beneath `~/projects` (the current default project root),
+initializes Git, uses the built-in default workspace, and launches that
+workspace. Use `--path` for a complete destination or `--root` to choose a
+parent directory. `--no-git` and `--no-launch` disable those defaults.
+
+Registered local workspace templates can be selected with `--template`; the
+template is copied into an independent project workspace and is never changed.
+Unknown template names and existing destinations are rejected, and `th new`
+never overwrites a directory. `--interactive` prompts for unspecified folder,
+root, Git, template, and launch choices. `--non-interactive` never prompts and
+uses the documented defaults. Plain usage uses defaults without emitting TUI
+output; EOF accepts prompt defaults and Ctrl+C cancels an interactive request.
+
+Creation is local-only: it does not create SSH projects, install packages, or
+configure Git remotes. `th new` shares the same project-creation service as the
+final step of the Textual wizard; opening the TUI remains the option for
+custom pane-by-pane workspace design.
 
 ## SSH hosts and remote projects
 
@@ -222,10 +249,11 @@ remote dependencies.
 ## Shell completion
 
 Terminal Home provides dynamic Bash and Zsh completion for commands, local
-projects, and registered remote projects. Unique projects are offered by short
+projects, registered remote projects, and `th new --template` names. Unique projects are offered by short
 name; duplicate names use exact local paths or `ssh:<host-id>:<remote-path>`
 selectors. The completion path is read-only and does not inspect Git status,
-SSH hosts, or tmux sessions.
+SSH hosts, or tmux sessions. Template completion reads only the local template
+store and performs no network or remote inspection.
 
 For Bash, enable completion in the current session with:
 

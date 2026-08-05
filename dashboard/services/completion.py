@@ -13,8 +13,9 @@ from dashboard.services.project_selection import (
 from dashboard.services.projects import discover_projects
 from dashboard.services.projects_config_store import load_projects_config_result
 from dashboard.services.remote_project_store import load_all_remote_projects
+from dashboard.services.template_store import load_templates_result
 
-SUBCOMMANDS = ("list", "plan", "up", "doctor", "completion")
+SUBCOMMANDS = ("list", "plan", "up", "new", "doctor", "completion")
 SHELLS = ("bash", "zsh")
 
 
@@ -64,6 +65,12 @@ def discover_project_selector_candidates() -> tuple[str, ...]:
     return project_selector_candidates((*local_projects, *remote_projects))
 
 
+def discover_template_names() -> tuple[str, ...]:
+    """Return registered template names without probing projects or hosts."""
+    result = load_templates_result()
+    return tuple(template.name for template in result.templates)
+
+
 def render_bash_completion() -> str:
     """Render dependency-free Bash completion for every console-script alias."""
     return r'''_terminal_home_complete() {
@@ -79,6 +86,7 @@ def render_bash_completion() -> str:
 list
 plan
 up
+new
 doctor
 completion
 EOF
@@ -100,6 +108,17 @@ EOF
             while IFS= read -r candidate; do
                 [[ $candidate == "$cur"* ]] && COMPREPLY+=("$candidate")
             done < <("${COMP_WORDS[0]}" __complete projects 2>/dev/null)
+        fi
+    fi
+
+    if [[ $command == new ]]; then
+        if [[ ${COMP_WORDS[COMP_CWORD-1]-} == --template ]]; then
+            while IFS= read -r candidate; do
+                [[ $candidate == "$cur"* ]] && COMPREPLY+=("$candidate")
+            done < <("${COMP_WORDS[0]}" __complete templates 2>/dev/null)
+        elif [[ $cur == --* ]]; then
+            COMPREPLY=( $(compgen -W '--path --root --template --git --no-git \
+                --launch --no-launch --interactive --non-interactive' -- "$cur") )
         fi
     fi
 }
@@ -130,6 +149,12 @@ _terminal_home_complete() {
     case $command in
         completion)
             (( CURRENT == 3 )) && compadd -- bash zsh
+            ;;
+        new)
+            if [[ ${words[CURRENT-1]-} == --template ]]; then
+                candidates=(${(@f)"$(command "${words[1]}" __complete templates 2>/dev/null)"})
+                compadd -- "${candidates[@]}"
+            fi
             ;;
         plan|up)
             if (( CURRENT == 3 )); then

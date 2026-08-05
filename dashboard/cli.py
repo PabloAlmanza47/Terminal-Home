@@ -20,6 +20,7 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from uuid import uuid4
 
 from dashboard import __version__
@@ -27,9 +28,16 @@ from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidat
 from dashboard.services.completion import (
     SHELLS,
     discover_project_selector_candidates,
+    discover_template_names,
     render_completion,
 )
 from dashboard.services.doctor import exit_code_for, format_diagnostic, run_diagnostics
+from dashboard.services.project_creation import (
+    DEFAULT_PROJECTS_ROOT,
+    ProjectCreationError,
+    ProjectCreationRequest,
+    create_project,
+)
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     launch_status_line,
@@ -57,6 +65,7 @@ from dashboard.services.remote_registry import (
     remove_ssh_host,
     update_registered_remote_project,
 )
+from dashboard.services.slug import slugify
 from dashboard.services.ssh_host_store import (
     SshHostStoreError,
     create_ssh_host,
@@ -106,6 +115,54 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     up_parser.add_argument("project", help="Project name (if unique) or filesystem path.")
     up_parser.set_defaults(handler=_run_up)
+
+    new_parser = subparsers.add_parser(
+        "new",
+        help="Create a new local project without opening the dashboard.",
+        description=(
+            "Create a local Terminal Home project. Defaults are a slug-derived folder, "
+            "Git initialization, the default workspace, and launch."
+        ),
+        epilog=(
+            "Examples: th new my-project; th new my-project --no-git; "
+            "th new my-project --path ~/school/csce331/my-project; "
+            "th new my-project --template web-development"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    new_parser.add_argument("project_name", help="Display name for the new project.")
+    destination_group = new_parser.add_mutually_exclusive_group()
+    destination_group.add_argument(
+        "--path", type=Path, help="Complete local destination path (expands '~')."
+    )
+    destination_group.add_argument(
+        "--root", type=Path, help="Parent project root; the slug-derived folder is appended."
+    )
+    new_parser.add_argument(
+        "--template", metavar="TEMPLATE", help="Registered local workspace template name."
+    )
+    git_group = new_parser.add_mutually_exclusive_group()
+    git_group.add_argument(
+        "--git", dest="init_git", action="store_true", help="Initialize Git (default)."
+    )
+    git_group.add_argument(
+        "--no-git", dest="init_git", action="store_false", help="Do not initialize Git."
+    )
+    launch_group = new_parser.add_mutually_exclusive_group()
+    launch_group.add_argument(
+        "--launch", dest="launch", action="store_true", help="Launch after creation (default)."
+    )
+    launch_group.add_argument(
+        "--no-launch", dest="launch", action="store_false", help="Create without launching tmux."
+    )
+    mode_group = new_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--interactive", action="store_true", help="Prompt for unspecified choices."
+    )
+    mode_group.add_argument(
+        "--non-interactive", action="store_true", help="Never prompt; use safe defaults."
+    )
+    new_parser.set_defaults(handler=_run_new, init_git=None, launch=None)
 
     doctor_parser = subparsers.add_parser(
         "doctor", help="Check the local environment (read-only)."
@@ -393,6 +450,121 @@ def _run_up(args: argparse.Namespace) -> int:
     return 0
 
 
+class _PromptCancelled(Exception):
+    pass
+
+
+def _prompt_text(prompt: str, default: str, *, stdin, stdout) -> str:
+    print(f"{prompt} [{default}]: ", end="", file=stdout, flush=True)
+    try:
+        answer = stdin.readline()
+    except KeyboardInterrupt as exc:
+        raise _PromptCancelled from exc
+    if answer == "":
+        return default
+    return answer.strip() or default
+
+
+def _prompt_yes_no(prompt: str, default: bool, *, stdin, stdout) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        print(f"{prompt} [{suffix}]: ", end="", file=stdout, flush=True)
+        try:
+            answer = stdin.readline()
+        except KeyboardInterrupt as exc:
+            raise _PromptCancelled from exc
+        answer = answer.strip().casefold()
+        if not answer:
+            return default
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("Please answer yes or no.", file=stdout)
+
+
+def _run_new(args: argparse.Namespace) -> int:
+    interactive = bool(args.interactive) and not args.non_interactive
+    project_name = args.project_name
+    folder = slugify(project_name)
+    if not folder:
+        return _management_error("project name must contain at least one letter or number")
+
+    try:
+        if args.path is not None:
+            destination = args.path.expanduser().resolve()
+        else:
+            root = (
+                args.root.expanduser().resolve()
+                if args.root is not None
+                else DEFAULT_PROJECTS_ROOT
+            )
+            if interactive and args.root is None:
+                folder = _prompt_text("Project folder", folder, stdin=sys.stdin, stdout=sys.stdout)
+                root = Path(
+                    _prompt_text("Project root", str(root), stdin=sys.stdin, stdout=sys.stdout)
+                ).expanduser().resolve()
+            destination = (root / folder).resolve()
+
+        init_git = args.init_git
+        if init_git is None:
+            init_git = (
+                _prompt_yes_no("Initialize Git?", True, stdin=sys.stdin, stdout=sys.stdout)
+                if interactive
+                else True
+            )
+
+        template_name = args.template
+        if template_name is None and interactive:
+            template_answer = _prompt_text(
+                "Workspace template", "default", stdin=sys.stdin, stdout=sys.stdout
+            )
+            template_name = (
+                None
+                if template_answer.casefold() in {"", "default", "none"}
+                else template_answer
+            )
+
+        launch = args.launch
+        if launch is None:
+            launch = (
+                _prompt_yes_no("Launch after creation?", True, stdin=sys.stdin, stdout=sys.stdout)
+                if interactive
+                else True
+            )
+
+        result = create_project(
+            ProjectCreationRequest(
+                project_name=project_name,
+                destination=destination,
+                init_git=init_git,
+                launch=launch,
+                template_name=template_name,
+            )
+        )
+    except _PromptCancelled:
+        print("error: interactive creation cancelled", file=sys.stderr)
+        return 1
+    except (OSError, ProjectCreationError, WorkspaceStoreVersionError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Created project: {project_name}")
+    print(f"Path: {result.destination}")
+    print(f"Workspace: {result.workspace_label}")
+    print(f"Git: {'initialized' if result.git_initialized else 'skipped'}")
+    if result.launch_request is None:
+        print("Launch: skipped")
+        return 0
+    print("Opening tmux workspace...", flush=True)
+    try:
+        execute_launch_request(result.launch_request)
+    except (LaunchError, TmuxCommandError, OSError, subprocess.TimeoutExpired) as exc:
+        print(f"error: project was created but launch failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _run_doctor(args: argparse.Namespace) -> int:
     print("Terminal Home doctor")
     print()
@@ -409,11 +581,15 @@ def _run_completion(args: argparse.Namespace) -> int:
 
 
 def _run_internal_completion(argv: Sequence[str]) -> int | None:
-    if list(argv) != ["__complete", "projects"]:
-        return None
-    for candidate in discover_project_selector_candidates():
-        print(candidate)
-    return 0
+    if list(argv) == ["__complete", "projects"]:
+        for candidate in discover_project_selector_candidates():
+            print(candidate)
+        return 0
+    if list(argv) == ["__complete", "templates"]:
+        for candidate in discover_template_names():
+            print(candidate)
+        return 0
+    return None
 
 
 def run(argv: Sequence[str] | None = None) -> int:
