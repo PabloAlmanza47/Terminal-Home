@@ -28,6 +28,7 @@ class HelpScreen(ModalScreen[None]):
             "  Arrow keys       Move between controls and choices",
             "  Enter / Space    Activate the focused item",
             "  Esc              Back or close",
+            "  Resume tmux      Exits the dashboard, then attaches to the selected session",
         ]
         if self.screen_bindings:
             lines.extend(["", "THIS SCREEN"])

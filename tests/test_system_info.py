@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
+from textual.app import App
+from textual.widgets import Footer
 
+import dashboard.screens.system_info as screen_module
 from dashboard.services import system_info as system_info_module
 from dashboard.services.system_info import (
+    DiskUsage,
+    SystemInfo,
     gather_system_info,
     get_disk_usage,
     get_memory_usage,
@@ -117,3 +123,90 @@ def test_gather_system_info_includes_wsl_and_memory_fields(
 
     assert info.wsl_distro == "Ubuntu"
     assert info.memory_usage is None
+
+
+@pytest.mark.parametrize("size", [(120, 35), (80, 24), (60, 18)])
+def test_system_info_borders_and_back_action_fit_above_footer(
+    size: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        screen_module,
+        "gather_system_info",
+        lambda: SystemInfo(
+            hostname="test-host",
+            operating_system="test-os",
+            python_version="3.12",
+            shell="/bin/test-shell",
+            tmux_version="tmux test",
+            disk_usage=None,
+            memory_usage=None,
+            wsl_distro=None,
+        ),
+    )
+
+    class Host(App[None]):
+        def on_mount(self) -> None:
+            self.push_screen(screen_module.SystemInfoScreen())
+
+    async def scenario() -> tuple[int, int, int, bool]:
+        app = Host()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            info_rows = app.screen.query_one("#info-rows")
+            footer = app.screen.query_one(Footer)
+            actions = app.screen.query_one("#system-info-actions")
+            return (
+                info_rows.region.height,
+                info_rows.region.bottom,
+                footer.region.y,
+                actions.display,
+            )
+
+    height, bottom, footer_y, reachable = asyncio.run(scenario())
+    assert height > 0
+    assert bottom <= footer_y
+    assert reachable
+
+
+@pytest.mark.parametrize("size", [(120, 35), (100, 30), (80, 24), (60, 18)])
+def test_system_info_long_values_use_wider_value_column(
+    size: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        screen_module,
+        "gather_system_info",
+        lambda: SystemInfo(
+            hostname="test-host",
+            operating_system="Linux-6.8.0-very-long-distribution-name-x86_64-with-desktop",
+            python_version="3.12",
+            shell="/bin/bash",
+            tmux_version="tmux test",
+            disk_usage=DiskUsage(999.99, 111.11, 888.88, 11.1),
+            memory_usage=None,
+            wsl_distro=None,
+        ),
+    )
+
+    class Host(App[None]):
+        def on_mount(self) -> None:
+            self.push_screen(screen_module.SystemInfoScreen())
+
+    async def scenario() -> tuple[int, int, int, int, int]:
+        app = Host()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            rows = app.screen.query_one("#info-rows")
+            values = list(app.screen.query(".info-value"))
+            return (
+                rows.region.width,
+                rows.region.right,
+                max(value.region.right for value in values),
+                rows.region.bottom,
+                app.screen.query_one(Footer).region.y,
+            )
+
+    row_width, row_right, value_right, row_bottom, footer_y = asyncio.run(scenario())
+    assert row_width > 0
+    assert value_right <= row_right
+    assert row_right <= size[0]
+    assert row_bottom <= footer_y

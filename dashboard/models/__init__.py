@@ -16,7 +16,7 @@ from dashboard.models.project_location import (
     SshProjectLocation,
     project_location_from_dict,
 )
-from dashboard.models.settings import CodingAgent
+from dashboard.models.settings import CodingAgent, TableHeaderColor
 from dashboard.models.ssh import (
     MAX_REMOTE_NAME_LENGTH,
     RemoteProjectRegistration,
@@ -38,6 +38,7 @@ from dashboard.models.workspace import (
     LaunchRequest,
     PaneKind,
     PaneSpec,
+    TmuxSessionAttachRequest,
     WindowSpec,
     WorkspaceSpec,
     WorkspaceValidationError,
@@ -46,7 +47,9 @@ from dashboard.models.workspace import (
 __all__ = [
     "LaunchAction",
     "LaunchRequest",
+    "TmuxSessionAttachRequest",
     "CodingAgent",
+    "TableHeaderColor",
     "LocalProjectLocation",
     "MAX_PANES_PER_WINDOW",
     "MAX_REMOTE_NAME_LENGTH",

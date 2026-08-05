@@ -38,6 +38,7 @@ def test_to_dict_uses_plain_json_safe_values() -> None:
         "clock_visible": True,
         "theme": "nord",
         "coding_agent": "none",
+        "table_header_color": "theme",
     }
 
 

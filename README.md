@@ -48,6 +48,19 @@ dashboard.
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
 - Keyboard-first [Textual](https://textual.textualize.io/) interface
+- Responsive Terminal Home identity artwork appears above the home summary and
+  collapses or hides cleanly on constrained terminals; it can be disabled in
+  Settings as “Show Terminal Home artwork”.
+- Continue Project groups configured, unconfigured, and remote projects, while
+  Recent Projects keeps project, status, and branch columns aligned.
+- Appearance settings share one keyboard-friendly multi-select group, with
+  consistent focus styling across Settings choice groups.
+- Resume tmux Session lists running local sessions; Enter or Space exits the dashboard,
+  rechecks the selection, and then attaches (or switches clients from inside tmux).
+- `th list` headings support a persisted color preference in Settings. The Theme
+  accent is the default; Blue, Cyan, Green, Magenta, Yellow, White, and No color
+  are also available. Headers stay plain when output is redirected, `NO_COLOR` is
+  set, or No color is selected.
 
 ## Demo workflow
 
@@ -467,7 +480,10 @@ detailed disk, memory, shell, and host information remains on System
 Information. Home sections are content-sized and only the focused section
 shows an active cursor.
 
-Settings includes a Coding Agent preference with None, Codex, and Claude Code.
+Settings includes a Coding Agent preference with None, Codex, and Claude Code. It also
+includes the persisted `th list` table-header colors: Theme default, Blue, Cyan, Green,
+Magenta, Yellow, White, and No color. CLI output stays plain when piped, when `NO_COLOR`
+is set, or when No color is selected.
 None opens a normal shell with a warning. Codex and Claude Code are used only
 when their commands are already available; a missing command falls back to a
 shell. Terminal Home never installs, authenticates, or stores credentials for
@@ -522,7 +538,7 @@ dashboard/
         template_path.py            Reusable import/export path modal
         template_import_review.py   Explicit imported-layout and custom-command review
         confirm.py                   Reusable Yes/No modal for destructive metadata actions
-        tmux_sessions.py            Resume tmux Session (read-only session list)
+        tmux_sessions.py            Resume tmux Session (post-TUI attach list)
         system_info.py               System Information
         settings.py                   Home screen presentation preferences
         new_project/                Shared window/pane configuration flow (WizardMode: NEW_PROJECT,

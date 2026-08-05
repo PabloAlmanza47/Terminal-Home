@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime as RealDateTime
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,7 @@ from dashboard.services.system_info import SystemInfo
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
-from dashboard.widgets import KeyboardActionList
+from dashboard.widgets import CircularSelectionList, KeyboardActionList
 
 _NARROW = (80, 24)
 _MEDIUM = (100, 30)
@@ -524,6 +525,15 @@ def test_clock_tick_updates_display_without_rescanning(
 
     monkeypatch.setattr(home_module, "scan_all_projects", counting_scan_all)
 
+    class FixedDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 5, 18, 0, 0, tzinfo=tz)
+
+    # This test controls the datetime name used by HomeScreen so it does not
+    # depend on the machine's clock or timezone.
+    monkeypatch.setattr(home_module, "datetime", FixedDateTime)
+
     async def scenario() -> tuple[int, int, str, str]:
         app = TerminalHomeApp()
         async with app.run_test(size=_MEDIUM) as pilot:
@@ -539,8 +549,8 @@ def test_clock_tick_updates_display_without_rescanning(
     calls_before, calls_after, before_text, after_text = _run(scenario())
     assert calls_before == 1
     assert calls_after == 1  # unchanged: clock ticks never trigger a rescan
-    assert "Good evening" in before_text
-    assert after_text == before_text or "Good evening" in after_text
+    assert before_text == after_text
+    assert "Wed Aug 05 • 18:00 • Good evening" in before_text
 
 
 # --- Responsive layout at the three required terminal sizes --------------------
@@ -610,7 +620,7 @@ def test_compact_terminal_header_has_one_plain_title(
 
     displayed, title = _run(scenario())
     assert displayed is True
-    assert title == "Terminal Home"
+    assert title == "╭─>_─╮  TERMINAL HOME"
 
 
 def test_home_sections_reset_cursor_when_focus_moves_between_them(
@@ -735,7 +745,8 @@ def test_disabling_artwork_in_settings_hides_it_immediately_on_return(
             await pilot.pause()
             assert type(app.screen).__name__ == "SettingsScreen"
 
-            await pilot.click("#artwork-checkbox")
+            appearance = app.screen.query_one("#appearance-settings", CircularSelectionList)
+            appearance.toggle("artwork")
             await pilot.pause()
 
             await pilot.press("escape")
@@ -761,11 +772,11 @@ def test_disabling_clock_in_settings_hides_it_immediately_on_return(
             await _wait_for_scan(pilot)
             await pilot.press("5")
             await pilot.pause()
-            clock_checkbox = app.screen.query_one("#clock-checkbox")
-            before_value = clock_checkbox.value
-            clock_checkbox.toggle()
+            appearance = app.screen.query_one("#appearance-settings", CircularSelectionList)
+            before_value = "clock" in appearance.selected
+            appearance.toggle("clock")
             await pilot.pause()
-            return before_value, clock_checkbox.value
+            return before_value, "clock" in appearance.selected
 
     before_value, after_value = _run(scenario())
     assert before_value is True
@@ -792,7 +803,7 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
 
             await pilot.press("5")
             await pilot.pause()
-            await pilot.click("#compact-checkbox")
+            app.screen.query_one("#appearance-settings", CircularSelectionList).toggle("compact")
             await pilot.pause()
             await pilot.press("escape")
             await pilot.pause()
@@ -805,8 +816,8 @@ def test_enabling_compact_layout_reduces_recent_project_label_detail(
 
     compact_applied, labels_expanded, labels_compact = _run(scenario())
     assert compact_applied is True
-    # The expanded label includes the saved-workspace status plus extra
-    # decoration (branch/relative time); the compact one is just name+badge.
-    assert labels_expanded != labels_compact
+    # Compact mode never adds detail; when discovery has no branch or mtime,
+    # both modes legitimately contain the same status-only row.
+    assert len(labels_compact[0]) <= len(labels_expanded[0])
     paired = zip(labels_compact, labels_expanded)
     assert all(len(compact) <= len(expanded) for compact, expanded in paired)

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Generic, TypeVar
 
+from rich.style import Style
 from rich.text import Text
 from textual import events
+from textual.content import Content
 from textual.message import Message
-from textual.widgets import OptionList, Static
+from textual.strip import Segment, Strip
+from textual.visual import VisualType
+from textual.widgets import Checkbox, OptionList, RadioButton, SelectionList, Static
+from textual.widgets.option_list import Option
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +149,44 @@ class KeyboardOptionList(OptionList):
     """
 
     def __init__(self, *options, reset_on_blur: bool = False, **kwargs) -> None:
-        super().__init__(*options, **kwargs)
+        self._original_prompts: dict[int, object] = {}
+        canonical_options = [self._canonical_option(option) for option in options]
+        super().__init__(*canonical_options, **kwargs)
         self.reset_on_blur = reset_on_blur
+
+    def _canonical_option(self, option: Option | VisualType | None) -> Option | None:
+        """Normalize and record an option before Textual can notify watchers."""
+        if option is None:
+            return None
+        canonical = option if isinstance(option, Option) else Option(option)
+        self._original_prompts[id(canonical)] = (
+            canonical.prompt.copy() if isinstance(canonical.prompt, Text) else canonical.prompt
+        )
+        return canonical
+
+    def add_options(
+        self, options: Iterable[Option | VisualType | None]
+    ) -> KeyboardOptionList:
+        # Capture every prompt before handing the batch to Textual. This is
+        # important for a mounted, focused empty list: adding its first item
+        # may synchronously trigger highlight/refresh callbacks.
+        canonical_options = [self._canonical_option(option) for option in options]
+        super().add_options(canonical_options)
+        if self.highlighted is None and self._options:
+            self.highlighted = next(
+                (index for index, item in enumerate(self._options) if not item.disabled),
+                None,
+            )
+        self._update_prompt_markers()
+        return self
+
+    def add_option(self, option: Option | VisualType | None = None) -> KeyboardOptionList:
+        return self.add_options([option])
+
+    def clear_options(self) -> KeyboardOptionList:
+        super().clear_options()
+        self._original_prompts.clear()
+        return self
 
     async def handle_key(self, event: events.Key) -> bool:
         if event.key == "space" and self.highlighted is not None:
@@ -160,13 +203,15 @@ class KeyboardOptionList(OptionList):
 
     def _update_prompt_markers(self, highlighted: int | None = None) -> None:
         highlighted = self.highlighted if highlighted is None else highlighted
-        for option in self.options:
-            original = getattr(option, "_terminal_home_prompt", None)
-            if original is None:
-                original = str(option.prompt)
-                setattr(option, "_terminal_home_prompt", original)
-            marker = "› " if self.options.index(option) == highlighted and self.has_focus else "  "
-            option._set_prompt(marker + original)
+        for index, option in enumerate(self.options):
+            original = self._original_prompts[id(option)]
+            marker = "› " if index == highlighted and self.has_focus else "  "
+            if isinstance(original, Text):
+                prompt = Text(marker)
+                prompt.append(original.copy())
+            else:
+                prompt = Text(marker + str(original))
+            option._set_prompt(prompt)
         self.refresh()
 
     def on_focus(self) -> None:
@@ -181,3 +226,73 @@ class KeyboardOptionList(OptionList):
         if self.reset_on_blur:
             self.highlighted = None
         self.call_after_refresh(self._update_prompt_markers)
+
+
+class CircularCheckbox(Checkbox):
+    """Checkbox with a circular indicator, preserving Checkbox semantics."""
+
+    def render(self) -> Content:
+        return _circular_content(self)
+
+
+SelectionType = TypeVar("SelectionType")
+
+CIRCULAR_SELECTED = "●"
+CIRCULAR_UNSELECTED = "○"
+
+
+def circular_indicator(value: bool) -> str:
+    """Return the shared one-cell indicator used by every circular control."""
+    return CIRCULAR_SELECTED if value else CIRCULAR_UNSELECTED
+
+
+def _circular_content(widget: Checkbox | RadioButton) -> Content:
+    """Render a control label with one shared indicator and separator."""
+    indicator_style = widget.get_visual_style("toggle--button")
+    label_style = widget.get_visual_style("toggle--label")
+    label = widget._label.stylize_before(label_style)
+    return Content.assemble((circular_indicator(widget.value), indicator_style), " ", label)
+
+
+class CircularRadioButton(RadioButton):
+    """RadioButton with the shared clean one-cell circular indicator."""
+
+    def render(self) -> Content:
+        return _circular_content(self)
+
+
+class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]):
+    """SelectionList with clean circular multi-select indicators."""
+
+    COMPONENT_CLASSES = SelectionList.COMPONENT_CLASSES | {
+        "toggle--button",
+        "toggle--label",
+    }
+
+    def render_line(self, y: int) -> Strip:
+        line = OptionList.render_line(self, y)
+        _, scroll_y = self.scroll_offset
+        selection_index = scroll_y + y
+        if selection_index >= self.option_count:
+            return line
+
+        selection = self.get_option_at_index(selection_index)
+        underlying_style = next(iter(line)).style or self.rich_style
+        component = "selection-list--button"
+        if selection.value in self._selected:
+            component += "-selected"
+        if self.highlighted == selection_index:
+            component += "-highlighted"
+        button_style = self.get_component_rich_style(component)
+        indicator_style = Style(
+            color=button_style.color,
+            bgcolor=button_style.bgcolor,
+            meta={"option": selection_index},
+        )
+        return Strip(
+            [
+                Segment(circular_indicator(selection.value in self._selected), indicator_style),
+                Segment(" ", style=underlying_style),
+                *line,
+            ]
+        )

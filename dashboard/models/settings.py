@@ -32,6 +32,17 @@ class CodingAgent(str, Enum):
     CLAUDE_CODE = "claude_code"
 
 
+class TableHeaderColor(str, Enum):
+    THEME = "theme"
+    BLUE = "blue"
+    CYAN = "cyan"
+    GREEN = "green"
+    MAGENTA = "magenta"
+    YELLOW = "yellow"
+    WHITE = "white"
+    NONE = "none"
+
+
 @dataclass(frozen=True, slots=True)
 class AppSettings:
     """Home screen presentation preferences.
@@ -46,6 +57,7 @@ class AppSettings:
     clock_visible: bool = True
     theme: str | None = None
     coding_agent: CodingAgent = CodingAgent.NONE
+    table_header_color: TableHeaderColor = TableHeaderColor.THEME
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +66,7 @@ class AppSettings:
             "clock_visible": self.clock_visible,
             "theme": self.theme,
             "coding_agent": self.coding_agent.value,
+            "table_header_color": self.table_header_color.value,
         }
 
     @classmethod
@@ -92,10 +105,19 @@ class AppSettings:
             except ValueError:
                 coding_agent = defaults.coding_agent
 
+        table_header_color = defaults.table_header_color
+        raw_header_color = data.get("table_header_color")
+        if isinstance(raw_header_color, str):
+            try:
+                table_header_color = TableHeaderColor(raw_header_color)
+            except ValueError:
+                table_header_color = defaults.table_header_color
+
         return cls(
             artwork_enabled=artwork_enabled,
             layout_mode=layout_mode,
             clock_visible=clock_visible,
             theme=theme,
             coding_agent=coding_agent,
+            table_header_color=table_header_color,
         )

@@ -18,6 +18,7 @@ from dashboard.models import (
     LaunchRequest,
     LocalProjectLocation,
     PaneKind,
+    TmuxSessionAttachRequest,
     WorkspaceSpec,
 )
 from dashboard.models.settings import CodingAgent
@@ -212,3 +213,19 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
             "and run the dashboard again."
         )
     _build_create_and_attach(request.workspace, stream, runner)
+
+
+def execute_tmux_session_attach(request: TmuxSessionAttachRequest) -> None:
+    """Attach to a selected local session after Textual has exited."""
+    if not tmux.is_tmux_installed():
+        raise LaunchError("tmux is not installed -- install tmux to resume a session.")
+    if not tmux.session_exists(request.session_name):
+        raise LaunchError(
+            f"tmux session '{request.session_name}' disappeared before it could be resumed."
+        )
+    try:
+        tmux.exec_attach(tmux.attach_or_switch_argv(request.session_name))
+    except OSError as exc:
+        raise LaunchError(
+            f"Could not attach to tmux session '{request.session_name}': {exc}"
+        ) from exc

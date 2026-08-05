@@ -7,11 +7,27 @@ Screen {
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
    long-form screens usable without letting the scrollbar dominate split
    terminals; containers that fit content do not render one. */
-VerticalScroll {
+VerticalScroll, OptionList {
     scrollbar-size: 1 1;
-    scrollbar-color: #087ea4;
     scrollbar-background: transparent;
-    scrollbar-color-hover: #55d6ff;
+    scrollbar-background-hover: transparent;
+    scrollbar-background-active: transparent;
+    scrollbar-color: $text-muted;
+    scrollbar-color-hover: $text-accent;
+    scrollbar-color-active: $text-accent;
+    scrollbar-corner-color: transparent;
+}
+
+OptionList {
+    scrollbar-size: 1 1;
+    height: auto;
+    max-height: 100%;
+    overflow-x: hidden;
+}
+
+.tmux-session-list {
+    min-height: 1;
+    height: auto;
 }
 
 /* Every screen centers a single fixed-width panel in the middle of the
@@ -26,11 +42,32 @@ VerticalScroll {
 
 .panel {
     width: 74;
+    max-width: 100%;
     height: auto;
     max-height: 90%;
     border: solid #30445f;
     padding: 1 3;
     background: transparent;
+}
+
+/* System Information needs a little more value-column room than ordinary
+   panels, but remains bounded by the screen and its outer scroll container. */
+.panel.system-info-panel {
+    width: 94;
+    max-width: 100%;
+}
+
+/* System Information owns the available area above Footer. Its content is
+   allowed to scroll on short terminals instead of being clipped by the
+   shared panel cap. */
+.system-info-scroll {
+    height: 1fr;
+    max-height: 100%;
+    overflow-y: auto;
+}
+
+.system-info-panel {
+    max-height: 100%;
 }
 
 #screen-title {
@@ -215,13 +252,24 @@ Input:focus {
 
 #info-rows {
     height: auto;
+    width: 100%;
+    grid-size: 2;
+    grid-columns: 20 1fr;
+    grid-rows: auto;
     border: round $primary;
     background: transparent;
     padding: 1 2;
 }
 
-.info-row {
-    padding: 0 1;
+.info-label {
+    height: auto;
+    color: $text-muted;
+}
+
+.info-value {
+    min-width: 0;
+    height: auto;
+    text-wrap: wrap;
 }
 
 /* --- Placeholder screens --- */
@@ -297,6 +345,24 @@ SelectionList:focus {
 
 Checkbox {
     margin: 1 0 0 0;
+}
+
+CircularCheckbox {
+    margin: 1 0 0 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+CircularSelectionList {
+    height: auto;
+    max-height: 10;
+    border: round $primary;
+    background: transparent;
+}
+
+CircularSelectionList:focus {
+    border: round $accent;
 }
 
 /* --- Confirm dialog --- */
@@ -388,6 +454,82 @@ OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus
     background-tint: transparent;
 }
 
+/* The three Settings choice groups share one focus treatment and geometry.
+   This block intentionally comes after the broad OptionList, SelectionList,
+   and RadioSet rules above it. */
+.settings-choice-group {
+    width: 100%;
+    max-width: 100%;
+    min-height: 3;
+    height: auto;
+    max-height: 9999;
+    margin: 1 0;
+    padding: 0 1;
+    border: solid #30445f !important;
+    background: transparent !important;
+}
+
+.settings-scroll {
+    height: 1fr;
+    max-height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.panel.settings-panel {
+    height: auto;
+    max-height: 9999;
+}
+
+.settings-choice-group:focus {
+    border: round #9b8cff !important;
+    background: transparent !important;
+}
+
+#appearance-settings:focus,
+#coding-agent-set:focus,
+#table-header-color-set:focus {
+    border: round #9b8cff !important;
+    background: transparent !important;
+}
+
+.settings-choice-group RadioButton,
+.settings-choice-group CircularSelectionList {
+    width: 100%;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.settings-choice-group > .option-list--option,
+.settings-choice-group > .option-list--option-highlighted,
+.settings-choice-group > .selection-list--button,
+.settings-choice-group > .selection-list--button-highlighted,
+.settings-choice-group > .selection-list--button-selected,
+.settings-choice-group > .selection-list--button-selected-highlighted {
+    color: #e0e0e0 !important;
+    background: transparent !important;
+}
+
+.settings-choice-group > .selection-list--button-selected,
+.settings-choice-group > .selection-list--button-selected-highlighted,
+.settings-choice-group RadioButton.-on > .toggle--button {
+    color: #9b8cff !important;
+    background: transparent !important;
+}
+
+#appearance-settings > .selection-list--button-selected,
+#appearance-settings > .selection-list--button-selected-highlighted,
+#coding-agent-set RadioButton.-on > .toggle--button,
+#table-header-color-set RadioButton.-on > .toggle--button {
+    color: #9b8cff !important;
+    background: transparent !important;
+}
+
+.settings-choice-group RadioButton > .toggle--button,
+.settings-choice-group RadioButton > .toggle--label {
+    background: transparent !important;
+}
+
 KeyboardActionList {
     height: auto;
     min-height: 0;
@@ -453,4 +595,45 @@ Footer {
 
 KeyboardOptionList:focus {
     border: double #55d6ff;
+}
+
+/* Shared circular-choice rendering. This is deliberately the final control
+   block so native SelectionList / ToggleButton defaults cannot restore green
+   selection colors or opaque highlight rails. */
+.circular-choice-control {
+    background: transparent !important;
+    color: #e0e0e0 !important;
+}
+
+.circular-choice-control:focus,
+CircularCheckbox:focus,
+CircularSelectionList:focus {
+    border: round #9b8cff !important;
+    background: transparent !important;
+}
+
+CircularCheckbox > .toggle--button,
+CircularCheckbox > .toggle--label,
+CircularRadioButton > .toggle--button,
+CircularRadioButton > .toggle--label {
+    background: transparent !important;
+}
+
+CircularCheckbox > .toggle--button,
+CircularRadioButton > .toggle--button,
+CircularSelectionList > .option-list--option,
+CircularSelectionList > .option-list--option-highlighted,
+CircularSelectionList > .selection-list--button,
+CircularSelectionList > .selection-list--button-highlighted,
+CircularSelectionList > .selection-list--button-selected,
+CircularSelectionList > .selection-list--button-selected-highlighted {
+    background: transparent !important;
+    color: #aebbd0 !important;
+}
+
+CircularCheckbox.-on > .toggle--button,
+CircularRadioButton.-on > .toggle--button,
+CircularSelectionList > .selection-list--button-selected,
+CircularSelectionList > .selection-list--button-selected-highlighted {
+    color: #9b8cff !important;
 }

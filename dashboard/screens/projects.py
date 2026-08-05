@@ -11,13 +11,21 @@ loading indicator while a scan is in progress.
 
 from __future__ import annotations
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
+from textual.geometry import Region
 from textual.screen import Screen
 from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
+from dashboard.services.project_categories import ProjectEntry, group_project_entries
+from dashboard.services.project_rows import (
+    format_project_row,
+    format_remote_project_row,
+    project_row_width,
+)
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
     SelectableProject,
@@ -36,7 +44,7 @@ from dashboard.services.ssh_host_store import get_ssh_host
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
-def _row_label(display_name: str, status: ProjectStatus) -> str:
+def _status_label(status: ProjectStatus) -> str:
     if status.session_running:
         tag = "Running"
     elif status.workspace_metadata_error:
@@ -46,18 +54,7 @@ def _row_label(display_name: str, status: ProjectStatus) -> str:
     else:
         tag = "Not Configured"
 
-    label = f"{display_name}  [{tag}]"
-    if status.is_git_repo and status.git_branch:
-        label += f"  ({status.git_branch})"
-    return label
-
-
-def _remote_row_label(project: RegisteredRemoteProject) -> str:
-    host_status = "" if get_ssh_host(project.location.host_id) is not None else "  [missing host]"
-    return (
-        f"{project.name}  [Remote]  {project.location.host_id}"
-        f"  {project.location.remote_path}{host_status}"
-    )
+    return tag
 
 
 def _details_text(status: ProjectStatus) -> str:
@@ -94,8 +91,13 @@ class ProjectsScreen(Screen[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._all_entries: list[ProjectStatus | RegisteredRemoteProject] = []
-        self._entries_by_id: dict[str, ProjectStatus | RegisteredRemoteProject] = {}
+        self._all_entries: list[ProjectEntry] = []
+        self._entries_by_id: dict[str, ProjectEntry] = {}
+        # These indexes describe the currently rendered option list.  Keeping
+        # them separate from ``_entries_by_id`` means disabled category rows
+        # remain presentation-only and can never become selectable projects.
+        self._category_header_index_by_entry_id: dict[str, int] = {}
+        self._preferred_entry_id: str | None = None
         self._scanning = False
 
     def compose(self) -> ComposeResult:
@@ -115,10 +117,19 @@ class ProjectsScreen(Screen[None]):
     def action_refresh(self) -> None:
         self._start_scan()
 
+    def on_resize(self, event: events.Resize) -> None:
+        if not self._all_entries or self._scanning:
+            return
+        selected_id = self._highlighted_entry_id()
+        query = self.query_one("#project-filter", Input).value.strip().lower()
+        self._populate(self._filtered(query))
+        self._restore_highlight(selected_id)
+
     def _start_scan(self) -> None:
         if self._scanning:
             return
         self._scanning = True
+        self._preferred_entry_id = self._highlighted_entry_id()
         self.query_one("#project-list", OptionList).clear_options()
         self.query_one("#project-path", Static).update("Scanning projects...")
         self.run_worker(self._scan, thread=True, exclusive=True)
@@ -169,7 +180,9 @@ class ProjectsScreen(Screen[None]):
 
     def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
         option_list = self.query_one("#project-list", OptionList)
+        preferred_id = self._highlighted_entry_id() or self._preferred_entry_id
         option_list.clear_options()
+        self._category_header_index_by_entry_id.clear()
         path_widget = self.query_one("#project-path", Static)
 
         if not self._all_entries:
@@ -184,29 +197,60 @@ class ProjectsScreen(Screen[None]):
             return
         local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
         display_names = disambiguated_display_names(local_statuses)
-        local_index = 0
-        for entry in entries:
-            if isinstance(entry, ProjectStatus):
-                display_name = display_names[local_index]
-                local_index += 1
-                label = _row_label(display_name, entry)
-                option_id = project_option_id(entry)
-            else:
-                label = _remote_row_label(entry)
-                option_id = entry.selector
-            option_list.add_option(
-                Option(label, id=option_id)
-            )
-        first = entries[0]
-        self._show_details(
-            project_option_id(first) if isinstance(first, ProjectStatus) else first.selector
+        display_names_by_id = {
+            project_option_id(entry): display_name
+            for entry, display_name in zip(local_statuses, display_names)
+        }
+        content_width = option_list.content_region.width or option_list.size.width
+        child_indent = "  "
+        row_width = project_row_width(content_width, leading_indent=len(child_indent))
+        for category in group_project_entries(entries):
+            header_index = option_list.option_count
+            option_list.add_option(Option(f"── {category.title} ──", disabled=True))
+            for entry in category.entries:
+                if isinstance(entry, ProjectStatus):
+                    option_id = project_option_id(entry)
+                    label = format_project_row(
+                        display_names_by_id[option_id],
+                        _status_label(entry),
+                        entry.git_branch if entry.is_git_repo else None,
+                        row_width,
+                    )
+                else:
+                    host = get_ssh_host(entry.location.host_id)
+                    host_label = (
+                        host.display_name
+                        if host is not None
+                        else f"{entry.location.host_id} [missing host]"
+                    )
+                    label = format_remote_project_row(entry, host_label, row_width)
+                    option_id = entry.selector
+                self._category_header_index_by_entry_id[option_id] = header_index
+                option_list.add_option(Option(child_indent + label, id=option_id))
+        visible_ids = {
+            project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
+            for entry in entries
+        }
+        self._restore_highlight(preferred_id if preferred_id in visible_ids else None)
+        first_id = preferred_id if preferred_id in visible_ids else next(
+            (
+                project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
+                for entry in entries
+            ),
+            None,
         )
+        self._preferred_entry_id = first_id
+        self._show_details(first_id)
+        self._queue_category_context_scroll(first_id)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate(self._filtered(event.value.strip().lower()))
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        self._show_details(event.option.id if event.option else None)
+        option_id = event.option.id if event.option else None
+        self._show_details(option_id)
+        if option_id is not None:
+            self._queue_category_context_scroll(str(option_id))
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id if event.option else None
@@ -215,6 +259,58 @@ class ProjectsScreen(Screen[None]):
             self.app.push_screen(ProjectDetailScreen(entry.project))
         elif isinstance(entry, RegisteredRemoteProject):
             self.app.push_screen(ProjectDetailScreen(entry))
+
+    def _highlighted_entry_id(self) -> str | None:
+        option_list = self.query_one("#project-list", OptionList)
+        if option_list.highlighted is None:
+            return None
+        option = option_list.get_option_at_index(option_list.highlighted)
+        return str(option.id) if option.id in self._entries_by_id else None
+
+    def _restore_highlight(self, entry_id: str | None) -> None:
+        if not entry_id:
+            return
+        option_list = self.query_one("#project-list", OptionList)
+        for index, option in enumerate(option_list.options):
+            if option.id == entry_id:
+                option_list.highlighted = index
+                return
+
+    def _queue_category_context_scroll(self, option_id: str | None) -> None:
+        """Scroll after Textual has completed its normal highlight update.
+
+        ``OptionList`` scrolls the highlighted line into view immediately,
+        which can leave a disabled category heading one line above the
+        viewport.  Deferring this small, public-API scroll adjustment until
+        after refresh lets the option regions and content size settle first.
+        """
+        if option_id is not None:
+            self.call_after_refresh(self._ensure_category_context_visible, option_id)
+
+    def _ensure_category_context_visible(self, option_id: str) -> None:
+        """Keep a first project row and its category heading visible together."""
+        option_list = self.query_one("#project-list", OptionList)
+        header_index = self._category_header_index_by_entry_id.get(option_id)
+        if header_index is None or option_list.highlighted is None:
+            return
+
+        highlighted_option = option_list.get_option_at_index(option_list.highlighted)
+        if highlighted_option.id != option_id:
+            return
+
+        # Category rows and project rows are intentionally single-line
+        # options.  A two-line region therefore represents the heading plus
+        # its first child and lets Textual calculate the smallest scroll
+        # adjustment through its supported scroll API.
+        if option_list.highlighted != header_index + 1:
+            return
+        content_width = max(1, option_list.scrollable_content_region.width)
+        option_list.scroll_to_region(
+            Region(0, header_index, content_width, 2),
+            force=True,
+            animate=False,
+            immediate=True,
+        )
 
     def _show_details(self, option_id: str | None) -> None:
         path_widget = self.query_one("#project-path", Static)
