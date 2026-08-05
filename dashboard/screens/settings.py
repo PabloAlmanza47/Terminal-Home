@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, RadioButton, RadioSet, SelectionList, Static
+from textual.widgets import Footer, RadioSet, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
 from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode, TableHeaderColor
@@ -20,7 +20,12 @@ from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
-from dashboard.widgets import ActionItem, CircularSelectionList, KeyboardActionList
+from dashboard.widgets import (
+    ActionItem,
+    CircularRadioButton,
+    CircularSelectionList,
+    KeyboardActionList,
+)
 
 
 class SettingsScreen(Screen[None]):
@@ -33,8 +38,8 @@ class SettingsScreen(Screen[None]):
         self.settings: AppSettings = load_settings()
 
     def compose(self) -> ComposeResult:
-        with Container(classes="screen-root"):
-            with Vertical(classes="panel"):
+        with VerticalScroll(classes="screen-root settings-scroll"):
+            with Vertical(classes="panel settings-panel"):
                 yield Static("Settings", id="screen-title")
                 yield Static(
                     "These preferences control the home screen's appearance.",
@@ -54,28 +59,32 @@ class SettingsScreen(Screen[None]):
                         self.settings.layout_mode is LayoutMode.COMPACT,
                     ),
                     id="appearance-settings",
-                    classes="settings-choice-group",
+                    classes="settings-choice-group circular-choice-control",
                 )
                 yield Static("Coding Agent", classes="panel-heading")
-                with RadioSet(id="coding-agent-set", classes="settings-choice-group"):
-                    yield RadioButton(
+                with RadioSet(
+                    id="coding-agent-set",
+                    classes="settings-choice-group circular-choice-control",
+                ):
+                    yield CircularRadioButton(
                         "None",
                         id="agent-none",
                         value=self.settings.coding_agent is CodingAgent.NONE,
                     )
-                    yield RadioButton(
+                    yield CircularRadioButton(
                         "Codex",
                         id="agent-codex",
                         value=self.settings.coding_agent is CodingAgent.CODEX,
                     )
-                    yield RadioButton(
+                    yield CircularRadioButton(
                         "Claude Code",
                         id="agent-claude",
                         value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
                     )
                 yield Static("CLI table header color", classes="panel-heading")
                 with RadioSet(
-                    id="table-header-color-set", classes="settings-choice-group"
+                    id="table-header-color-set",
+                    classes="settings-choice-group circular-choice-control",
                 ):
                     for color, label in (
                         (TableHeaderColor.THEME, "Theme accent (default)"),
@@ -87,7 +96,7 @@ class SettingsScreen(Screen[None]):
                         (TableHeaderColor.WHITE, "White"),
                         (TableHeaderColor.NONE, "No color"),
                     ):
-                        yield RadioButton(
+                        yield CircularRadioButton(
                             label,
                             id=f"header-color-{color.value}",
                             value=self.settings.table_header_color is color,

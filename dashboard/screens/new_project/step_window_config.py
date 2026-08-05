@@ -60,6 +60,7 @@ class WindowConfigScreen(Screen[None]):
                         for kind in PANE_KIND_ORDER
                     ],
                     id="pane-selection-list",
+                    classes="circular-choice-control",
                 )
                 yield Static("Pane order (first = leftmost/topmost)", classes="field-label")
                 yield OptionList(id="pane-order-list")
