@@ -22,14 +22,14 @@ class RecentProjectRow:
     detail: str | None = None
 
 
-def project_row_width(available_width: int) -> int:
+def project_row_width(available_width: int, *, leading_indent: int = 0) -> int:
     """Return label width from the OptionList content region.
 
     Textual's ``content_region`` already excludes the widget border, padding,
     and a visible scrollbar. The marker is rendered by KeyboardOptionList, so
     reserve its two terminal cells here before formatting the label itself.
     """
-    return max(1, available_width - 2)
+    return max(1, available_width - 2 - leading_indent)
 
 
 def _ellipsis(value: str, width: int) -> str:

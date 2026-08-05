@@ -100,13 +100,16 @@ def test_pane_selection_renders_circular_markers() -> None:
         async with app.run_test(size=(40, 10)) as pilot:
             await pilot.pause()
             selection_list = app.query_one(CircularSelectionList)
-            return str(selection_list.render_line(0)), str(selection_list.render_line(1))
+            return (
+                "".join(segment.text for segment in selection_list.render_line(0)),
+                "".join(segment.text for segment in selection_list.render_line(1)),
+            )
 
     import asyncio
 
     selected, unselected = asyncio.run(scenario())
-    assert "◉" in selected and "X" not in selected
-    assert "○" in unselected and "X" not in unselected
+    assert "▐●▌" in selected and "X" not in selected
+    assert "▐●▌" in unselected and "X" not in unselected
 
 
 def test_project_categories_have_stable_order_and_remote_is_separate(tmp_path) -> None:

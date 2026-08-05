@@ -17,10 +17,13 @@ import pytest
 from textual.widgets import Input, OptionList
 
 import dashboard.screens.home as home_module
+import dashboard.screens.projects as projects_module
 from dashboard.app import TerminalHomeApp
-from dashboard.models import RemoteProjectRegistration
+from dashboard.models import RemoteProjectRegistration, SshProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
+from dashboard.services.project_selection import RegisteredRemoteProject
+from dashboard.services.projects import Project, ProjectScanResult, ProjectStatus
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.remote_project_store import create_remote_project
 from dashboard.services.system_info import SystemInfo
@@ -109,6 +112,13 @@ def _option_index(option_list: OptionList, option_id: str) -> int:
     )
 
 
+def _visible_option_indices(option_list: OptionList) -> range:
+    """Return option indexes covered by the mounted list viewport."""
+    scroll_y = option_list.scroll_offset.y
+    height = option_list.scrollable_content_region.height
+    return range(scroll_y, min(option_list.option_count, scroll_y + height))
+
+
 def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     projects_root = _isolate(monkeypatch, tmp_path)
     (projects_root / "alpha").mkdir()
@@ -123,6 +133,140 @@ def test_lists_discovered_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     expected = [_project_id(projects_root / "alpha"), _project_id(projects_root / "beta")]
     assert _run(scenario()) == expected
+
+
+def test_category_header_remains_visible_when_navigation_wraps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wrapping selection must reveal the first project's category context."""
+    _isolate(monkeypatch, tmp_path)
+    local_projects = tuple(
+        Project(name, tmp_path / name)
+        for name in ("configured-a", "configured-b", "unconfigured-a", "unconfigured-b")
+    )
+
+    def status(project: Project, *, configured: bool, running: bool = False) -> ProjectStatus:
+        return ProjectStatus(
+            project=project,
+            canonical_path=project.path,
+            project_dir_exists=True,
+            is_git_repo=True,
+            git_branch="main",
+            saved_workspace=object() if configured else None,  # type: ignore[arg-type]
+            workspace_metadata_error=None,
+            expected_session_name=project.name,
+            tmux_available=True,
+            session_running=running,
+            last_modified=None,
+        )
+
+    statuses = tuple(
+        status(project, configured=index < 2, running=index == 2)
+        for index, project in enumerate(local_projects)
+    )
+    registration = RemoteProjectRegistration(
+        "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+        "d84aeefb-7c29-4c63-b39c-766d559df977",
+        "remote-project",
+        "/srv/remote-project",
+    )
+    remote = RegisteredRemoteProject(
+        "remote-project",
+        SshProjectLocation(registration.host_id, registration.remote_path),
+        registration,
+    )
+    scan_result = ProjectScanResult(statuses, truncated=False, warnings=())
+    monkeypatch.setattr(projects_module, "scan_all_projects", lambda: scan_result)
+    monkeypatch.setattr(
+        projects_module,
+        "list_selectable_projects",
+        lambda: (*local_projects, remote),
+    )
+
+    async def scenario() -> tuple[str, str, int, int, list[str], int, int, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=(70, 12)) as pilot:
+            await _open_projects_screen(pilot)
+            screen = app.screen
+            option_list = screen.query_one("#project-list", OptionList)
+            option_list.focus()
+            await pilot.pause()
+
+            entry_ids = _option_ids(pilot)
+            first_id = entry_ids[0]
+            final_id = entry_ids[-1]
+            option_objects = tuple(id(option) for option in option_list.options)
+            option_list.highlighted = _option_index(option_list, final_id)
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            first_header_index = screen._category_header_index_by_entry_id[first_id]
+            visible_after_down = list(_visible_option_indices(option_list))
+            assert first_header_index in visible_after_down
+            selected_after_down = str(
+                option_list.get_option_at_index(option_list.highlighted).id
+            )
+            headers = [
+                str(option.prompt.plain)
+                for option in option_list.options
+                if option.id is None
+            ]
+            header_options = [option for option in option_list.options if option.id is None]
+            assert len(header_options) == 3
+            assert all(option.disabled for option in header_options)
+
+            # Crossing a category boundary applies the same rule without
+            # rebuilding the list or changing the selected project.
+            configured_last = entry_ids[1]
+            option_list.highlighted = _option_index(option_list, configured_last)
+            await pilot.press("down")
+            await pilot.pause()
+            next_id = entry_ids[2]
+            next_header = screen._category_header_index_by_entry_id[next_id]
+            assert str(option_list.get_option_at_index(option_list.highlighted).id) == next_id
+            assert next_header in _visible_option_indices(option_list)
+
+            option_list.highlighted = _option_index(option_list, first_id)
+            await pilot.press("up")
+            await pilot.pause()
+            final_header_index = screen._category_header_index_by_entry_id[final_id]
+            visible_after_up = list(_visible_option_indices(option_list))
+            assert final_header_index in visible_after_up
+            assert tuple(id(option) for option in option_list.options) == option_objects
+
+            filter_box = screen.query_one("#project-filter", Input)
+            filter_box.value = "remote-project"
+            await pilot.pause()
+            assert sum(option.id is None for option in option_list.options) == 1
+            filter_box.value = ""
+            await pilot.pause()
+            assert sum(option.id is None for option in option_list.options) == 3
+            return (
+                selected_after_down,
+                str(option_list.get_option_at_index(option_list.highlighted).id),
+                first_header_index,
+                final_header_index,
+                headers,
+                visible_after_down[0],
+                visible_after_up[0],
+                option_list.scrollable_content_region.height,
+            )
+
+    (
+        selected_after_down,
+        selected_after_up,
+        first_header,
+        final_header,
+        headers,
+        down_top,
+        up_top,
+        viewport_height,
+    ) = _run(scenario())
+    assert selected_after_down == _project_id(tmp_path / "configured-a")
+    assert selected_after_up.startswith("ssh:")
+    assert first_header in range(down_top, down_top + viewport_height)
+    assert final_header in range(up_top, up_top + viewport_height)
+    assert len(headers) == 3
 
 
 def test_lists_registered_remote_projects_and_opens_offline_detail(
@@ -219,11 +363,19 @@ def test_repeated_filtering_keeps_project_names_at_one_marker_column(
             for query in ("a", "be", "", "ga", "", "al", ""):
                 filter_box.value = query
                 await pilot.pause()
-            return [str(option.prompt.plain)[2:] for option in option_list.options]
+            return [
+                str(option.prompt.plain)
+                for option in option_list.options
+                if option.id is not None
+            ]
 
     labels = _run(scenario())
     assert all(label for label in labels)
-    assert all(not label.startswith(("› ", "  ")) for label in labels)
+    # Two cells belong to KeyboardOptionList's marker and two to the
+    # Continue Project category-child indentation; neither may accumulate.
+    assert all(label[:2] in {"› ", "  "} for label in labels)
+    assert all(label[2:4] == "  " for label in labels)
+    assert all(not label[4:].startswith("  ") for label in labels)
 
 
 def test_escape_returns_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -385,8 +537,9 @@ def test_same_named_projects_under_different_roots_both_appear_distinguishably(
     assert school_label != work_label
     assert "school" in school_label
     assert "work" in work_label
-    assert school_label[2:].startswith("example")  # marker precedes the friendly name
-    assert work_label[2:].startswith("example")
+    # The marker and child indent precede the friendly name.
+    assert school_label[4:].startswith("example")
+    assert work_label[4:].startswith("example")
 
 
 def test_selecting_either_same_named_project_opens_its_own_canonical_path(

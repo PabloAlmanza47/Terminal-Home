@@ -14,6 +14,7 @@ from __future__ import annotations
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
+from textual.geometry import Region
 from textual.screen import Screen
 from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
@@ -92,6 +93,10 @@ class ProjectsScreen(Screen[None]):
         super().__init__()
         self._all_entries: list[ProjectEntry] = []
         self._entries_by_id: dict[str, ProjectEntry] = {}
+        # These indexes describe the currently rendered option list.  Keeping
+        # them separate from ``_entries_by_id`` means disabled category rows
+        # remain presentation-only and can never become selectable projects.
+        self._category_header_index_by_entry_id: dict[str, int] = {}
         self._preferred_entry_id: str | None = None
         self._scanning = False
 
@@ -177,6 +182,7 @@ class ProjectsScreen(Screen[None]):
         option_list = self.query_one("#project-list", OptionList)
         preferred_id = self._highlighted_entry_id() or self._preferred_entry_id
         option_list.clear_options()
+        self._category_header_index_by_entry_id.clear()
         path_widget = self.query_one("#project-path", Static)
 
         if not self._all_entries:
@@ -196,8 +202,10 @@ class ProjectsScreen(Screen[None]):
             for entry, display_name in zip(local_statuses, display_names)
         }
         content_width = option_list.content_region.width or option_list.size.width
-        row_width = project_row_width(content_width)
+        child_indent = "  "
+        row_width = project_row_width(content_width, leading_indent=len(child_indent))
         for category in group_project_entries(entries):
+            header_index = option_list.option_count
             option_list.add_option(Option(f"── {category.title} ──", disabled=True))
             for entry in category.entries:
                 if isinstance(entry, ProjectStatus):
@@ -217,7 +225,8 @@ class ProjectsScreen(Screen[None]):
                     )
                     label = format_remote_project_row(entry, host_label, row_width)
                     option_id = entry.selector
-                option_list.add_option(Option(label, id=option_id))
+                self._category_header_index_by_entry_id[option_id] = header_index
+                option_list.add_option(Option(child_indent + label, id=option_id))
         visible_ids = {
             project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
             for entry in entries
@@ -232,12 +241,16 @@ class ProjectsScreen(Screen[None]):
         )
         self._preferred_entry_id = first_id
         self._show_details(first_id)
+        self._queue_category_context_scroll(first_id)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate(self._filtered(event.value.strip().lower()))
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        self._show_details(event.option.id if event.option else None)
+        option_id = event.option.id if event.option else None
+        self._show_details(option_id)
+        if option_id is not None:
+            self._queue_category_context_scroll(str(option_id))
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id if event.option else None
@@ -262,6 +275,42 @@ class ProjectsScreen(Screen[None]):
             if option.id == entry_id:
                 option_list.highlighted = index
                 return
+
+    def _queue_category_context_scroll(self, option_id: str | None) -> None:
+        """Scroll after Textual has completed its normal highlight update.
+
+        ``OptionList`` scrolls the highlighted line into view immediately,
+        which can leave a disabled category heading one line above the
+        viewport.  Deferring this small, public-API scroll adjustment until
+        after refresh lets the option regions and content size settle first.
+        """
+        if option_id is not None:
+            self.call_after_refresh(self._ensure_category_context_visible, option_id)
+
+    def _ensure_category_context_visible(self, option_id: str) -> None:
+        """Keep a first project row and its category heading visible together."""
+        option_list = self.query_one("#project-list", OptionList)
+        header_index = self._category_header_index_by_entry_id.get(option_id)
+        if header_index is None or option_list.highlighted is None:
+            return
+
+        highlighted_option = option_list.get_option_at_index(option_list.highlighted)
+        if highlighted_option.id != option_id:
+            return
+
+        # Category rows and project rows are intentionally single-line
+        # options.  A two-line region therefore represents the heading plus
+        # its first child and lets Textual calculate the smallest scroll
+        # adjustment through its supported scroll API.
+        if option_list.highlighted != header_index + 1:
+            return
+        content_width = max(1, option_list.scrollable_content_region.width)
+        option_list.scroll_to_region(
+            Region(0, header_index, content_width, 2),
+            force=True,
+            animate=False,
+            immediate=True,
+        )
 
     def _show_details(self, option_id: str | None) -> None:
         path_widget = self.query_one("#project-path", Static)

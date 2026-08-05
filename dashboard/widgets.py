@@ -13,7 +13,7 @@ from textual.content import Content
 from textual.message import Message
 from textual.strip import Segment, Strip
 from textual.visual import VisualType
-from textual.widgets import Checkbox, OptionList, SelectionList, Static
+from textual.widgets import Checkbox, OptionList, RadioButton, SelectionList, Static
 from textual.widgets.option_list import Option
 
 
@@ -250,6 +250,11 @@ class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]
     layout while retaining SelectionList's public selection and message API.
     """
 
+    COMPONENT_CLASSES = SelectionList.COMPONENT_CLASSES | {
+        "toggle--button",
+        "toggle--label",
+    }
+
     def render_line(self, y: int) -> Strip:
         line = OptionList.render_line(self, y)
         _, scroll_y = self.scroll_offset
@@ -258,21 +263,28 @@ class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]
             return line
 
         selection = self.get_option_at_index(selection_index)
+        underlying_style = next(iter(line)).style or self.rich_style
         component = "selection-list--button"
         if selection.value in self._selected:
             component += "-selected"
         if self.highlighted == selection_index:
             component += "-highlighted"
-        underlying_style = next(iter(line)).style or self.rich_style
         button_style = self.get_component_rich_style(component)
-        indicator_style = Style(
-            color=button_style.color,
+        side_style = Style(
+            color=button_style.bgcolor,
             bgcolor=underlying_style.bgcolor,
+            meta={"option": selection_index},
+        )
+        inner_style = Style(
+            color=button_style.color,
+            bgcolor=button_style.bgcolor,
             meta={"option": selection_index},
         )
         return Strip(
             [
-                Segment("◉" if selection.value in self._selected else "○", indicator_style),
+                Segment(RadioButton.BUTTON_LEFT, side_style),
+                Segment(RadioButton.BUTTON_INNER, inner_style),
+                Segment(RadioButton.BUTTON_RIGHT, side_style),
                 Segment(" ", style=underlying_style),
                 *line,
             ]

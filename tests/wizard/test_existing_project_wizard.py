@@ -89,7 +89,7 @@ async def _open_project_detail(pilot, project_name: str) -> None:
     index = next(
         i
         for i in range(option_list.option_count)
-        if str(option_list.get_option_at_index(i).prompt)[2:].startswith(project_name)
+            if str(option_list.get_option_at_index(i).prompt)[4:].startswith(project_name)
     )
     option_list.highlighted = index
     option_list.focus()

@@ -63,15 +63,15 @@ def test_independent_settings_use_circular_indicators(
             await pilot.press("space")
             await pilot.pause()
             return (
-                str(appearance.render_line(0)),
-                str(appearance.render_line(1)),
+                "".join(segment.text for segment in appearance.render_line(0)),
+                "".join(segment.text for segment in appearance.render_line(1)),
                 "artwork" in appearance.selected,
                 "clock" in appearance.selected,
             )
 
     artwork, clock, artwork_value, clock_value = _run(scenario())
-    assert "○" in artwork and "X" not in artwork
-    assert "◉" in clock and "X" not in clock
+    assert "▐●▌" in artwork and "X" not in artwork
+    assert "▐●▌" in clock and "X" not in clock
     assert artwork_value is False
     assert clock_value is True
 

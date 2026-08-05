@@ -467,7 +467,7 @@ OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus
 }
 
 .settings-choice-group:focus {
-    border: round $accent;
+    border: round #9b8cff;
     background: transparent;
 }
 
@@ -476,6 +476,12 @@ OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus
     width: 100%;
     padding: 0;
     margin: 0;
+}
+
+.settings-choice-group RadioButton.-on > .toggle--button,
+.settings-choice-group CircularSelectionList > .selection-list--button-selected {
+    color: #9b8cff;
+    background: transparent;
 }
 
 KeyboardActionList {
@@ -493,6 +499,26 @@ KeyboardActionList:focus {
 #project-actions:focus,
 #confirm-actions:focus,
 #settings-actions:focus {
+    background: transparent;
+}
+
+/* Keep Settings-specific purple styling last so native widget defaults cannot
+   restore their blue or green focus/selection accents. */
+SettingsScreen .settings-choice-group:focus {
+    border: round #9b8cff;
+    background: transparent;
+}
+
+#appearance-settings:focus,
+#coding-agent-set:focus,
+#table-header-color-set:focus {
+    border: round #9b8cff;
+    background: transparent;
+}
+
+SettingsScreen .settings-choice-group RadioButton.-on > .toggle--button,
+SettingsScreen .settings-choice-group CircularSelectionList > .selection-list--button-selected {
+    color: #9b8cff;
     background: transparent;
 }
 
@@ -543,4 +569,17 @@ Footer {
 
 KeyboardOptionList:focus {
     border: double #55d6ff;
+}
+
+/* Final Settings override: keep native RadioSet and custom multi-select
+   focus/selection accents identical. */
+SettingsScreen .settings-choice-group:focus {
+    border: round #9b8cff;
+    background: transparent;
+}
+
+SettingsScreen .settings-choice-group RadioButton.-on > .toggle--button,
+SettingsScreen .settings-choice-group CircularSelectionList > .selection-list--button-selected {
+    color: #9b8cff;
+    background: transparent;
 }
