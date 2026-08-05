@@ -5,12 +5,13 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, OptionList, Static
+from textual.widgets import Button, Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.new_project.state import WizardMode, WizardState
 from dashboard.services.template_store import load_templates_result
 from dashboard.services.workspace_defaults import default_workspace_windows
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 BLANK_WORKSPACE = "blank"
 DEFAULT_WORKSPACE = "default"

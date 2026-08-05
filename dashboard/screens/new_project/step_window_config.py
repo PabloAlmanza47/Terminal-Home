@@ -12,13 +12,14 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, OptionList, SelectionList, Static
+from textual.widgets import Button, Footer, Input, SelectionList, Static
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
 from dashboard.models import PANE_KIND_LABELS, PaneKind
 from dashboard.models.workspace import PANE_KIND_ORDER
 from dashboard.screens.new_project.state import PaneDraft, WizardState
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 MAX_PANES_PER_WINDOW = 4
 
@@ -94,6 +95,11 @@ class WindowConfigScreen(Screen[None]):
             self.query_one("#window-name-input", Input).value = "main"
         self._refresh_order_list()
         self._refresh_custom_fields()
+        self.query_one("#window-name-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "window-name-input":
+            self._go_next()
 
     def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         if self._suppress_toggle:

@@ -18,7 +18,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, OptionList, Static
+from textual.widgets import Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.art import ASCII_ART
@@ -47,6 +47,7 @@ from dashboard.services.projects import (
 from dashboard.services.settings_store import load_settings
 from dashboard.services.system_info import SystemInfo, gather_system_info
 from dashboard.services.tmux import TmuxSession
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 # A terminal at least this many columns wide gets the 2x2 panel grid;
 # narrower terminals get a single stacked column instead.
@@ -217,6 +218,14 @@ class HomeScreen(Screen[None]):
         wide = width >= _WIDE_BREAKPOINT
         dashboard.set_class(wide, "layout-wide")
         dashboard.set_class(not wide, "layout-narrow")
+
+        # Preserve the primary workflow on short terminals. Secondary
+        # dashboard panels remain available through their dedicated screens;
+        # collapsing them here prevents the action list from being squeezed
+        # to zero rows.
+        compact_screen = height < 24
+        for panel_id in ("#panel-recent", "#panel-sessions", "#panel-status"):
+            self.query_one(panel_id).display = not compact_screen
 
         # The artwork logo is the header's biggest line-count cost -- once
         # the terminal is too short to comfortably fit it *and* all four

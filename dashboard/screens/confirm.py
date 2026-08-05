@@ -36,6 +36,10 @@ class ConfirmScreen(ModalScreen[bool]):
                 yield Button(self.confirm_label, id="confirm-button", variant="error")
                 yield Button(self.cancel_label, id="cancel-button")
 
+    def on_mount(self) -> None:
+        # Cancellation is the safe default for every destructive confirmation.
+        self.query_one("#cancel-button", Button).focus()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "confirm-button":
             self.dismiss(True)

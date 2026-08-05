@@ -317,3 +317,82 @@ ConfirmScreen {
     color: $warning;
     padding: 1 0 0 0;
 }
+
+/* Phase 12 visual and focus overrides. Keep the structural rules above
+   readable while centralizing the shared interaction treatment here. */
+Screen {
+    background: #101827;
+    color: #e6edf7;
+}
+
+.panel {
+    width: 1fr;
+    max-width: 86;
+    max-height: 94%;
+    border: solid #30445f;
+    padding: 1 2;
+    background: #172236;
+}
+
+#screen-title, .panel-heading {
+    color: #72d7ff;
+}
+
+OptionList, SelectionList {
+    border: solid #30445f;
+    background: #121c2d;
+}
+
+OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus {
+    border: double #55d6ff;
+    background-tint: #55d6ff 12%;
+}
+
+Button {
+    min-width: 12;
+    border: solid #38506d;
+    background: #1c2c45;
+    color: #e6edf7;
+}
+
+Button:hover, Button:focus {
+    background: #164b68;
+    color: #ffffff;
+}
+
+Button.-primary {
+    background: #087ea4;
+    color: #ffffff;
+}
+
+Button.-error {
+    background: #843f51;
+    color: #ffffff;
+}
+
+Footer {
+    background: #0b1220;
+    color: #b5c8df;
+}
+
+#help-panel {
+    width: 72;
+    max-width: 94%;
+    max-height: 90%;
+    border: solid #55d6ff;
+}
+
+#help-title {
+    color: #72d7ff;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#help-body {
+    color: #d4e2f2;
+    padding-bottom: 1;
+}
+
+KeyboardOptionList:focus {
+    border: double #55d6ff;
+}

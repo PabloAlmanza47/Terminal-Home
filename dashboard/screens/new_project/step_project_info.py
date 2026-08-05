@@ -68,6 +68,9 @@ class NewProjectScreen(Screen[None]):
             self.state.folder_name = event.value
         self._update_destination_preview()
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._go_next()
+
     def _update_destination_preview(self) -> None:
         folder = self.state.folder_name.strip()
         root = project_creation.DEFAULT_PROJECTS_ROOT

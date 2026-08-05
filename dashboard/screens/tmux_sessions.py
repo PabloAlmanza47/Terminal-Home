@@ -10,10 +10,11 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, OptionList, Static
+from textual.widgets import Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.services.tmux import is_tmux_installed, list_tmux_sessions
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 class TmuxSessionsScreen(Screen[None]):
@@ -35,6 +36,7 @@ class TmuxSessionsScreen(Screen[None]):
 
         if not is_tmux_installed():
             status.update("tmux was not found on this system.")
+            option_list.focus()
             return
 
         sessions = list_tmux_sessions()
@@ -42,6 +44,7 @@ class TmuxSessionsScreen(Screen[None]):
             status.update(
                 "No tmux sessions are running.\nStart one from a terminal with: tmux new -s <name>"
             )
+            option_list.focus()
             return
 
         status.update(

@@ -7,11 +7,12 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, OptionList, Static
+from textual.widgets import Button, Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.new_project.state import WizardState
 from dashboard.services import tmux
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 class WindowSummaryScreen(Screen[None]):
@@ -68,6 +69,10 @@ class WindowSummaryScreen(Screen[None]):
             self._finish()
         elif event.button.id == "cancel-button":
             self.action_cancel()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id == "window-list":
+            self._edit_selected()
 
     def _add_window(self) -> None:
         self.state.start_new_window()

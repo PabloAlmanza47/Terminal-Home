@@ -67,6 +67,9 @@ class SettingsScreen(Screen[None]):
                 )
         yield Footer()
 
+    def on_mount(self) -> None:
+        self.query_one("#artwork-checkbox", Checkbox).focus()
+
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         if event.checkbox.id == "artwork-checkbox":
             self.settings = replace(self.settings, artwork_enabled=event.value)

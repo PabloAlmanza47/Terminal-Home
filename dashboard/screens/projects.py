@@ -14,7 +14,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, Input, OptionList, Static
+from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
@@ -33,6 +33,7 @@ from dashboard.services.projects import (
     scan_all_projects,
 )
 from dashboard.services.ssh_host_store import get_ssh_host
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 def _row_label(display_name: str, status: ProjectStatus) -> str:

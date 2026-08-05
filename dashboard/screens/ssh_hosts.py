@@ -8,7 +8,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, OptionList, Static
+from textual.widgets import Button, Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import SshHost, SshModelValidationError
@@ -24,6 +24,7 @@ from dashboard.services.ssh_host_store import (
     load_all_ssh_hosts,
     update_ssh_host,
 )
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 class SshHostsScreen(Screen[None]):
@@ -61,6 +62,7 @@ class SshHostsScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self._refresh()
+        self.query_one("#host-list", OptionList).focus()
 
     def _refresh(self) -> None:
         self.hosts = list(load_all_ssh_hosts())

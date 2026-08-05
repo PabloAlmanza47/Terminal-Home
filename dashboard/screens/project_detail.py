@@ -199,6 +199,11 @@ class ProjectDetailScreen(Screen[None]):
                     yield Button("Back to Project List", id="back-to-list-button")
         yield Footer()
 
+    def on_mount(self) -> None:
+        buttons = [button for button in self.query(Button) if not button.disabled]
+        if buttons:
+            buttons[0].focus()
+
     def _compose_remote(self, project: RegisteredRemoteProject) -> ComposeResult:
         with Container(classes="screen-root"):
             with VerticalScroll(classes="panel"):

@@ -8,7 +8,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, OptionList, Static
+from textual.widgets import Button, Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import RemoteProjectRegistration, SshModelValidationError
@@ -21,6 +21,7 @@ from dashboard.services.remote_registry import (
     remove_registered_remote_project,
     update_registered_remote_project,
 )
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 class RemoteProjectsScreen(Screen[None]):
@@ -57,6 +58,7 @@ class RemoteProjectsScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self._refresh()
+        self.query_one("#remote-project-list", OptionList).focus()
 
     def _refresh(self) -> None:
         result = inspect_remote_registry_integrity()

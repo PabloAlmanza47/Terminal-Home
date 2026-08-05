@@ -53,5 +53,8 @@ class ImportTemplateReviewScreen(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "template-import-confirm")
 
+    def on_mount(self) -> None:
+        self.query_one("#template-import-confirm", Button).focus()
+
     def action_cancel(self) -> None:
         self.dismiss(False)

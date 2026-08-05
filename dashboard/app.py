@@ -12,7 +12,10 @@ import sys
 from dataclasses import replace
 
 from textual.app import App
+from textual.binding import Binding
+from textual.screen import ModalScreen
 from textual.theme import Theme
+from textual.widgets import Input, TextArea
 
 from dashboard.models import LaunchRequest
 from dashboard.models.settings import AppSettings
@@ -27,6 +30,14 @@ class TerminalHomeApp(App[LaunchRequest | None]):
 
     CSS_PATH = "app.tcss"
     TITLE = "Terminal Home"
+    BINDINGS = [
+        ("?", "show_help", "Keyboard help"),
+        ("q", "quit_app", "Quit"),
+        ("/", "focus_search", "Search"),
+        ("n", "new_project", "New Project"),
+        ("p", "open_projects", "Projects"),
+        ("s", "open_settings", "Settings"),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
@@ -61,6 +72,57 @@ class TerminalHomeApp(App[LaunchRequest | None]):
                 title="Settings",
                 severity="error",
             )
+
+    def _editing(self) -> bool:
+        return isinstance(self.focused, (Input, TextArea))
+
+    def action_quit_app(self) -> None:
+        if not self._editing() and not isinstance(self.screen, ModalScreen):
+            self.exit()
+
+    def action_show_help(self) -> None:
+        if self._editing() or isinstance(self.screen, ModalScreen):
+            return
+        from dashboard.screens.help import HelpScreen
+
+        bindings: list[tuple[str, str]] = []
+        for binding in self.screen.BINDINGS:
+            if isinstance(binding, Binding):
+                bindings.append((binding.key, binding.description or binding.action))
+            else:
+                bindings.append((binding[0], binding[2] if len(binding) > 2 else binding[1]))
+        self.push_screen(HelpScreen(bindings))
+
+    def action_focus_search(self) -> None:
+        if self._editing():
+            return
+        for widget in self.screen.query(Input):
+            widget.focus()
+            return
+
+    def action_new_project(self) -> None:
+        if self._editing() or isinstance(self.screen, ModalScreen):
+            return
+        from dashboard.screens.new_project import NewProjectScreen
+
+        if self.screen.__class__.__name__ in {"HomeScreen", "ProjectsScreen"}:
+            self.push_screen(NewProjectScreen())
+
+    def action_open_projects(self) -> None:
+        if self._editing() or isinstance(self.screen, ModalScreen):
+            return
+        from dashboard.screens.projects import ProjectsScreen
+
+        if self.screen.__class__.__name__ in {"HomeScreen", "ProjectsScreen", "SettingsScreen"}:
+            self.push_screen(ProjectsScreen())
+
+    def action_open_settings(self) -> None:
+        if self._editing() or isinstance(self.screen, ModalScreen):
+            return
+        from dashboard.screens.settings import SettingsScreen
+
+        if self.screen.__class__.__name__ in {"HomeScreen", "ProjectsScreen"}:
+            self.push_screen(SettingsScreen())
 
 
 def main() -> None:

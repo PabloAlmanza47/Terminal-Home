@@ -6,7 +6,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, OptionList, Static
+from textual.widgets import Button, Footer, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import (
@@ -39,6 +39,7 @@ from dashboard.services.template_store import (
     load_templates_result,
     rename_template,
 )
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 class WorkspaceTemplatesScreen(Screen[None]):

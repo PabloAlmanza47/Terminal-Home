@@ -51,6 +51,9 @@ class LayoutPreviewScreen(Screen[None]):
         elif event.button.id == "cancel-button":
             self.action_cancel()
 
+    def on_mount(self) -> None:
+        self.query_one("#continue-button", Button).focus()
+
     def _continue(self) -> None:
         self.state.commit_pending_window()
 

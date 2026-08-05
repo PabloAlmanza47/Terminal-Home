@@ -103,6 +103,9 @@ class ReviewScreen(Screen[None]):
         elif event.button.id == "cancel-button":
             self.action_cancel()
 
+    def on_mount(self) -> None:
+        self.query_one("#create-button", Button).focus()
+
     def _create(self) -> None:
         if self.state.mode is WizardMode.NEW_PROJECT:
             self._create_new_project()

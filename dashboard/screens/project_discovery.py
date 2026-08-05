@@ -20,7 +20,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Input, OptionList, Static
+from textual.widgets import Button, Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models.projects_config import ProjectsConfig, ProjectsConfigValidationError
@@ -28,6 +28,7 @@ from dashboard.services.projects_config_store import (
     load_projects_config_result,
     save_projects_config,
 )
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 
 def _clean_path_input(value: str) -> Path | None:
@@ -117,6 +118,7 @@ class ProjectDiscoveryScreen(Screen[None]):
         self._refresh_roots()
         self._refresh_excluded()
         self._refresh_manual()
+        self.query_one("#roots-list", OptionList).focus()
 
     # --- Rendering each list from self.config ---------------------------------
 
