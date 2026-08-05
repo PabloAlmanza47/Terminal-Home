@@ -7,6 +7,10 @@ resuming, and rebuilding project-specific tmux environments.
 
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
+> The dashboard image is a historical reference and does not represent the
+> final v0.2.0 transparent terminal-native interface. Replace it manually
+> after capturing a current screenshot.
+
 [![CI](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Textual](https://img.shields.io/badge/UI-Textual-5A4FCF)
@@ -34,9 +38,13 @@ dashboard.
 - Configurable tmux windows with 1-4 pane layouts per window
 - Saved workspace persistence — layouts survive tmux restarts and WSL reboots
 - Reusable local workspace templates with stable identity and independent copies
+- SSH host and remote-project registration with safe remote tmux launching
+- Remote-aware `th list`, `th plan`, `th up`, and diagnostics
+- Bash and Zsh completion for commands, projects, remotes, and templates
 - Resume-if-running, recreate-if-not launch behavior with no duplicate sessions
 - Neovim, Coding Agent, Git (lazygit), file tree, test, dev server, blank shell,
   and custom-command pane types
+- Project-aware development-server and test-command detection
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
 - Keyboard-first [Textual](https://textual.textualize.io/) interface
@@ -69,12 +77,12 @@ To install directly from GitHub:
 pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 # or
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+```
 
 For the v0.2.0 release specifically:
 
 ```bash
 pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.2.0"
-```
 ```
 
 After installation, open a new terminal and run `th` or `th doctor`.
@@ -411,8 +419,8 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 799 pytest tests collected (798 passed and one optional Zsh
-syntax check skipped when Zsh was unavailable), Ruff clean, mypy clean.
+Current status: 898 pytest tests passed and one optional Zsh syntax check was
+skipped when Zsh was unavailable; Ruff and Mypy are clean.
 
 ```bash
 pytest
@@ -468,8 +476,6 @@ either agent.
 ## Roadmap
 
 - Optional online template sharing and marketplace
-- Optional remote/SSH project support
-- Packaging and installation improvements
 
 ## License
 
