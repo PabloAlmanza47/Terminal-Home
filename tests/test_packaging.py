@@ -36,6 +36,8 @@ def test_pyproject_has_runtime_metadata_and_console_scripts() -> None:
     reason="build is provided by the development extra",
 )
 def test_build_artifacts_and_isolated_wheel_install(tmp_path: Path) -> None:
+    from dashboard import __version__
+
     dist = tmp_path / "dist"
     subprocess.run(
         [sys.executable, "-m", "build", "--sdist", "--wheel", "--outdir", str(dist)],
@@ -46,6 +48,8 @@ def test_build_artifacts_and_isolated_wheel_install(tmp_path: Path) -> None:
     sdists = list(dist.glob("*.tar.gz"))
     assert len(wheels) == 1
     assert len(sdists) == 1
+    assert __version__ in wheels[0].name
+    assert __version__ in sdists[0].name
 
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = set(wheel.namelist())
@@ -78,3 +82,22 @@ def test_build_artifacts_and_isolated_wheel_install(tmp_path: Path) -> None:
         text=True,
     )
     assert "Terminal Home" in help_result.stdout
+    for command in ("th", "terminal-home", "dev"):
+        version_result = subprocess.run(
+            [str(scripts / command), "--version"],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert version_result.stdout.strip().endswith(__version__)
+    new_help_result = subprocess.run(
+        [str(scripts / "th"), "new", "--help"],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "--template" in new_help_result.stdout

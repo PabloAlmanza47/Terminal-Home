@@ -69,6 +69,12 @@ To install directly from GitHub:
 pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 # or
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+
+For the v0.2.0 release specifically:
+
+```bash
+pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.2.0"
+```
 ```
 
 After installation, open a new terminal and run `th` or `th doctor`.
@@ -134,9 +140,12 @@ th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
 th new my-project  # create a local project with safe defaults
 th new my-project --no-git
+th new my-project --no-launch
 th new my-project --path ~/school/csce331/my-project
+th new my-project --root ~/school/csce331
 th new my-project --template web-development
 th new my-project --template python --no-launch
+th new my-project --non-interactive
 th doctor       # check local tools, stores, config paths, and project roots
 th doctor --remote  # additionally inspect registered remote projects
 th completion bash  # print Bash completion setup
@@ -431,12 +440,18 @@ will and won't do to a running session or a saved workspace — see
 
 ## Keyboard controls
 
-- **Arrow keys** — move through menus and lists
-- **Enter** — select the highlighted item
-- **Escape** — go back one step (or cancel, on the first step of a flow)
-- **F5** — refresh (project list, session status)
-- **q** — quit, from the home screen
-- Full shortcut list is always visible in the footer at the bottom of the screen
+`Tab` / `Shift+Tab` move focus through controls. Arrow keys navigate
+collections, `Enter` activates or confirms, `Space` toggles or selects, and
+`Esc` goes back or cancels. The contextual shortcuts are:
+
+```text
+/  Focus search       ?  Keyboard help
+n  New project        p  Projects
+s  Settings           q  Quit outside editable fields
+```
+
+`F5` refreshes screens that expose refreshable project or session data. The
+shortcut help overlay shows the global and current-screen bindings.
 
 ## Roadmap
 

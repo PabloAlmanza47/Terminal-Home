@@ -28,7 +28,11 @@ jobs:
       - name: Verify wheel contents and entry points
         run: |
           python -m pip install --no-deps dist/*.whl
+          th --version
+          terminal-home --version
+          dev --version
           th --help
+          th new --help
           terminal-home --help
 
       - name: Upload tagged artifacts
