@@ -2,26 +2,88 @@
 
 from __future__ import annotations
 
+from rich.cells import cell_len
+
 from dashboard.services.project_selection import RegisteredRemoteProject
 
-_STATUS_WIDTH = 22
-_NAME_WIDTH = 24
+_STATUS_COLUMN_WIDTH = 20
+_BRANCH_COLUMN_WIDTH = 24
+_COLUMN_GAP = 2
+_MIN_NAME_WIDTH = 8
 
 
 def project_row_width(available_width: int) -> int:
-    """Reserve the list's border/padding without letting rows overflow."""
-    return max(20, available_width - 12)
+    """Return label width from the OptionList content region.
+
+    Textual's ``content_region`` already excludes the widget border, padding,
+    and a visible scrollbar. The marker is rendered by KeyboardOptionList, so
+    reserve its two terminal cells here before formatting the label itself.
+    """
+    return max(1, available_width - 2)
 
 
 def _ellipsis(value: str, width: int) -> str:
     if width <= 0:
         return ""
-    if len(value) <= width:
+    if cell_len(value) <= width:
         return value
     if width == 1:
         return "…"
-    left = max(1, (width - 1) // 2)
-    return value[:left] + "…" + value[-(width - left - 1) :]
+    # Project disambiguation puts the useful root suffix at the end of a
+    # long label. Keep more of that suffix so similarly named projects remain
+    # distinguishable after truncation.
+    left_budget = max(1, (width - 1) // 3)
+    left = ""
+    used = 0
+    for character in value:
+        cells = cell_len(character)
+        if used + cells > left_budget:
+            break
+        left += character
+        used += cells
+    right_budget = width - 1 - used
+    right_chars: list[str] = []
+    used_right = 0
+    for character in reversed(value):
+        cells = cell_len(character)
+        if used_right + cells > right_budget:
+            break
+        right_chars.append(character)
+        used_right += cells
+    return left + "…" + "".join(reversed(right_chars))
+
+
+def _pad_right(value: str, width: int) -> str:
+    return value + " " * max(0, width - cell_len(value))
+
+
+def _pad_left(value: str, width: int) -> str:
+    return " " * max(0, width - cell_len(value)) + value
+
+
+def _status_token(status: str, width: int | None = None) -> str:
+    token = f"[{status}]"
+    if width is None or cell_len(token) <= width:
+        return token
+    inner = _ellipsis(status, max(0, width - 2))
+    return f"[{inner}]"
+
+
+def _compact_row(name: str, status: str, branch: str | None, width: int) -> str:
+    token = _status_token(status)
+    if cell_len(token) > width:
+        token = _status_token(status, width)
+    branch_text = branch or ""
+    separators = 2 if branch_text else 1
+    branch_budget = max(0, width - cell_len(token) - separators - 1)
+    branch_text = _ellipsis(branch_text, branch_budget)
+    if branch_text:
+        name_budget = max(1, width - cell_len(token) - cell_len(branch_text) - 2)
+        line = f"{_ellipsis(name, name_budget)} {token} {branch_text}"
+    else:
+        name_budget = max(1, width - cell_len(token) - 1)
+        line = f"{_ellipsis(name, name_budget)} {token}"
+    return _ellipsis(line, width)
 
 
 def format_project_row(
@@ -36,25 +98,28 @@ def format_project_row(
     the same column regardless of focus.
     """
     width = max(1, width)
-    if width < 52:
-        inline = f"{name} [{status}]"
-        if branch:
-            inline += f" {branch}"
-        return _ellipsis(inline, width)
+    status_width = max(_STATUS_COLUMN_WIDTH, cell_len(_status_token(status)))
+    # Reserve the branch column even when this row has no branch. That keeps
+    # every status column aligned, while the branchless row still ends at its
+    # closing status bracket without trailing field padding.
+    branch_width = _BRANCH_COLUMN_WIDTH
+    required = _MIN_NAME_WIDTH + _COLUMN_GAP + status_width
+    required += _COLUMN_GAP + branch_width
+    if width < required:
+        return _compact_row(name, status, branch, width)
 
-    branch_text = branch or ""
-    branch_width = min(max(10, len(branch_text)), max(10, width - _NAME_WIDTH - _STATUS_WIDTH - 2))
-    status_width = _STATUS_WIDTH
-    name_width = max(8, width - status_width - branch_width - 4)
-    if name_width < 8:
-        return _ellipsis(f"{name} [{status}] {branch_text}".strip(), width)
-    row = (
-        f"{_ellipsis(name, name_width):<{name_width}}  "
-        f"[{_ellipsis(status, status_width - 2):<{status_width - 2}}]"
-    )
+    name_width = width - _COLUMN_GAP - status_width
+    name_width -= _COLUMN_GAP + branch_width
+    if name_width < _MIN_NAME_WIDTH:
+        return _compact_row(name, status, branch, width)
+
+    name_text = _pad_right(_ellipsis(name, name_width), name_width)
+    token = _status_token(status)
+    row = f"{name_text}{' ' * _COLUMN_GAP}{token}"
     if branch:
-        row += f"  {_ellipsis(branch, branch_width):>{branch_width}}"
-    return _ellipsis(row, width)
+        row += " " * (status_width - cell_len(token) + _COLUMN_GAP)
+        row += _pad_left(_ellipsis(branch, branch_width), branch_width)
+    return row
 
 
 def format_remote_project_row(
@@ -63,10 +128,14 @@ def format_remote_project_row(
     width: int,
 ) -> str:
     """Return a consistent local-only representation of a remote project."""
-    if width < 80:
-        return _ellipsis(
-            f"{project.name} [Remote] {project.location.remote_path}", width
-        )
-    return _ellipsis(
-        f"{project.name:<24}  [Remote]  {host_label:<18}  {project.location.remote_path}", width
-    )
+    remote = f"[Remote] {host_label} {project.location.remote_path}"
+    wide = f"{_pad_right(_ellipsis(project.name, 24), 24)}  {remote}"
+    if cell_len(wide) <= width:
+        return wide
+    status = "[Remote]"
+    suffix = f"{host_label} {project.location.remote_path}"
+    name_budget = max(1, width - cell_len(status) - 2)
+    name_text = _ellipsis(project.name, name_budget)
+    suffix_budget = max(0, width - cell_len(name_text) - cell_len(status) - 2)
+    suffix_text = _ellipsis(suffix, suffix_budget)
+    return _ellipsis(f"{name_text} {status} {suffix_text}".rstrip(), width)

@@ -357,11 +357,13 @@ def _print_project_table(statuses: Sequence[ProjectStatus]) -> None:
         for status in statuses
     ]
     widths = [max(len(row[i]) for row in (headers, *rows)) for i in range(len(headers) - 1)]
+    header_color = load_settings().table_header_color
     for row_index, row in enumerate((headers, *rows)):
         line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
+        line += f"  {row[-1]}"
         if row_index == 0:
-            line = style_table_header(line, load_settings().table_header_color, sys.stdout)
-        print(f"{line}  {row[-1]}")
+            line = style_table_header(line, header_color, sys.stdout)
+        print(line)
 
 
 def _print_remote_project_table(
@@ -385,11 +387,13 @@ def _print_remote_project_table(
         max(len(row[index]) for row in (headers, *rows))
         for index in range(len(headers) - 1)
     ]
+    header_color = load_settings().table_header_color
     for row_index, row in enumerate((headers, *rows)):
         line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
+        line += f"  {row[-1]}"
         if row_index == 0:
-            line = style_table_header(line, load_settings().table_header_color, sys.stdout)
-        print(f"{line}  {row[-1]}")
+            line = style_table_header(line, header_color, sys.stdout)
+        print(line)
 
 
 def _run_list(args: argparse.Namespace) -> int:

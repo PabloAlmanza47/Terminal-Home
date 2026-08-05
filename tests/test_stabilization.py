@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 from pathlib import Path
 
 import pytest
 from rich.text import Text
+from textual.app import App, ComposeResult
 from textual.widgets.option_list import Option
 
+import dashboard.cli as cli_module
 import dashboard.screens.tmux_sessions as tmux_screen_module
+from dashboard.models.project_location import SshProjectLocation
 from dashboard.models.settings import AppSettings, TableHeaderColor
+from dashboard.models.ssh import RemoteProjectRegistration
 from dashboard.models.workspace import TmuxSessionAttachRequest
 from dashboard.services import tmux
 from dashboard.services.cli_colors import style_table_header
 from dashboard.services.project_rows import format_project_row
+from dashboard.services.project_selection import RegisteredRemoteProject
+from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.settings_store import load_settings, save_settings
 from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_launcher import LaunchError, execute_tmux_session_attach
@@ -78,11 +85,124 @@ def test_shared_option_marker_updates_do_not_accumulate_or_flatten_rich_prompt()
     assert option.prompt.spans[0].style == "bold red"
 
 
+def test_dynamic_option_markers_survive_full_mounted_lifecycle() -> None:
+    class Host(App[None]):
+        def compose(self) -> ComposeResult:
+            yield KeyboardOptionList(id="rows", reset_on_blur=True)
+
+        def on_mount(self) -> None:
+            self.query_one("#rows", KeyboardOptionList).focus()
+
+    async def scenario() -> list[tuple[str, int, str | None]]:
+        app = Host()
+        async with app.run_test(size=(60, 12)) as pilot:
+            rows = app.query_one("#rows", KeyboardOptionList)
+            for name in ("alpha", "  intentional", "gamma"):
+                rows.add_option(Option(Text(name, style="bold red"), id=name))
+                await pilot.pause()
+            for _ in range(3):
+                for index in range(rows.option_count):
+                    rows.highlighted = index
+                    await pilot.pause()
+                for index in reversed(range(rows.option_count)):
+                    rows.highlighted = index
+                    await pilot.pause()
+            app.set_focus(None)
+            await pilot.pause()
+            rows.focus()
+            await pilot.pause()
+            rows.clear_options()
+            rows.add_option(Option(Text("  intentional", style="bold red"), id="reset"))
+            rows.add_option(Option(Text("final", style="bold red"), id="final"))
+            await pilot.pause()
+            rows._update_prompt_markers()
+            await pilot.pause()
+            return [
+                (option.prompt.plain, len(option.prompt.plain), option.id)
+                for option in rows.options
+            ]
+
+    final = asyncio.run(scenario())
+    assert [item[0][:2] for item in final] == ["› ", "  "]
+    assert [item[1] for item in final] == [len("›   intentional"), len("  final")]
+    assert [item[2] for item in final] == ["reset", "final"]
+
+
 def test_project_row_wide_layout_aligns_status_and_branch() -> None:
     first = format_project_row("one", "Running", "dev", 80)
     second = format_project_row("two", "Not Configured", None, 80)
     assert first.index("[") == second.index("[")
     assert first.rfind("dev") > first.index("]")
+
+
+@pytest.mark.parametrize("status", ["Running", "Saved Workspace", "Not Configured"])
+def test_project_row_status_tokens_are_complete_and_unpadded(status: str) -> None:
+    row = format_project_row("project", status, "main", 56)
+    assert f"[{status}]" in row
+    assert not re.search(r" +\]", row)
+    assert row.count("[") == row.count("]") == 1
+    assert len(row) == 56
+
+
+def test_cli_colors_complete_local_and_remote_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    class Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    local_status = ProjectStatus(
+        project=Project("demo", tmp_path),
+        canonical_path=tmp_path,
+        project_dir_exists=True,
+        is_git_repo=False,
+        git_branch=None,
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="demo",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+    registration = RemoteProjectRegistration(
+        "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3",
+        "d84aeefb-7c29-4c63-b39c-766d559df977",
+        "api",
+        "/srv/api",
+    )
+    remote = RegisteredRemoteProject(
+        "api", SshProjectLocation(registration.host_id, registration.remote_path), registration
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "load_settings",
+        lambda: AppSettings(table_header_color=TableHeaderColor.BLUE),
+    )
+    local_stream = Tty()
+    remote_stream = Tty()
+    monkeypatch.setattr(cli_module.sys, "stdout", local_stream)
+    cli_module._print_project_table([local_status])
+    monkeypatch.setattr(cli_module.sys, "stdout", remote_stream)
+    monkeypatch.setattr(cli_module, "load_all_ssh_hosts", lambda: [])
+    cli_module._print_remote_project_table([remote])
+
+    local_output = local_stream.getvalue()
+    remote_output = remote_stream.getvalue()
+    assert "\033[34mNAME" in local_output
+    assert local_output.splitlines()[0].endswith("PATH\033[0m")
+    assert "\033[34mNAME" in remote_output
+    assert remote_output.splitlines()[0].endswith("STATUS\033[0m")
+    assert "\033[34m" not in local_output.splitlines()[1]
+    monkeypatch.setattr(
+        cli_module,
+        "load_settings",
+        lambda: AppSettings(table_header_color=TableHeaderColor.NONE),
+    )
+    plain_stream = Tty()
+    monkeypatch.setattr(cli_module.sys, "stdout", plain_stream)
+    cli_module._print_project_table([local_status])
+    assert re.sub(r"\033\[[0-9;]*m", "", local_output) == plain_stream.getvalue()
 
 
 def test_settings_header_color_migrates_and_invalid_value_preserves_other_fields(

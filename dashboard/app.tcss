@@ -50,6 +50,19 @@ OptionList {
     background: transparent;
 }
 
+/* System Information owns the available area above Footer. Its content is
+   allowed to scroll on short terminals instead of being clipped by the
+   shared panel cap. */
+.system-info-scroll {
+    height: 1fr;
+    max-height: 100%;
+    overflow-y: auto;
+}
+
+.system-info-panel {
+    max-height: 100%;
+}
+
 #screen-title {
     text-style: bold;
     text-align: center;

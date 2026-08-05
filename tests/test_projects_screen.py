@@ -191,6 +191,29 @@ def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert _run(scenario()) == [_project_id(projects_root / "alpha")]
 
 
+def test_repeated_filtering_keeps_project_names_at_one_marker_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    for name in ("alpha", "beta", "gamma"):
+        (projects_root / name).mkdir()
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            filter_box = app.screen.query_one("#project-filter", Input)
+            option_list = app.screen.query_one("#project-list", OptionList)
+            for query in ("a", "be", "", "ga", "", "al", ""):
+                filter_box.value = query
+                await pilot.pause()
+            return [str(option.prompt.plain)[2:] for option in option_list.options]
+
+    labels = _run(scenario())
+    assert all(label for label in labels)
+    assert all(not label.startswith(("› ", "  ")) for label in labels)
+
+
 def test_escape_returns_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate(monkeypatch, tmp_path)
 
@@ -351,8 +374,8 @@ def test_same_named_projects_under_different_roots_both_appear_distinguishably(
     assert school_label != work_label
     assert "school" in school_label
     assert "work" in work_label
-    assert school_label.startswith("example")  # requirement 6: friendly name kept, not a bare path
-    assert work_label.startswith("example")
+    assert school_label[2:].startswith("example")  # marker precedes the friendly name
+    assert work_label[2:].startswith("example")
 
 
 def test_selecting_either_same_named_project_opens_its_own_canonical_path(

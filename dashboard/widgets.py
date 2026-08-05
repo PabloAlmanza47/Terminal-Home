@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from rich.text import Text
@@ -144,24 +145,39 @@ class KeyboardOptionList(OptionList):
     """
 
     def __init__(self, *options, reset_on_blur: bool = False, **kwargs) -> None:
-        self._original_prompts: dict[int, object] = {
-            id(option): option.prompt.copy() if isinstance(option.prompt, Text) else option.prompt
-            for option in options
-        }
-        super().__init__(*options, **kwargs)
+        self._original_prompts: dict[int, object] = {}
+        canonical_options = [self._canonical_option(option) for option in options]
+        super().__init__(*canonical_options, **kwargs)
         self.reset_on_blur = reset_on_blur
 
-    def add_option(self, option: Option | VisualType | None = None) -> KeyboardOptionList:
-        super().add_option(option)
-        # Textual normalizes strings, VisualTypes, and None into Option
-        # objects inside OptionList.add_option. Capture that actual object so
-        # marker refreshes always rebuild from the unmarked prompt.
-        if self.options:
-            actual = self.options[-1]
-            self._original_prompts[id(actual)] = (
-                actual.prompt.copy() if isinstance(actual.prompt, Text) else actual.prompt
+    def _canonical_option(self, option: Option | VisualType | None) -> Option | None:
+        """Normalize and record an option before Textual can notify watchers."""
+        if option is None:
+            return None
+        canonical = option if isinstance(option, Option) else Option(option)
+        self._original_prompts[id(canonical)] = (
+            canonical.prompt.copy() if isinstance(canonical.prompt, Text) else canonical.prompt
+        )
+        return canonical
+
+    def add_options(
+        self, options: Iterable[Option | VisualType | None]
+    ) -> KeyboardOptionList:
+        # Capture every prompt before handing the batch to Textual. This is
+        # important for a mounted, focused empty list: adding its first item
+        # may synchronously trigger highlight/refresh callbacks.
+        canonical_options = [self._canonical_option(option) for option in options]
+        super().add_options(canonical_options)
+        if self.highlighted is None and self._options:
+            self.highlighted = next(
+                (index for index, item in enumerate(self._options) if not item.disabled),
+                None,
             )
+        self._update_prompt_markers()
         return self
+
+    def add_option(self, option: Option | VisualType | None = None) -> KeyboardOptionList:
+        return self.add_options([option])
 
     def clear_options(self) -> KeyboardOptionList:
         super().clear_options()
@@ -184,7 +200,7 @@ class KeyboardOptionList(OptionList):
     def _update_prompt_markers(self, highlighted: int | None = None) -> None:
         highlighted = self.highlighted if highlighted is None else highlighted
         for index, option in enumerate(self.options):
-            original = self._original_prompts.get(id(option), option.prompt)
+            original = self._original_prompts[id(option)]
             marker = "› " if index == highlighted and self.has_focus else "  "
             if isinstance(original, Text):
                 prompt = Text(marker)

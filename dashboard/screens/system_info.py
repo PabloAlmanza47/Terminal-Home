@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
@@ -34,8 +34,8 @@ class SystemInfoScreen(Screen[None]):
             ("Disk Usage (home)", disk_line),
         ]
 
-        with Container(classes="screen-root"):
-            with Vertical(classes="panel"):
+        with VerticalScroll(classes="screen-root system-info-scroll"):
+            with Vertical(classes="panel system-info-panel"):
                 yield Static("System Information", id="screen-title")
                 with Vertical(id="info-rows"):
                     for label, value in rows:

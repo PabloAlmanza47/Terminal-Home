@@ -195,7 +195,8 @@ class ProjectsScreen(Screen[None]):
             return
         local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
         display_names = disambiguated_display_names(local_statuses)
-        row_width = project_row_width(option_list.content_region.width or self.size.width)
+        content_width = option_list.content_region.width or option_list.size.width
+        row_width = project_row_width(content_width)
         local_index = 0
         for entry in entries:
             if isinstance(entry, ProjectStatus):
