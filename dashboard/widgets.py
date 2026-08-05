@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual import events
 from textual.message import Message
+from textual.visual import VisualType
 from textual.widgets import OptionList, Static
+from textual.widgets.option_list import Option
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +144,25 @@ class KeyboardOptionList(OptionList):
     """
 
     def __init__(self, *options, reset_on_blur: bool = False, **kwargs) -> None:
+        self._original_prompts: dict[int, object] = {
+            id(option): option.prompt.copy() if isinstance(option.prompt, Text) else option.prompt
+            for option in options
+        }
         super().__init__(*options, **kwargs)
         self.reset_on_blur = reset_on_blur
+
+    def add_option(self, option: Option | VisualType | None = None) -> KeyboardOptionList:
+        super().add_option(option)
+        if isinstance(option, Option):
+            self._original_prompts[id(option)] = (
+                option.prompt.copy() if isinstance(option.prompt, Text) else option.prompt
+            )
+        return self
+
+    def clear_options(self) -> KeyboardOptionList:
+        super().clear_options()
+        self._original_prompts.clear()
+        return self
 
     async def handle_key(self, event: events.Key) -> bool:
         if event.key == "space" and self.highlighted is not None:
@@ -160,13 +179,15 @@ class KeyboardOptionList(OptionList):
 
     def _update_prompt_markers(self, highlighted: int | None = None) -> None:
         highlighted = self.highlighted if highlighted is None else highlighted
-        for option in self.options:
-            original = getattr(option, "_terminal_home_prompt", None)
-            if original is None:
-                original = str(option.prompt)
-                setattr(option, "_terminal_home_prompt", original)
-            marker = "› " if self.options.index(option) == highlighted and self.has_focus else "  "
-            option._set_prompt(marker + original)
+        for index, option in enumerate(self.options):
+            original = self._original_prompts.get(id(option), option.prompt)
+            marker = "› " if index == highlighted and self.has_focus else "  "
+            if isinstance(original, Text):
+                prompt = Text(marker)
+                prompt.append(original.copy())
+            else:
+                prompt = Text(marker + str(original))
+            option._set_prompt(prompt)
         self.refresh()
 
     def on_focus(self) -> None:

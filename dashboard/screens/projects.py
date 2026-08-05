@@ -18,6 +18,7 @@ from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
+from dashboard.services.project_rows import format_project_row, format_remote_project_row
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
     SelectableProject,
@@ -36,7 +37,7 @@ from dashboard.services.ssh_host_store import get_ssh_host
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
-def _row_label(display_name: str, status: ProjectStatus) -> str:
+def _status_label(status: ProjectStatus) -> str:
     if status.session_running:
         tag = "Running"
     elif status.workspace_metadata_error:
@@ -46,18 +47,7 @@ def _row_label(display_name: str, status: ProjectStatus) -> str:
     else:
         tag = "Not Configured"
 
-    label = f"{display_name}  [{tag}]"
-    if status.is_git_repo and status.git_branch:
-        label += f"  ({status.git_branch})"
-    return label
-
-
-def _remote_row_label(project: RegisteredRemoteProject) -> str:
-    host_status = "" if get_ssh_host(project.location.host_id) is not None else "  [missing host]"
-    return (
-        f"{project.name}  [Remote]  {project.location.host_id}"
-        f"  {project.location.remote_path}{host_status}"
-    )
+    return tag
 
 
 def _details_text(status: ProjectStatus) -> str:
@@ -184,15 +174,27 @@ class ProjectsScreen(Screen[None]):
             return
         local_statuses = [entry for entry in entries if isinstance(entry, ProjectStatus)]
         display_names = disambiguated_display_names(local_statuses)
+        row_width = max(20, option_list.content_region.width or self.size.width - 12)
         local_index = 0
         for entry in entries:
             if isinstance(entry, ProjectStatus):
                 display_name = display_names[local_index]
                 local_index += 1
-                label = _row_label(display_name, entry)
+                label = format_project_row(
+                    display_name,
+                    _status_label(entry),
+                    entry.git_branch if entry.is_git_repo else None,
+                    row_width,
+                )
                 option_id = project_option_id(entry)
             else:
-                label = _remote_row_label(entry)
+                host = get_ssh_host(entry.location.host_id)
+                host_label = (
+                    host.display_name
+                    if host is not None
+                    else f"{entry.location.host_id} [missing host]"
+                )
+                label = format_remote_project_row(entry, host_label, row_width)
                 option_id = entry.selector
             option_list.add_option(
                 Option(label, id=option_id)

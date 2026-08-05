@@ -17,16 +17,22 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import Button, Checkbox, Input, TextArea
 
-from dashboard.models import LaunchRequest
+from dashboard.models import LaunchRequest, TmuxSessionAttachRequest
 from dashboard.models.settings import AppSettings
 from dashboard.screens.home import HomeScreen
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
-from dashboard.services.workspace_launcher import LaunchError, execute_launch_request
+from dashboard.services.workspace_launcher import (
+    LaunchError,
+    execute_launch_request,
+    execute_tmux_session_attach,
+)
 from dashboard.widgets import KeyboardActionList
 
+AppResult = LaunchRequest | TmuxSessionAttachRequest | None
 
-class TerminalHomeApp(App[LaunchRequest | None]):
+
+class TerminalHomeApp(App[AppResult]):
     """Terminal Home: a declarative tmux workspace manager."""
 
     CSS_PATH = "app.tcss"
@@ -191,7 +197,10 @@ def main() -> None:
         return
 
     try:
-        execute_launch_request(launch_request)
+        if isinstance(launch_request, TmuxSessionAttachRequest):
+            execute_tmux_session_attach(launch_request)
+        else:
+            execute_launch_request(launch_request)
     except (LaunchError, TmuxCommandError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)

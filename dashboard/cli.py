@@ -25,6 +25,7 @@ from uuid import uuid4
 
 from dashboard import __version__
 from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
+from dashboard.services.cli_colors import style_table_header
 from dashboard.services.completion import (
     SHELLS,
     discover_project_selector_candidates,
@@ -65,6 +66,7 @@ from dashboard.services.remote_registry import (
     remove_ssh_host,
     update_registered_remote_project,
 )
+from dashboard.services.settings_store import load_settings
 from dashboard.services.slug import slugify
 from dashboard.services.ssh_host_store import (
     SshHostStoreError,
@@ -355,8 +357,10 @@ def _print_project_table(statuses: Sequence[ProjectStatus]) -> None:
         for status in statuses
     ]
     widths = [max(len(row[i]) for row in (headers, *rows)) for i in range(len(headers) - 1)]
-    for row in (headers, *rows):
+    for row_index, row in enumerate((headers, *rows)):
         line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
+        if row_index == 0:
+            line = style_table_header(line, load_settings().table_header_color, sys.stdout)
         print(f"{line}  {row[-1]}")
 
 
@@ -381,8 +385,10 @@ def _print_remote_project_table(
         max(len(row[index]) for row in (headers, *rows))
         for index in range(len(headers) - 1)
     ]
-    for row in (headers, *rows):
+    for row_index, row in enumerate((headers, *rows)):
         line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
+        if row_index == 0:
+            line = style_table_header(line, load_settings().table_header_color, sys.stdout)
         print(f"{line}  {row[-1]}")
 
 

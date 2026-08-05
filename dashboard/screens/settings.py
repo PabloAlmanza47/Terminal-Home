@@ -14,7 +14,7 @@ from textual.containers import Container, Vertical
 from textual.screen import Screen
 from textual.widgets import Checkbox, Footer, RadioButton, RadioSet, Static
 
-from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode
+from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode, TableHeaderColor
 from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
@@ -72,6 +72,23 @@ class SettingsScreen(Screen[None]):
                         id="agent-claude",
                         value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
                     )
+                yield Static("CLI table header color", classes="panel-heading")
+                with RadioSet(id="table-header-color-set"):
+                    for color, label in (
+                        (TableHeaderColor.THEME, "Theme accent (default)"),
+                        (TableHeaderColor.BLUE, "Blue"),
+                        (TableHeaderColor.CYAN, "Cyan"),
+                        (TableHeaderColor.GREEN, "Green"),
+                        (TableHeaderColor.MAGENTA, "Magenta"),
+                        (TableHeaderColor.YELLOW, "Yellow"),
+                        (TableHeaderColor.WHITE, "White"),
+                        (TableHeaderColor.NONE, "No color"),
+                    ):
+                        yield RadioButton(
+                            label,
+                            id=f"header-color-{color.value}",
+                            value=self.settings.table_header_color is color,
+                        )
                 yield Static("Project Management", classes="panel-heading")
                 yield KeyboardActionList(
                     ActionItem("project-discovery", "Project Discovery..."),
@@ -83,6 +100,8 @@ class SettingsScreen(Screen[None]):
                     "Theme: open the command palette (ctrl+p) and search\n"
                     "\"theme\" -- your choice is applied immediately and\n"
                     "persists across launches.\n\n"
+                    "CLI table headings use this color only on a TTY; NO_COLOR, pipes, and\n"
+                    "the No color option always produce plain text.\n\n"
                     "Remote access actions do not probe or install anything on remote hosts.\n\n"
                     "Coding agents are never installed or authenticated by Terminal Home.\n\n"
                     "Press Escape to go back.",
@@ -114,6 +133,14 @@ class SettingsScreen(Screen[None]):
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         selected_id = event.pressed.id
+        if selected_id and selected_id.startswith("header-color-"):
+            try:
+                selected_color = TableHeaderColor(selected_id.removeprefix("header-color-"))
+            except ValueError:
+                return
+            self.settings = replace(self.settings, table_header_color=selected_color)
+            self._save_settings("Table header color")
+            return
         selected = {
             "agent-none": CodingAgent.NONE,
             "agent-codex": CodingAgent.CODEX,
@@ -122,11 +149,14 @@ class SettingsScreen(Screen[None]):
         if selected is None:
             return
         self.settings = replace(self.settings, coding_agent=selected)
+        self._save_settings("Coding Agent")
+
+    def _save_settings(self, label: str) -> None:
         try:
             save_settings(self.settings)
         except OSError as exc:
             self.app.notify(
-                f"Coding Agent changed for this session, but couldn't be saved: {exc}",
+                f"{label} changed for this session, but couldn't be saved: {exc}",
                 title="Settings",
                 severity="error",
             )

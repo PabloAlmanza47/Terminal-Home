@@ -256,3 +256,14 @@ class LaunchRequest:
             return self.workspace.session_name
         assert self.session_name is not None  # enforced by __post_init__
         return self.session_name
+
+
+@dataclass(frozen=True, slots=True)
+class TmuxSessionAttachRequest:
+    """A validated post-TUI request to attach to a local tmux session."""
+
+    session_name: str
+
+    def __post_init__(self) -> None:
+        if not self.session_name.strip():
+            raise WorkspaceValidationError("A tmux session name is required.")

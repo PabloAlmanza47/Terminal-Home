@@ -7,11 +7,27 @@ Screen {
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
    long-form screens usable without letting the scrollbar dominate split
    terminals; containers that fit content do not render one. */
-VerticalScroll {
+VerticalScroll, OptionList {
     scrollbar-size: 1 1;
-    scrollbar-color: #087ea4;
     scrollbar-background: transparent;
-    scrollbar-color-hover: #55d6ff;
+    scrollbar-background-hover: transparent;
+    scrollbar-background-active: transparent;
+    scrollbar-color: $text-muted;
+    scrollbar-color-hover: $text-accent;
+    scrollbar-color-active: $text-accent;
+    scrollbar-corner-color: transparent;
+}
+
+OptionList {
+    scrollbar-size: 1 1;
+    height: auto;
+    max-height: 100%;
+    overflow-x: hidden;
+}
+
+.tmux-session-list {
+    min-height: 1;
+    height: auto;
 }
 
 /* Every screen centers a single fixed-width panel in the middle of the

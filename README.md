@@ -48,6 +48,11 @@ dashboard.
 - Graceful fallbacks when a preferred tool (e.g. `nvim`, `lazygit`) isn't installed
 - Safe under custom tmux `base-index`/`pane-base-index` settings (see [Architecture](#architecture))
 - Keyboard-first [Textual](https://textual.textualize.io/) interface
+- Resume tmux Session attaches to the selected local session after the dashboard exits.
+- `th list` headings support a persisted color preference in Settings. The Theme
+  accent is the default; Blue, Cyan, Green, Magenta, Yellow, White, and No color
+  are also available. Headers stay plain when output is redirected, `NO_COLOR` is
+  set, or No color is selected.
 
 ## Demo workflow
 
@@ -522,7 +527,7 @@ dashboard/
         template_path.py            Reusable import/export path modal
         template_import_review.py   Explicit imported-layout and custom-command review
         confirm.py                   Reusable Yes/No modal for destructive metadata actions
-        tmux_sessions.py            Resume tmux Session (read-only session list)
+        tmux_sessions.py            Resume tmux Session (post-TUI attach list)
         system_info.py               System Information
         settings.py                   Home screen presentation preferences
         new_project/                Shared window/pane configuration flow (WizardMode: NEW_PROJECT,

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.1] - 2026-08-05
+
+### Added
+
+- Resume tmux Session now exits Textual and attaches or switches to the selected
+  session, with a final existence check and clear failure messages.
+- Persisted CLI table-header color preference in Settings, including No color
+  and automatic plain output for pipes, redirected output, and `NO_COLOR`.
+
+### Fixed
+
+- Shared option-list prompt markers no longer accumulate indentation or flatten
+  Rich styling.
+- Open Project rows align status and branch columns on wide terminals and use
+  deliberate ellipsis/compact layouts on narrow terminals.
+- Scrollbars now use one-cell, transparent-track, restrained theme-aware styling.
+
 ## [0.2.0] - 2026-08-04
 
 ### Added
