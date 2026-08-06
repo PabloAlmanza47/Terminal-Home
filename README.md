@@ -5,6 +5,8 @@
 A keyboard-driven terminal workspace manager for creating, configuring,
 resuming, and rebuilding project-specific tmux environments.
 
+Current release: **v0.3.0**
+
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
 
@@ -89,10 +91,10 @@ pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 ```
 
-For the v0.2.1 release specifically:
+For the v0.3.0 release specifically:
 
 ```bash
-pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.2.1"
+pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.3.0"
 ```
 
 After installation, open a new terminal and run `th` or `th doctor`.
@@ -199,9 +201,13 @@ Project intelligence follows a Detect → Explain → Approve → Execute model.
 `th setup` proposes exact commands or exact environment-file copies; every
 action and the final confirmation default to No. Package-manager installs may
 invoke lifecycle/build hooks, so that risk is shown before approval. Terminal
-Home refuses to automate runtime installation, global installs, manifest or
-lockfile edits, migrations, seeds, database operations, destructive cleanup,
-Git operations, remote setup, or credential handling.
+Home refuses to automate migrations, seeds, database pushes, global installs,
+runtime installation, manifest or lockfile edits, Git changes, secret writing,
+environment-file overwrites, destructive cleanup, arbitrary project scripts,
+remote setup, or credential handling. Project intelligence and setup are
+local-only; remote selectors are rejected without SSH activity. The v0.3.0
+detectors cover Node.js (including Next.js and Prisma), Python, .NET,
+environment examples, malformed or oversized indicators, and unknown projects.
 
 ### Non-TUI project creation
 
@@ -451,8 +457,9 @@ resume/recreate behavior.
 
 ## Testing
 
-Current status: 898 pytest tests passed and one optional Zsh syntax check was
-skipped when Zsh was unavailable; Ruff and Mypy are clean.
+Release validation runs the full pytest suite, Ruff, Mypy, bytecode compilation,
+and isolated build/install checks. The test suite uses only temporary fixtures
+and mocks external commands; it does not modify real projects or user data.
 
 ```bash
 pytest
@@ -510,7 +517,6 @@ either agent.
 
 ## Roadmap
 
-v0.3.0  Project intelligence and safe setup *(in development; unreleased)*  
 v0.4.0  Editor support and intelligent workspace recommendations  
 v0.5.0  Team recipes and project health dashboard  
 v0.6.0+ Template and recipe sharing  

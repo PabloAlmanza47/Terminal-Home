@@ -79,10 +79,10 @@ def test_entrypoint_is_the_cli_dispatcher_not_the_tui_launcher() -> None:
     assert scripts["terminal-home"] == "dashboard.cli:main"
 
 
-def test_release_version_is_020_and_console_scripts_report_it() -> None:
+def test_release_version_is_030_and_console_scripts_report_it() -> None:
     from dashboard import __version__
 
-    assert __version__ == "0.2.0"
+    assert __version__ == "0.3.0"
     for command in ("th", "terminal-home", "dev"):
         executable = Path(sys.executable).parent / command
         if not executable.exists():
@@ -90,4 +90,4 @@ def test_release_version_is_020_and_console_scripts_report_it() -> None:
         result = subprocess.run(
             [executable, "--version"], capture_output=True, text=True, check=True
         )
-        assert result.stdout.strip().endswith("0.2.0")
+        assert result.stdout.strip().endswith("0.3.0")

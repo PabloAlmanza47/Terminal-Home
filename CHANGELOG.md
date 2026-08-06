@@ -2,18 +2,37 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-05
+
 ### Added
 
-- Read-only local project intelligence and `th doctor <project>` diagnostics
-  for Node.js, Python, .NET, environment examples, and evidence-backed facts.
-- Safe guided setup with dry-run plans, per-action approval, dependency-aware
-  execution, and exact argv/cwd reporting through `th setup <project>`.
-- Project-selector completion for `doctor` and `setup` in Bash and Zsh.
+- Read-only local project intelligence and project-specific `th doctor <project>` diagnostics.
+- Typed, evidence-backed setup plans and safe guided execution through `th setup <project>`.
+- `th setup <project> --dry-run` with exact argv, working-directory, evidence, and risk reporting.
+- Node.js, Next.js, Prisma, Python, .NET, environment-example, malformed-file,
+  bounded-file, and unknown-project analysis.
+- Bash and Zsh project-selector completion for `doctor` and `setup`.
 
 ### Changed
 
-- Public documentation now describes the Detect → Explain → Approve → Execute
-  safety model and the unreleased v0.3.0 roadmap.
+- Setup now follows Detect → Explain → Approve → Execute with default-No
+  per-action and final approvals.
+- Package-manager setup output clearly warns that lifecycle/build hooks may run.
+- Project intelligence, setup planning, and setup execution remain local-only;
+  remote selectors are rejected without SSH activity.
+
+### Fixed
+
+- Environment-file copies revalidate project-root containment and reject
+  symlinked sources and destinations, including broken destination symlinks.
+- Manifest inspection uses bounded reads and deterministic, malformed-input-safe
+  parsing without speculative actions.
+
+### Security
+
+- Setup never automates migrations, seeds, database pushes, global or runtime
+  installs, Git changes, secret writing, environment-file overwrites, or
+  arbitrary project scripts.
 
 ## [0.2.1] - 2026-08-05
 
