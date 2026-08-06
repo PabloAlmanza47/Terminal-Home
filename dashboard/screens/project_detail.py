@@ -121,9 +121,7 @@ class ProjectDetailScreen(Screen[None]):
             else None
         )
         self.remote_host = (
-            get_ssh_host(remote_project.location.host_id)
-            if remote_project is not None
-            else None
+            get_ssh_host(remote_project.location.host_id) if remote_project is not None else None
         )
         self._feedback = ""
 

@@ -74,9 +74,7 @@ class SettingsScreen(Screen[None]):
                         value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
                     )
                 yield Static("CLI table header color", classes="panel-heading")
-                with RadioSet(
-                    id="table-header-color-set", classes="settings-choice-group"
-                ):
+                with RadioSet(id="table-header-color-set", classes="settings-choice-group"):
                     for color, label in (
                         (TableHeaderColor.THEME, "Theme accent (default)"),
                         (TableHeaderColor.BLUE, "Blue"),
@@ -101,7 +99,7 @@ class SettingsScreen(Screen[None]):
                 )
                 yield Static(
                     "Theme: open the command palette (ctrl+p) and search\n"
-                    "\"theme\" -- your choice is applied immediately and\n"
+                    '"theme" -- your choice is applied immediately and\n'
                     "persists across launches.\n\n"
                     "CLI table headings use this color only on a TTY; NO_COLOR, pipes, and\n"
                     "the No color option always produce plain text.\n\n"
@@ -115,9 +113,7 @@ class SettingsScreen(Screen[None]):
     def on_mount(self) -> None:
         self.query_one("#appearance-settings", CircularSelectionList).focus()
 
-    def on_selection_list_selection_toggled(
-        self, event: SelectionList.SelectionToggled
-    ) -> None:
+    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
         if event.selection_list.id != "appearance-settings":
             return
         selected = set(event.selection_list.selected)
@@ -125,9 +121,7 @@ class SettingsScreen(Screen[None]):
             self.settings,
             artwork_enabled="artwork" in selected,
             clock_visible="clock" in selected,
-            layout_mode=(
-                LayoutMode.COMPACT if "compact" in selected else LayoutMode.EXPANDED
-            ),
+            layout_mode=(LayoutMode.COMPACT if "compact" in selected else LayoutMode.EXPANDED),
         )
         try:
             save_settings(self.settings)

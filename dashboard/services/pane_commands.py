@@ -124,9 +124,7 @@ def plan_for_pane(
         else:
             commands = DetectedProjectCommands(development=None, test=None)
         if commands.development is not None:
-            return PaneLaunchPlan(
-                startup_command=commands.development.command, pane_title="server"
-            )
+            return PaneLaunchPlan(startup_command=commands.development.command, pane_title="server")
         return PaneLaunchPlan(
             startup_command=None,
             pane_title="server",

@@ -7,9 +7,6 @@ resuming, and rebuilding project-specific tmux environments.
 
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
-> The dashboard image is a historical reference and does not represent the
-> final v0.2.0 transparent terminal-native interface. Replace it manually
-> after capturing a current screenshot.
 
 [![CI](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAlmanza47/Terminal-Home/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -92,10 +89,10 @@ pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 ```
 
-For the v0.2.0 release specifically:
+For the v0.2.1 release specifically:
 
 ```bash
-pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.2.0"
+pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.2.1"
 ```
 
 After installation, open a new terminal and run `th` or `th doctor`.
@@ -103,6 +100,14 @@ After installation, open a new terminal and run `th` or `th doctor`.
 alias for older installations. Upgrade with `pipx install --force .` or
 `uv tool install --upgrade .`; uninstall with `pipx uninstall terminal-home`
 or `uv tool uninstall terminal-home`.
+
+## First five minutes
+
+Install with `pipx install .` (or `uv tool install .`), then run `th doctor`
+to check the local environment. Run `th` to open the dashboard, `th list` to
+see discovered projects, and `th up <project>` to launch one. Use
+`th doctor <project>` for a read-only project report and
+`th setup <project> --dry-run` to preview conservative local setup.
 
 ## Contributor installation
 
@@ -169,6 +174,9 @@ th new my-project --template python --no-launch
 th new my-project --non-interactive
 th doctor       # check local tools, stores, config paths, and project roots
 th doctor --remote  # additionally inspect registered remote projects
+th doctor <project>  # inspect one local project without changing it
+th setup <project>  # approve safe local setup actions one at a time
+th setup <project> --dry-run  # print the complete setup plan only
 th completion bash  # print Bash completion setup
 th completion zsh   # print Zsh completion setup
 ```
@@ -185,6 +193,15 @@ unique registered remote name, or an exact remote selector. Remote selectors
 have the form `ssh:<host-id>:<remote-path>`. Duplicate names require an exact
 path or remote selector. An explicit local path outside configured roots works,
 but is not automatically registered in `projects.json`.
+
+Project intelligence follows a Detect → Explain → Approve → Execute model.
+`th doctor <project>` reports facts, evidence, commands, and readiness only.
+`th setup` proposes exact commands or exact environment-file copies; every
+action and the final confirmation default to No. Package-manager installs may
+invoke lifecycle/build hooks, so that risk is shown before approval. Terminal
+Home refuses to automate runtime installation, global installs, manifest or
+lockfile edits, migrations, seeds, database operations, destructive cleanup,
+Git operations, remote setup, or credential handling.
 
 ### Non-TUI project creation
 
@@ -410,7 +427,9 @@ a marketplace are not supported.
   Textual imports and no subprocess calls, so they're trivially unit tested.
 - **Services** (`dashboard/services/`) — the logic layer: project scanning,
   git info, slug generation, pane command resolution, portable-template file
-  validation, and the tmux orchestration itself. No Textual imports here either.
+  validation, project intelligence/readiness/setup planning, and tmux
+  orchestration. No Textual imports here; setup execution is isolated behind
+  typed actions and argv-based subprocess calls.
 - **Persistence** — confirmed workspaces are saved as JSON under
   `$XDG_DATA_HOME/terminal-home/workspaces.json`; reusable templates are saved
   separately under `$XDG_DATA_HOME/terminal-home/templates.json`; presentation preferences
@@ -491,7 +510,11 @@ either agent.
 
 ## Roadmap
 
-- Optional online template sharing and marketplace
+v0.3.0  Project intelligence and safe setup *(in development; unreleased)*  
+v0.4.0  Editor support and intelligent workspace recommendations  
+v0.5.0  Team recipes and project health dashboard  
+v0.6.0+ Template and recipe sharing  
+v1.0    Stable developer workspace manager
 
 ## License
 
@@ -527,6 +550,7 @@ dashboard/
         workspace_store.py           JSON persistence under XDG_DATA_HOME; load/forget by canonical path
         template_store.py            Independent versioned templates.json persistence
         template_portability.py      Strict portable-envelope parsing and atomic file export
+        project_intelligence.py       Bounded project facts, readiness, setup plans, and execution
         workspace_launcher.py         Non-Textual orchestration: LaunchRequest -> running tmux
         settings_store.py            JSON persistence under XDG_CONFIG_HOME
     screens/                    One module per screen

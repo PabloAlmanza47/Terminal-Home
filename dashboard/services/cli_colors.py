@@ -19,9 +19,7 @@ _ANSI = {
 
 
 def color_output_enabled(stream: TextIO) -> bool:
-    return "NO_COLOR" not in os.environ and bool(
-        getattr(stream, "isatty", lambda: False)()
-    )
+    return "NO_COLOR" not in os.environ and bool(getattr(stream, "isatty", lambda: False)())
 
 
 def style_table_header(line: str, setting: TableHeaderColor, stream: TextIO) -> str:

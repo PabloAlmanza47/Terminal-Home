@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Read-only local project intelligence and `th doctor <project>` diagnostics
+  for Node.js, Python, .NET, environment examples, and evidence-backed facts.
+- Safe guided setup with dry-run plans, per-action approval, dependency-aware
+  execution, and exact argv/cwd reporting through `th setup <project>`.
+- Project-selector completion for `doctor` and `setup` in Bash and Zsh.
+
+### Changed
+
+- Public documentation now describes the Detect → Explain → Approve → Execute
+  safety model and the unreleased v0.3.0 roadmap.
+
 ## [0.2.1] - 2026-08-05
 
 ### Added

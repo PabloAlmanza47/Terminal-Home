@@ -24,9 +24,7 @@ def tmux_layout_for_pane_count(pane_count: int) -> str | None:
     no layout needs to be applied.
     """
     if pane_count not in _TMUX_LAYOUTS:
-        raise ValueError(
-            f"Unsupported pane count: {pane_count} (must be 1-{MAX_SUPPORTED_PANES})"
-        )
+        raise ValueError(f"Unsupported pane count: {pane_count} (must be 1-{MAX_SUPPORTED_PANES})")
     return _TMUX_LAYOUTS[pane_count]
 
 

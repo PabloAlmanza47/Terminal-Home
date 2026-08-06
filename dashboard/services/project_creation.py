@@ -233,9 +233,7 @@ def validate_new_project(
             errors.append(str(exc))
         else:
             if destination.exists():
-                errors.append(
-                    f"'{destination}' already exists -- choose a different folder name."
-                )
+                errors.append(f"'{destination}' already exists -- choose a different folder name.")
 
     return NewProjectValidation(errors=errors)
 

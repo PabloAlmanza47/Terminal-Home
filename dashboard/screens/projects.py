@@ -150,17 +150,13 @@ class ProjectsScreen(Screen[None]):
         self._scanning = False
         statuses_by_location = {status.project.location: status for status in scan_result.statuses}
         self._all_entries = [
-            statuses_by_location[project.location]
-            if isinstance(project, Project)
-            else project
+            statuses_by_location[project.location] if isinstance(project, Project) else project
             for project in selectable
             if isinstance(project, RegisteredRemoteProject)
             or project.location in statuses_by_location
         ]
         self._entries_by_id = {
-            project_option_id(entry)
-            if isinstance(entry, ProjectStatus)
-            else entry.selector: entry
+            project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector: entry
             for entry in self._all_entries
         }
         self.query_one("#scan-warning", Static).update(format_scan_warnings(scan_result))
@@ -173,9 +169,8 @@ class ProjectsScreen(Screen[None]):
         return [
             entry
             for entry in self._all_entries
-            if query in (
-                entry.project.name if isinstance(entry, ProjectStatus) else entry.name
-            ).lower()
+            if query
+            in (entry.project.name if isinstance(entry, ProjectStatus) else entry.name).lower()
         ]
 
     def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
@@ -232,12 +227,16 @@ class ProjectsScreen(Screen[None]):
             for entry in entries
         }
         self._restore_highlight(preferred_id if preferred_id in visible_ids else None)
-        first_id = preferred_id if preferred_id in visible_ids else next(
-            (
-                project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
-                for entry in entries
-            ),
-            None,
+        first_id = (
+            preferred_id
+            if preferred_id in visible_ids
+            else next(
+                (
+                    project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
+                    for entry in entries
+                ),
+                None,
+            )
         )
         self._preferred_entry_id = first_id
         self._show_details(first_id)

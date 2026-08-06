@@ -164,9 +164,7 @@ class KeyboardOptionList(OptionList):
         )
         return canonical
 
-    def add_options(
-        self, options: Iterable[Option | VisualType | None]
-    ) -> KeyboardOptionList:
+    def add_options(self, options: Iterable[Option | VisualType | None]) -> KeyboardOptionList:
         # Capture every prompt before handing the batch to Textual. This is
         # important for a mounted, focused empty list: adding its first item
         # may synchronously trigger highlight/refresh callbacks.

@@ -39,6 +39,13 @@ from dashboard.services.project_creation import (
     ProjectCreationRequest,
     create_project,
 )
+from dashboard.services.project_intelligence import (
+    execute_setup_action,
+    format_project_report,
+    inspect_project,
+    project_exit_code,
+    shell_display,
+)
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     launch_status_line,
@@ -48,6 +55,7 @@ from dashboard.services.project_launch import (
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
     list_selectable_projects,
+    resolve_project_selector,
 )
 from dashboard.services.projects import (
     ProjectStatus,
@@ -167,14 +175,25 @@ def _build_parser() -> argparse.ArgumentParser:
     new_parser.set_defaults(handler=_run_new, init_git=None, launch=None)
 
     doctor_parser = subparsers.add_parser(
-        "doctor", help="Check the local environment (read-only)."
+        "doctor", help="Check the local environment or one project."
     )
-    doctor_parser.add_argument(
-        "--remote",
-        action="store_true",
-        help="Also inspect manually registered remote projects over SSH.",
+    doctor_mode = doctor_parser.add_mutually_exclusive_group()
+    doctor_mode.add_argument("project", nargs="?", help="Local project name or path.")
+    doctor_mode.add_argument(
+        "--remote", action="store_true", help="Inspect registered remote projects over SSH."
     )
     doctor_parser.set_defaults(handler=_run_doctor)
+
+    setup_parser = subparsers.add_parser(
+        "setup", help="Propose or safely apply local project setup actions."
+    )
+    setup_parser.add_argument("project", help="Local project name or path.")
+    setup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the plan without prompting or changing anything.",
+    )
+    setup_parser.set_defaults(handler=_run_setup)
 
     completion_parser = subparsers.add_parser(
         "completion", help="Generate dynamic shell completion."
@@ -259,9 +278,7 @@ def _run_host_add(args: argparse.Namespace) -> int:
 
 def _run_host_edit(args: argparse.Namespace) -> int:
     try:
-        host = update_ssh_host(
-            args.id, display_name=args.name, destination=args.destination
-        )
+        host = update_ssh_host(args.id, display_name=args.name, destination=args.destination)
     except (SshModelValidationError, SshHostStoreError) as exc:
         return _management_error(exc)
     if host is None:
@@ -292,14 +309,10 @@ def _run_remote_list(args: argparse.Namespace) -> int:
     print("ID  NAME  HOST  REMOTE PATH  STATUS")
     for project in integrity.projects:
         host_label = (
-            hosts[project.host_id].display_name
-            if project.host_id in hosts
-            else project.host_id
+            hosts[project.host_id].display_name if project.host_id in hosts else project.host_id
         )
         status = (
-            "registered"
-            if project.id not in integrity.orphaned_project_ids
-            else "missing host"
+            "registered" if project.id not in integrity.orphaned_project_ids else "missing host"
         )
         print(f"{project.id}  {project.name}  {host_label}  {project.remote_path}  {status}")
     return 0
@@ -383,10 +396,7 @@ def _print_remote_project_table(
         )
         for project in projects
     ]
-    widths = [
-        max(len(row[index]) for row in (headers, *rows))
-        for index in range(len(headers) - 1)
-    ]
+    widths = [max(len(row[index]) for row in (headers, *rows)) for index in range(len(headers) - 1)]
     header_color = load_settings().table_header_color
     for row_index, row in enumerate((headers, *rows)):
         line = "  ".join(cell.ljust(width) for cell, width in zip(row[:-1], widths))
@@ -399,9 +409,7 @@ def _print_remote_project_table(
 def _run_list(args: argparse.Namespace) -> int:
     selectable_projects = list_selectable_projects()
     remote_projects = tuple(
-        project
-        for project in selectable_projects
-        if isinstance(project, RegisteredRemoteProject)
+        project for project in selectable_projects if isinstance(project, RegisteredRemoteProject)
     )
     result = scan_all_projects()
 
@@ -505,15 +513,17 @@ def _run_new(args: argparse.Namespace) -> int:
             destination = args.path.expanduser().resolve()
         else:
             root = (
-                args.root.expanduser().resolve()
-                if args.root is not None
-                else DEFAULT_PROJECTS_ROOT
+                args.root.expanduser().resolve() if args.root is not None else DEFAULT_PROJECTS_ROOT
             )
             if interactive and args.root is None:
                 folder = _prompt_text("Project folder", folder, stdin=sys.stdin, stdout=sys.stdout)
-                root = Path(
-                    _prompt_text("Project root", str(root), stdin=sys.stdin, stdout=sys.stdout)
-                ).expanduser().resolve()
+                root = (
+                    Path(
+                        _prompt_text("Project root", str(root), stdin=sys.stdin, stdout=sys.stdout)
+                    )
+                    .expanduser()
+                    .resolve()
+                )
             destination = (root / folder).resolve()
 
         init_git = args.init_git
@@ -530,9 +540,7 @@ def _run_new(args: argparse.Namespace) -> int:
                 "Workspace template", "default", stdin=sys.stdin, stdout=sys.stdout
             )
             template_name = (
-                None
-                if template_answer.casefold() in {"", "default", "none"}
-                else template_answer
+                None if template_answer.casefold() in {"", "default", "none"} else template_answer
             )
 
         launch = args.launch
@@ -576,6 +584,31 @@ def _run_new(args: argparse.Namespace) -> int:
 
 
 def _run_doctor(args: argparse.Namespace) -> int:
+    if args.project:
+        resolved = resolve_project_selector(args.project)
+        if not resolved.ok:
+            print(f"error: {resolved.error}", file=sys.stderr)
+            return 1
+        if isinstance(resolved.project, RegisteredRemoteProject):
+            print(
+                "error: remote project intelligence is unsupported; no SSH connection was made",
+                file=sys.stderr,
+            )
+            return 1
+        assert resolved.project is not None
+        if not resolved.project.path.is_dir():
+            print(
+                f"error: project is not a readable directory: {resolved.project.path}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            info = inspect_project(resolved.project.path)
+        except (OSError, RuntimeError) as exc:
+            print(f"error: cannot inspect project: {exc}", file=sys.stderr)
+            return 1
+        print(format_project_report(info))
+        return project_exit_code(info)
     print("Terminal Home doctor")
     print()
     diagnostics = run_diagnostics(remote=args.remote)
@@ -583,6 +616,104 @@ def _run_doctor(args: argparse.Namespace) -> int:
         print(format_diagnostic(diagnostic))
 
     return exit_code_for(diagnostics)
+
+
+def _resolve_local_intelligence(selector: str):
+    resolved = resolve_project_selector(selector)
+    if not resolved.ok:
+        print(f"error: {resolved.error}", file=sys.stderr)
+        return None
+    if isinstance(resolved.project, RegisteredRemoteProject):
+        print(
+            "error: remote project setup is not supported yet; no SSH connection was made",
+            file=sys.stderr,
+        )
+        return None
+    assert resolved.project is not None
+    if not resolved.project.path.is_dir():
+        print(
+            f"error: project is not a readable directory: {resolved.project.path}", file=sys.stderr
+        )
+        return None
+    return resolved.project
+
+
+def _run_setup(args: argparse.Namespace) -> int:
+    project = _resolve_local_intelligence(args.project)
+    if project is None:
+        return 1
+    try:
+        info = inspect_project(project.path)
+    except (OSError, RuntimeError) as exc:
+        print(f"error: cannot inspect project: {exc}", file=sys.stderr)
+        return 1
+    print(format_project_report(info))
+    actions = info.setup_actions
+    if not actions:
+        print("\nNo changes made.")
+        return project_exit_code(info)
+    print("\nSetup plan")
+    if args.dry_run:
+        for index, action in enumerate(actions, 1):
+            print(f"  {index}. {action.description}: {action.reason}")
+            print(f"     cwd: {action.cwd}")
+            if action.argv:
+                print(f"     argv: {shell_display(action.argv)}")
+            if action.source and action.destination:
+                print(f"     copy: {action.source} -> {action.destination}")
+            print(
+                f"     risk: {action.risk.value}; evidence: {', '.join(map(str, action.evidence))}"
+            )
+        return project_exit_code(info)
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print(
+            "error: setup requires an interactive terminal; use "
+            "--dry-run for a non-interactive plan",
+            file=sys.stderr,
+        )
+        return 1
+    approved = []
+    try:
+        for action in actions:
+            if _prompt_yes_no(
+                f"Approve {action.description}?", False, stdin=sys.stdin, stdout=sys.stdout
+            ):
+                approved.append(action)
+        final_approval = _prompt_yes_no(
+            "Execute the approved setup actions?", False, stdin=sys.stdin, stdout=sys.stdout
+        )
+    except _PromptCancelled:
+        print("No changes made.")
+        return 0
+    if not approved or not final_approval:
+        print("No changes made.")
+        return 0
+    approved_ids = {a.id for a in approved}
+    completed: set[str] = set()
+    attempted: set[str] = set()
+    stopped = False
+    for action in approved:
+        if any(dep not in completed for dep in action.dependencies):
+            print(f"SKIP  {action.id}: prerequisite was not completed")
+            attempted.add(action.id)
+            continue
+        attempted.add(action.id)
+        try:
+            ok, detail = execute_setup_action(action)
+        except (OSError, subprocess.SubprocessError) as exc:
+            ok, detail = False, str(exc)
+        print(f"{'PASS' if ok else 'FAIL'}  {action.description}: {detail}")
+        if not ok:
+            print("Setup stopped after a failed action.")
+            stopped = True
+            break
+        completed.add(action.id)
+    for action in actions:
+        if action.id not in approved_ids:
+            print(f"SKIP  {action.description}: not approved")
+        elif stopped and action.id not in attempted:
+            print(f"NOT-RUN  {action.description}: setup stopped after a failed action")
+    return 0
 
 
 def _run_completion(args: argparse.Namespace) -> int:

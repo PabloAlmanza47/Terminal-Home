@@ -178,13 +178,10 @@ def prepare_project_launch(
     # disappeared after status gathering.
     if not status.canonical_path.is_dir():
         raise ProjectLaunchPreparationError(
-            f"Cannot launch because the project directory no longer exists: "
-            f"{status.canonical_path}"
+            f"Cannot launch because the project directory no longer exists: {status.canonical_path}"
         )
     save_workspace(plan.workspace, store_path=store_path)
-    request = LaunchRequest(
-        workspace=plan.workspace, init_git=False, action=LaunchAction.CREATE
-    )
+    request = LaunchRequest(workspace=plan.workspace, init_git=False, action=LaunchAction.CREATE)
     return PreparedProjectLaunch(plan, request, True)
 
 
@@ -212,9 +209,7 @@ def prepare_project_launch_for_selector(selector: str) -> ResolvedProjectLaunch:
 
     resolved_plan = resolve_project_plan(selector)
     if resolved_plan.plan is None:
-        return ResolvedProjectLaunch(
-            None, resolved_plan.error, resolved_plan.warnings
-        )
+        return ResolvedProjectLaunch(None, resolved_plan.error, resolved_plan.warnings)
     plan = resolved_plan.plan
     if plan.blocked:
         return ResolvedProjectLaunch(None, plan.note or "Project launch is blocked.")

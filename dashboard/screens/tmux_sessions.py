@@ -68,9 +68,7 @@ class TmuxSessionsScreen(Screen[TmuxSessionAttachRequest | None]):
 
         self.sessions = list_tmux_sessions()
         if not self.sessions:
-            status.update(
-                "No tmux sessions are running. Start one with: tmux new -s <name>"
-            )
+            status.update("No tmux sessions are running. Start one with: tmux new -s <name>")
             option_list.display = False
             return
 
@@ -87,9 +85,7 @@ class TmuxSessionsScreen(Screen[TmuxSessionAttachRequest | None]):
         option_list.clear_options()
         width = max(12, option_list.content_region.width or self.size.width - 12)
         for session in self.sessions:
-            option_list.add_option(
-                Option(format_tmux_session_row(session, width), id=session.name)
-            )
+            option_list.add_option(Option(format_tmux_session_row(session, width), id=session.name))
         if selected is not None and selected < option_list.option_count:
             option_list.highlighted = selected
 

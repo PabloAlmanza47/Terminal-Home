@@ -62,10 +62,7 @@ def _looks_like_path(selector: str) -> bool:
     was invoked from.
     """
     return (
-        "/" in selector
-        or "\\" in selector
-        or selector in (".", "..")
-        or selector.startswith("~")
+        "/" in selector or "\\" in selector or selector in (".", "..") or selector.startswith("~")
     )
 
 

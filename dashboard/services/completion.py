@@ -15,7 +15,7 @@ from dashboard.services.projects_config_store import load_projects_config_result
 from dashboard.services.remote_project_store import load_all_remote_projects
 from dashboard.services.template_store import load_templates_result
 
-SUBCOMMANDS = ("list", "plan", "up", "new", "doctor", "completion")
+SUBCOMMANDS = ("list", "plan", "up", "new", "doctor", "setup", "completion")
 SHELLS = ("bash", "zsh")
 
 
@@ -39,9 +39,7 @@ def project_selector_candidates(projects: Iterable[SelectableProject]) -> tuple[
             candidate = project.selector
         else:
             candidate = (
-                project.name
-                if name_counts[project.name] == 1
-                else str(project.path.resolve())
+                project.name if name_counts[project.name] == 1 else str(project.path.resolve())
             )
         # The internal protocol is line-delimited. A newline in a filesystem
         # name cannot be represented without corrupting the candidate stream.
@@ -73,7 +71,7 @@ def discover_template_names() -> tuple[str, ...]:
 
 def render_bash_completion() -> str:
     """Render dependency-free Bash completion for every console-script alias."""
-    return r'''_terminal_home_complete() {
+    return r"""_terminal_home_complete() {
     local cur command candidate
     COMPREPLY=()
     cur=${COMP_WORDS[COMP_CWORD]}
@@ -88,6 +86,7 @@ plan
 up
 new
 doctor
+setup
 completion
 EOF
         return
@@ -100,7 +99,8 @@ EOF
         return
     fi
 
-    if [[ ( $command == plan || $command == up ) && $COMP_CWORD -eq 2 ]]; then
+    if [[ ( $command == plan || $command == up || $command == doctor || \
+        $command == setup ) && $COMP_CWORD -eq 2 ]]; then
         if [[ $cur == /* || $cur == ./* || $cur == ../* || $cur == ~* ]]; then
             compopt -o filenames
             mapfile -t COMPREPLY < <(compgen -d -- "$cur")
@@ -123,12 +123,12 @@ EOF
     fi
 }
 complete -F _terminal_home_complete th terminal-home dev
-'''
+"""
 
 
 def render_zsh_completion() -> str:
     """Render dependency-free Zsh completion for every console-script alias."""
-    return r'''#compdef th terminal-home dev
+    return r"""#compdef th terminal-home dev
 _terminal_home_complete() {
     local command output
     local -a commands candidates
@@ -136,7 +136,8 @@ _terminal_home_complete() {
         'list:List discovered projects and their status'
         'plan:Preview a project workspace launch'
         'up:Create or attach to a project workspace'
-        'doctor:Check the local environment'
+        'doctor:Check the local environment or a project'
+        'setup:Safely apply local project setup'
         'completion:Generate shell completion'
     )
 
@@ -156,7 +157,7 @@ _terminal_home_complete() {
                 compadd -- "${candidates[@]}"
             fi
             ;;
-        plan|up)
+        plan|up|doctor|setup)
             if (( CURRENT == 3 )); then
                 output=$(command "${words[1]}" __complete projects 2>/dev/null)
                 if [[ -n $output ]]; then
@@ -169,7 +170,7 @@ _terminal_home_complete() {
     esac
 }
 compdef _terminal_home_complete th terminal-home dev
-'''
+"""
 
 
 def render_completion(shell: str) -> str:

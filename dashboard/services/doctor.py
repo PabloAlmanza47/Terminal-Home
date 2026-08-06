@@ -168,13 +168,9 @@ def _check_store_path(path: Path, label: str, display_name: str, error: str | No
     if error:
         return Diagnostic(DiagnosticLevel.FAIL, label, f"{display_name}: {path} -- {error}")
     if not path.exists():
-        return Diagnostic(
-            DiagnosticLevel.PASS, label, f"{display_name}: {path} (not created yet)"
-        )
+        return Diagnostic(DiagnosticLevel.PASS, label, f"{display_name}: {path} (not created yet)")
     if not path.is_file() or not os.access(path, os.R_OK):
-        return Diagnostic(
-            DiagnosticLevel.FAIL, label, f"{display_name}: {path} (not readable)"
-        )
+        return Diagnostic(DiagnosticLevel.FAIL, label, f"{display_name}: {path} (not readable)")
     return Diagnostic(DiagnosticLevel.PASS, label, f"{display_name}: {path}")
 
 

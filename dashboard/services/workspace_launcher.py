@@ -44,16 +44,12 @@ def build_pane_plans(
     """
     project_aware_kinds = {PaneKind.DEV_SERVER, PaneKind.TEST_TERMINAL}
     needs_detection = any(
-        pane.kind in project_aware_kinds
-        for window in workspace.windows
-        for pane in window.panes
+        pane.kind in project_aware_kinds for window in workspace.windows for pane in window.panes
     )
     if isinstance(workspace.project_location, LocalProjectLocation):
         local_project_path = workspace.project_location.path
         project_path: Path | str = local_project_path
-        detected_commands = (
-            detect_project_commands(local_project_path) if needs_detection else None
-        )
+        detected_commands = detect_project_commands(local_project_path) if needs_detection else None
     else:
         # Remote inspection and remote project discovery are separate phases.
         # Keep planning read-only and avoid probing a remote path locally.
@@ -139,8 +135,7 @@ def _attach_remote(session_name: str, runner: tmux.TmuxCommandRunner) -> None:
     )
     if not result.succeeded:
         detail = result.error or (
-            f"interactive SSH exited with status {result.status} "
-            f"(return code {result.returncode})"
+            f"interactive SSH exited with status {result.status} (return code {result.returncode})"
         )
         raise LaunchError(f"Could not attach to remote tmux session: {detail}")
 
@@ -149,9 +144,7 @@ def _resolve_runner(workspace: WorkspaceSpec) -> tmux.TmuxCommandRunner:
     resolution = tmux.resolve_tmux_runner(workspace)
     if resolution.runner is None:
         message = (
-            resolution.error.message
-            if resolution.error is not None
-            else "Unknown runner error."
+            resolution.error.message if resolution.error is not None else "Unknown runner error."
         )
         raise LaunchError(message)
     return resolution.runner

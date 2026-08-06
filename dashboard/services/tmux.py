@@ -119,9 +119,7 @@ def is_tmux_installed() -> bool:
 
 def run_local_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """Execute one tmux argv command locally, capturing its output."""
-    return subprocess.run(
-        argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS
-    )
+    return subprocess.run(argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
 
 
 def run_tmux_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -376,9 +374,7 @@ def _select_pane_argv(pane_id: str) -> list[str]:
     return ["tmux", "select-pane", "-t", pane_id]
 
 
-def _run_step(
-    runner: TmuxCommandRunner, argv: list[str]
-) -> subprocess.CompletedProcess[str]:
+def _run_step(runner: TmuxCommandRunner, argv: list[str]) -> subprocess.CompletedProcess[str]:
     result = runner(argv)
     if result.returncode != 0:
         raise TmuxCommandError(f"Command failed: {' '.join(argv)}\n{result.stderr.strip()}")

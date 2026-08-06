@@ -32,8 +32,4 @@ def group_project_entries(entries: list[ProjectEntry]) -> tuple[ProjectCategory,
     grouped: dict[str, list[ProjectEntry]] = {title: [] for title in order}
     for entry in entries:
         grouped[project_category(entry)].append(entry)
-    return tuple(
-        ProjectCategory(title, tuple(grouped[title]))
-        for title in order
-        if grouped[title]
-    )
+    return tuple(ProjectCategory(title, tuple(grouped[title])) for title in order if grouped[title])

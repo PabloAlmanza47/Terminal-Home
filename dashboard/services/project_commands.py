@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import configparser
-import json
 import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from dashboard.services.project_files import is_directory, is_regular_file, load_json_object
 
 
 class CommandSource(str, Enum):
@@ -41,28 +42,17 @@ _PYTEST_COMMAND_PATTERN = re.compile(r"(?:^|\s)pytest(?:\s|$)")
 
 
 def _is_file(path: Path) -> bool:
-    try:
-        return not path.is_symlink() and path.is_file()
-    except OSError:
-        return False
+    return is_regular_file(path)
 
 
 def _is_dir(path: Path) -> bool:
-    try:
-        return not path.is_symlink() and path.is_dir()
-    except OSError:
-        return False
+    return is_directory(path)
 
 
 def _load_package_json(project_path: Path) -> dict[str, Any] | None:
     package_path = project_path / "package.json"
-    if not _is_file(package_path):
-        return None
-    try:
-        payload = json.loads(package_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
+    payload, error = load_json_object(package_path)
+    if error or payload is None:
         return None
     scripts = payload.get("scripts", {})
     if not isinstance(scripts, dict):
@@ -111,13 +101,9 @@ def _detect_node_commands(project_path: Path) -> _NodeCommands | None:
 
     development: DetectedCommand | None = None
     if _script_exists(scripts, "dev"):
-        development = DetectedCommand(
-            _node_command(manager, "dev"), CommandSource.NODE_DEV
-        )
+        development = DetectedCommand(_node_command(manager, "dev"), CommandSource.NODE_DEV)
     elif _script_exists(scripts, "start"):
-        development = DetectedCommand(
-            _node_command(manager, "start"), CommandSource.NODE_START
-        )
+        development = DetectedCommand(_node_command(manager, "start"), CommandSource.NODE_START)
 
     test: DetectedCommand | None = None
     test_script = scripts.get("test")
@@ -144,8 +130,10 @@ def _pyproject_configures_pytest(project_path: Path) -> bool:
     except (OSError, tomllib.TOMLDecodeError):
         return False
     tool = payload.get("tool")
-    return isinstance(tool, dict) and isinstance(tool.get("pytest"), dict) and isinstance(
-        tool["pytest"].get("ini_options"), dict
+    return (
+        isinstance(tool, dict)
+        and isinstance(tool.get("pytest"), dict)
+        and isinstance(tool["pytest"].get("ini_options"), dict)
     )
 
 
@@ -198,9 +186,7 @@ def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
     test = node.test if node is not None else None
 
     if development is None and _is_file(project_path / "manage.py"):
-        development = DetectedCommand(
-            "python manage.py runserver", CommandSource.DJANGO
-        )
+        development = DetectedCommand("python manage.py runserver", CommandSource.DJANGO)
     if test is None and _has_pytest_indicator(project_path):
         test = DetectedCommand("pytest", CommandSource.PYTEST)
     return DetectedProjectCommands(development=development, test=test)
