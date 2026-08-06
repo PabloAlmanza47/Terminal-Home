@@ -36,6 +36,7 @@ def test_pyproject_has_runtime_metadata_and_console_scripts() -> None:
     assert project["license-files"] == ["LICENSE"]
     assert "License :: OSI Approved :: MIT License" not in project["classifiers"]
     assert project["requires-python"] == ">=3.10"
+    assert "tomli>=2; python_version < '3.11'" in project["dependencies"]
     assert project["scripts"]["th"] == "dashboard.cli:main"
     assert project["scripts"]["terminal-home"] == "dashboard.cli:main"
     assert project["scripts"]["dev"] == "dashboard.cli:main"

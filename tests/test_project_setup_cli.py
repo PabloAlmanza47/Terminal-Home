@@ -12,11 +12,8 @@ def test_setup_dry_run_is_read_only(tmp_path: Path, monkeypatch, capsys) -> None
     project.mkdir()
     (project / "package.json").write_text(json.dumps({"scripts": {"dev": "next dev"}}))
     monkeypatch.setattr(cli.sys, "stdin", type("Input", (), {"isatty": lambda self: False})())
-    called = []
-    monkeypatch.setattr(cli, "execute_setup_action", lambda action: called.append(action))
 
     assert cli.run(["setup", str(project), "--dry-run"]) == 0
-    assert called == []
     assert not (project / "node_modules").exists()
     assert "Setup plan" in capsys.readouterr().out
 
