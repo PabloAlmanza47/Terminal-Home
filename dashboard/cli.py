@@ -39,13 +39,6 @@ from dashboard.services.project_creation import (
     ProjectCreationRequest,
     create_project,
 )
-from dashboard.services.project_intelligence import (
-    execute_setup_action,
-    format_project_report,
-    inspect_project,
-    project_exit_code,
-    shell_display,
-)
 from dashboard.services.project_launch import (
     ProjectLaunchPreparationError,
     launch_status_line,
@@ -585,6 +578,12 @@ def _run_new(args: argparse.Namespace) -> int:
 
 def _run_doctor(args: argparse.Namespace) -> int:
     if args.project:
+        from dashboard.services.project_intelligence import (
+            format_project_report,
+            inspect_project,
+            project_exit_code,
+        )
+
         resolved = resolve_project_selector(args.project)
         if not resolved.ok:
             print(f"error: {resolved.error}", file=sys.stderr)
@@ -639,6 +638,14 @@ def _resolve_local_intelligence(selector: str):
 
 
 def _run_setup(args: argparse.Namespace) -> int:
+    from dashboard.services.project_intelligence import (
+        execute_setup_action,
+        format_project_report,
+        inspect_project,
+        project_exit_code,
+        shell_display,
+    )
+
     project = _resolve_local_intelligence(args.project)
     if project is None:
         return 1

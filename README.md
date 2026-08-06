@@ -5,7 +5,7 @@
 A keyboard-driven terminal workspace manager for creating, configuring,
 resuming, and rebuilding project-specific tmux environments.
 
-Current release: **v0.3.0**
+Current release: **v0.3.1**
 
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
@@ -91,10 +91,10 @@ pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 ```
 
-For the v0.3.0 release specifically:
+For the v0.3.1 release specifically:
 
 ```bash
-pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.3.0"
+pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.3.1"
 ```
 
 After installation, open a new terminal and run `th` or `th doctor`.
@@ -205,7 +205,7 @@ Home refuses to automate migrations, seeds, database pushes, global installs,
 runtime installation, manifest or lockfile edits, Git changes, secret writing,
 environment-file overwrites, destructive cleanup, arbitrary project scripts,
 remote setup, or credential handling. Project intelligence and setup are
-local-only; remote selectors are rejected without SSH activity. The v0.3.0
+local-only; remote selectors are rejected without SSH activity. The v0.3.1
 detectors cover Node.js (including Next.js and Prisma), Python, .NET,
 environment examples, malformed or oversized indicators, and unknown projects.
 

@@ -79,10 +79,10 @@ def test_entrypoint_is_the_cli_dispatcher_not_the_tui_launcher() -> None:
     assert scripts["terminal-home"] == "dashboard.cli:main"
 
 
-def test_release_version_is_030_and_console_scripts_report_it() -> None:
+def test_release_version_is_031_and_console_scripts_report_it() -> None:
     from dashboard import __version__
 
-    assert __version__ == "0.3.0"
+    assert __version__ == "0.3.1"
     for command in ("th", "terminal-home", "dev"):
         executable = Path(sys.executable).parent / command
         if not executable.exists():
@@ -90,4 +90,19 @@ def test_release_version_is_030_and_console_scripts_report_it() -> None:
         result = subprocess.run(
             [executable, "--version"], capture_output=True, text=True, check=True
         )
-        assert result.stdout.strip().endswith("0.3.0")
+        assert result.stdout.strip().endswith("0.3.1")
+
+
+def test_cli_import_does_not_eagerly_import_project_intelligence() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import dashboard.cli; "
+            "assert 'dashboard.services.project_intelligence' not in sys.modules",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
