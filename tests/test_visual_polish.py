@@ -108,8 +108,8 @@ def test_pane_selection_renders_circular_markers() -> None:
     import asyncio
 
     selected, unselected = asyncio.run(scenario())
-    assert "▐●▌" in selected and "X" not in selected
-    assert "▐●▌" in unselected and "X" not in unselected
+    assert "●" in selected and "▐" not in selected and "▌" not in selected
+    assert "○" in unselected and "▐" not in unselected and "▌" not in unselected
 
 
 def test_project_categories_have_stable_order_and_remote_is_separate(tmp_path) -> None:

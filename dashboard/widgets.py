@@ -230,23 +230,37 @@ class CircularCheckbox(Checkbox):
     """Checkbox with a circular indicator, preserving Checkbox semantics."""
 
     def render(self) -> Content:
-        button_style = self.get_visual_style("toggle--button")
-        label_style = self.get_visual_style("toggle--label")
-        indicator = "◉" if self.value else "○"
-        label = self._label.pad(1, 1).stylize_before(label_style)
-        return Content.assemble((indicator, button_style), " ", label)
+        return _circular_content(self)
 
 
 SelectionType = TypeVar("SelectionType")
 
+CIRCULAR_SELECTED = "●"
+CIRCULAR_UNSELECTED = "○"
+
+
+def circular_indicator(value: bool) -> str:
+    """Return the shared one-cell indicator used by every circular control."""
+    return CIRCULAR_SELECTED if value else CIRCULAR_UNSELECTED
+
+
+def _circular_content(widget: Checkbox | RadioButton) -> Content:
+    """Render a control label with one shared indicator and separator."""
+    indicator_style = widget.get_visual_style("toggle--button")
+    label_style = widget.get_visual_style("toggle--label")
+    label = widget._label.stylize_before(label_style)
+    return Content.assemble((circular_indicator(widget.value), indicator_style), " ", label)
+
+
+class CircularRadioButton(RadioButton):
+    """RadioButton with the shared clean one-cell circular indicator."""
+
+    def render(self) -> Content:
+        return _circular_content(self)
+
 
 class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]):
-    """SelectionList with circular multi-select indicators.
-
-    Textual 8.2.8 renders SelectionList's square marker directly in its
-    public ``render_line`` implementation. This small subclass mirrors that
-    layout while retaining SelectionList's public selection and message API.
-    """
+    """SelectionList with clean circular multi-select indicators."""
 
     COMPONENT_CLASSES = SelectionList.COMPONENT_CLASSES | {
         "toggle--button",
@@ -268,21 +282,14 @@ class CircularSelectionList(SelectionList[SelectionType], Generic[SelectionType]
         if self.highlighted == selection_index:
             component += "-highlighted"
         button_style = self.get_component_rich_style(component)
-        side_style = Style(
-            color=button_style.bgcolor,
-            bgcolor=underlying_style.bgcolor,
-            meta={"option": selection_index},
-        )
-        inner_style = Style(
+        indicator_style = Style(
             color=button_style.color,
             bgcolor=button_style.bgcolor,
             meta={"option": selection_index},
         )
         return Strip(
             [
-                Segment(RadioButton.BUTTON_LEFT, side_style),
-                Segment(RadioButton.BUTTON_INNER, inner_style),
-                Segment(RadioButton.BUTTON_RIGHT, side_style),
+                Segment(circular_indicator(selection.value in self._selected), indicator_style),
                 Segment(" ", style=underlying_style),
                 *line,
             ]

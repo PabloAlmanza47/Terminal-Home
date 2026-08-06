@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from textual import events
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, RadioButton, RadioSet, SelectionList, Static
+from textual.widgets import Footer, RadioSet, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
 from dashboard.models.settings import AppSettings, CodingAgent, LayoutMode, TableHeaderColor
@@ -20,7 +21,12 @@ from dashboard.screens.project_discovery import ProjectDiscoveryScreen
 from dashboard.screens.remote_projects import RemoteProjectsScreen
 from dashboard.screens.ssh_hosts import SshHostsScreen
 from dashboard.services.settings_store import load_settings, save_settings
-from dashboard.widgets import ActionItem, CircularSelectionList, KeyboardActionList
+from dashboard.widgets import (
+    ActionItem,
+    CircularRadioButton,
+    CircularSelectionList,
+    KeyboardActionList,
+)
 
 
 class SettingsScreen(Screen[None]):
@@ -33,8 +39,8 @@ class SettingsScreen(Screen[None]):
         self.settings: AppSettings = load_settings()
 
     def compose(self) -> ComposeResult:
-        with Container(classes="screen-root"):
-            with Vertical(classes="panel"):
+        with VerticalScroll(classes="screen-root settings-scroll"):
+            with Vertical(classes="panel settings-panel"):
                 yield Static("Settings", id="screen-title")
                 yield Static(
                     "These preferences control the home screen's appearance.",
@@ -54,27 +60,33 @@ class SettingsScreen(Screen[None]):
                         self.settings.layout_mode is LayoutMode.COMPACT,
                     ),
                     id="appearance-settings",
-                    classes="settings-choice-group",
+                    classes="settings-choice-group circular-choice-control",
                 )
                 yield Static("Coding Agent", classes="panel-heading")
-                with RadioSet(id="coding-agent-set", classes="settings-choice-group"):
-                    yield RadioButton(
+                with RadioSet(
+                    id="coding-agent-set",
+                    classes="settings-choice-group circular-choice-control",
+                ):
+                    yield CircularRadioButton(
                         "None",
                         id="agent-none",
                         value=self.settings.coding_agent is CodingAgent.NONE,
                     )
-                    yield RadioButton(
+                    yield CircularRadioButton(
                         "Codex",
                         id="agent-codex",
                         value=self.settings.coding_agent is CodingAgent.CODEX,
                     )
-                    yield RadioButton(
+                    yield CircularRadioButton(
                         "Claude Code",
                         id="agent-claude",
                         value=self.settings.coding_agent is CodingAgent.CLAUDE_CODE,
                     )
                 yield Static("CLI table header color", classes="panel-heading")
-                with RadioSet(id="table-header-color-set", classes="settings-choice-group"):
+                with RadioSet(
+                    id="table-header-color-set",
+                    classes="settings-choice-group circular-choice-control",
+                ):
                     for color, label in (
                         (TableHeaderColor.THEME, "Theme accent (default)"),
                         (TableHeaderColor.BLUE, "Blue"),
@@ -85,7 +97,7 @@ class SettingsScreen(Screen[None]):
                         (TableHeaderColor.WHITE, "White"),
                         (TableHeaderColor.NONE, "No color"),
                     ):
-                        yield RadioButton(
+                        yield CircularRadioButton(
                             label,
                             id=f"header-color-{color.value}",
                             value=self.settings.table_header_color is color,
@@ -99,7 +111,7 @@ class SettingsScreen(Screen[None]):
                 )
                 yield Static(
                     "Theme: open the command palette (ctrl+p) and search\n"
-                    '"theme" -- your choice is applied immediately and\n'
+                    "\"theme\" -- your choice is applied immediately and\n"
                     "persists across launches.\n\n"
                     "CLI table headings use this color only on a TTY; NO_COLOR, pipes, and\n"
                     "the No color option always produce plain text.\n\n"
@@ -113,7 +125,19 @@ class SettingsScreen(Screen[None]):
     def on_mount(self) -> None:
         self.query_one("#appearance-settings", CircularSelectionList).focus()
 
-    def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        """Keep focused Settings controls visible on short terminals.
+
+        Textual's default focus scrolling is deferred and animated.  On a
+        short Settings viewport that can leave a focused choice group partly
+        below the viewport for one refresh, so make this screen's focus policy
+        immediate and deterministic.
+        """
+        event.widget.scroll_visible(animate=False, force=True, immediate=True)
+
+    def on_selection_list_selection_toggled(
+        self, event: SelectionList.SelectionToggled
+    ) -> None:
         if event.selection_list.id != "appearance-settings":
             return
         selected = set(event.selection_list.selected)
@@ -121,7 +145,9 @@ class SettingsScreen(Screen[None]):
             self.settings,
             artwork_enabled="artwork" in selected,
             clock_visible="clock" in selected,
-            layout_mode=(LayoutMode.COMPACT if "compact" in selected else LayoutMode.EXPANDED),
+            layout_mode=(
+                LayoutMode.COMPACT if "compact" in selected else LayoutMode.EXPANDED
+            ),
         )
         try:
             save_settings(self.settings)

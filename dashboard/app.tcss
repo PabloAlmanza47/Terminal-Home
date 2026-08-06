@@ -454,34 +454,80 @@ OptionList:focus, SelectionList:focus, Input:focus, Checkbox:focus, Button:focus
     background-tint: transparent;
 }
 
-/* The three Settings choice groups share one focus treatment and geometry. */
+/* The three Settings choice groups share one focus treatment and geometry.
+   This block intentionally comes after the broad OptionList, SelectionList,
+   and RadioSet rules above it. */
 .settings-choice-group {
     width: 100%;
     max-width: 100%;
     min-height: 3;
     height: auto;
+    max-height: 9999;
     margin: 1 0;
     padding: 0 1;
-    border: solid #30445f;
-    background: transparent;
+    border: solid #30445f !important;
+    background: transparent !important;
+}
+
+.settings-scroll {
+    height: 1fr;
+    max-height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.panel.settings-panel {
+    height: auto;
+    max-height: 9999;
 }
 
 .settings-choice-group:focus {
-    border: round #9b8cff;
-    background: transparent;
+    border: round #9b8cff !important;
+    background: transparent !important;
+}
+
+#appearance-settings:focus,
+#coding-agent-set:focus,
+#table-header-color-set:focus {
+    border: round #9b8cff !important;
+    background: transparent !important;
 }
 
 .settings-choice-group RadioButton,
 .settings-choice-group CircularSelectionList {
     width: 100%;
-    padding: 0;
-    margin: 0;
+    padding: 0 !important;
+    margin: 0 !important;
 }
 
-.settings-choice-group RadioButton.-on > .toggle--button,
-.settings-choice-group CircularSelectionList > .selection-list--button-selected {
-    color: #9b8cff;
-    background: transparent;
+.settings-choice-group > .option-list--option,
+.settings-choice-group > .option-list--option-highlighted,
+.settings-choice-group > .selection-list--button,
+.settings-choice-group > .selection-list--button-highlighted,
+.settings-choice-group > .selection-list--button-selected,
+.settings-choice-group > .selection-list--button-selected-highlighted {
+    color: #e0e0e0 !important;
+    background: transparent !important;
+}
+
+.settings-choice-group > .selection-list--button-selected,
+.settings-choice-group > .selection-list--button-selected-highlighted,
+.settings-choice-group RadioButton.-on > .toggle--button {
+    color: #9b8cff !important;
+    background: transparent !important;
+}
+
+#appearance-settings > .selection-list--button-selected,
+#appearance-settings > .selection-list--button-selected-highlighted,
+#coding-agent-set RadioButton.-on > .toggle--button,
+#table-header-color-set RadioButton.-on > .toggle--button {
+    color: #9b8cff !important;
+    background: transparent !important;
+}
+
+.settings-choice-group RadioButton > .toggle--button,
+.settings-choice-group RadioButton > .toggle--label {
+    background: transparent !important;
 }
 
 KeyboardActionList {
@@ -499,26 +545,6 @@ KeyboardActionList:focus {
 #project-actions:focus,
 #confirm-actions:focus,
 #settings-actions:focus {
-    background: transparent;
-}
-
-/* Keep Settings-specific purple styling last so native widget defaults cannot
-   restore their blue or green focus/selection accents. */
-SettingsScreen .settings-choice-group:focus {
-    border: round #9b8cff;
-    background: transparent;
-}
-
-#appearance-settings:focus,
-#coding-agent-set:focus,
-#table-header-color-set:focus {
-    border: round #9b8cff;
-    background: transparent;
-}
-
-SettingsScreen .settings-choice-group RadioButton.-on > .toggle--button,
-SettingsScreen .settings-choice-group CircularSelectionList > .selection-list--button-selected {
-    color: #9b8cff;
     background: transparent;
 }
 
@@ -571,15 +597,43 @@ KeyboardOptionList:focus {
     border: double #55d6ff;
 }
 
-/* Final Settings override: keep native RadioSet and custom multi-select
-   focus/selection accents identical. */
-SettingsScreen .settings-choice-group:focus {
-    border: round #9b8cff;
-    background: transparent;
+/* Shared circular-choice rendering. This is deliberately the final control
+   block so native SelectionList / ToggleButton defaults cannot restore green
+   selection colors or opaque highlight rails. */
+.circular-choice-control {
+    background: transparent !important;
+    color: #e0e0e0 !important;
 }
 
-SettingsScreen .settings-choice-group RadioButton.-on > .toggle--button,
-SettingsScreen .settings-choice-group CircularSelectionList > .selection-list--button-selected {
-    color: #9b8cff;
-    background: transparent;
+.circular-choice-control:focus,
+CircularCheckbox:focus,
+CircularSelectionList:focus {
+    border: round #9b8cff !important;
+    background: transparent !important;
+}
+
+CircularCheckbox > .toggle--button,
+CircularCheckbox > .toggle--label,
+CircularRadioButton > .toggle--button,
+CircularRadioButton > .toggle--label {
+    background: transparent !important;
+}
+
+CircularCheckbox > .toggle--button,
+CircularRadioButton > .toggle--button,
+CircularSelectionList > .option-list--option,
+CircularSelectionList > .option-list--option-highlighted,
+CircularSelectionList > .selection-list--button,
+CircularSelectionList > .selection-list--button-highlighted,
+CircularSelectionList > .selection-list--button-selected,
+CircularSelectionList > .selection-list--button-selected-highlighted {
+    background: transparent !important;
+    color: #aebbd0 !important;
+}
+
+CircularCheckbox.-on > .toggle--button,
+CircularRadioButton.-on > .toggle--button,
+CircularSelectionList > .selection-list--button-selected,
+CircularSelectionList > .selection-list--button-selected-highlighted {
+    color: #9b8cff !important;
 }

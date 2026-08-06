@@ -46,6 +46,7 @@ class NewProjectScreen(Screen[None]):
                     "Initialize an empty Git repository",
                     value=self.state.init_git,
                     id="git-init-checkbox",
+                    classes="circular-choice-control",
                 )
                 yield Static("", id="wizard-error")
                 yield KeyboardActionList(
