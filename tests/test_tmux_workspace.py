@@ -29,11 +29,13 @@ from dashboard.models import (
 )
 from dashboard.services import pane_commands
 from dashboard.services import tmux as tmux_module
+from dashboard.services.pane_layout_store import PaneLayout
 from dashboard.services.ssh_host_store import create_ssh_host
 from dashboard.services.tmux import (
     SshTmuxCommandRunner,
     TmuxCommandError,
     attach_or_switch_argv,
+    capture_tmux_window_layouts,
     create_workspace_session,
     generate_session_name,
     resolve_tmux_runner,
@@ -78,6 +80,7 @@ class _FakeTmux:
         self._next_window = window_start
         self._next_pane = pane_start
         self.fail_on = fail_on
+        self.failed = False
         self.executed: list[list[str]] = []
         self.sessions: set[str] = set(existing_sessions)
 
@@ -87,7 +90,8 @@ class _FakeTmux:
         if command == "has-session":
             target = argv[argv.index("-t") + 1]
             return _FakeCompletedProcess(returncode=0 if target in self.sessions else 1)
-        if self.fail_on is not None and command == self.fail_on:
+        if self.fail_on is not None and command == self.fail_on and not self.failed:
+            self.failed = True
             return _FakeCompletedProcess(returncode=1, stderr="boom")
         if command == "new-session":
             self.sessions.add(argv[argv.index("-s") + 1])
@@ -356,6 +360,96 @@ def test_two_panes_even_horizontal(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     layout_commands = [c for c in fake.executed if c[1] == "select-layout"]
     assert len(split_commands) == 1
     assert layout_commands == [["tmux", "select-layout", "-t", "@0", "even-horizontal"]]
+
+
+def test_capture_tmux_window_layouts_parses_rows_and_skips_malformed_output() -> None:
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str]) -> _FakeCompletedProcess:
+        calls.append(argv)
+        return _FakeCompletedProcess(
+            stdout="main\t2\t148x40,0,0[74x40,0,0,1,74x40,75,0,2]\n"
+            "bad-count\tnope\tignored\n"
+            "malformed\t1\n"
+        )
+
+    layouts = capture_tmux_window_layouts("demo", runner=runner)
+
+    assert layouts["main"] == PaneLayout("main", 2, "148x40,0,0[74x40,0,0,1,74x40,75,0,2]")
+    assert calls == [
+        ["tmux", "list-windows", "-t", "demo", "-F", tmux_module._WINDOW_LAYOUT_FORMAT]
+    ]
+
+
+def test_capture_tmux_window_layouts_reports_runner_failure() -> None:
+    def runner(argv: list[str]) -> _FakeCompletedProcess:
+        return _FakeCompletedProcess(returncode=1, stderr="no server")
+
+    with pytest.raises(TmuxCommandError, match="list-windows"):
+        capture_tmux_window_layouts("demo", runner=runner)
+
+
+def test_remembered_layout_is_applied_when_pane_count_matches(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, WindowSpec(window_name="main", panes=(_pane(), _pane())))
+    fake = _FakeTmux()
+    remembered = {"main": PaneLayout("main", 2, "148x40,0,0[74x40,0,0,1,74x40,75,0,2]")}
+
+    create_workspace_session(
+        workspace,
+        {("main", 0): _plan(), ("main", 1): _plan()},
+        runner=fake,
+        saved_window_layouts=remembered,
+    )
+
+    assert [c for c in fake.executed if c[1] == "select-layout"] == [
+        ["tmux", "select-layout", "-t", "@0", remembered["main"].tmux_layout]
+    ]
+
+
+def test_remembered_layout_is_ignored_when_pane_count_differs(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, WindowSpec(window_name="main", panes=(_pane(), _pane())))
+    fake = _FakeTmux()
+
+    create_workspace_session(
+        workspace,
+        {("main", 0): _plan(), ("main", 1): _plan()},
+        runner=fake,
+        saved_window_layouts={"main": PaneLayout("main", 3, "stale")},
+    )
+
+    assert [c for c in fake.executed if c[1] == "select-layout"] == [
+        ["tmux", "select-layout", "-t", "@0", "even-horizontal"]
+    ]
+
+
+def test_failed_remembered_layout_falls_back_to_default(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, WindowSpec(window_name="main", panes=(_pane(), _pane())))
+    fake = _FakeTmux(fail_on="select-layout")
+    remembered = {"main": PaneLayout("main", 2, "stale-layout")}
+
+    # The fake fails only the remembered attempt; the normal layout succeeds.
+    create_workspace_session(
+        workspace,
+        {("main", 0): _plan(), ("main", 1): _plan()},
+        runner=fake,
+        saved_window_layouts=remembered,
+    )
+
+    assert [c for c in fake.executed if c[1] == "select-layout"] == [
+        ["tmux", "select-layout", "-t", "@0", "stale-layout"],
+        ["tmux", "select-layout", "-t", "@0", "even-horizontal"],
+    ]
+
+
+def test_no_remembered_layout_preserves_default_behavior(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, WindowSpec(window_name="main", panes=(_pane(), _pane())))
+    fake = _FakeTmux()
+
+    create_workspace_session(workspace, {("main", 0): _plan(), ("main", 1): _plan()}, runner=fake)
+
+    assert [c for c in fake.executed if c[1] == "select-layout"] == [
+        ["tmux", "select-layout", "-t", "@0", "even-horizontal"]
+    ]
 
 
 def test_three_panes_main_vertical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

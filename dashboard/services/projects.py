@@ -17,6 +17,7 @@ from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation, 
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux
 from dashboard.services.git_info import gather_git_info
+from dashboard.services.pane_layout_store import has_saved_pane_layouts
 from dashboard.services.projects_config_store import (
     load_projects_config,
     load_projects_config_result,
@@ -247,6 +248,7 @@ class ProjectStatus:
     session_running: bool
     last_modified: datetime | None
     workspace_metadata_warning: str | None = None
+    remembered_pane_layouts: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +506,10 @@ def gather_project_status(
         tmux_available=tmux_available,
         session_running=session_running,
         last_modified=last_modified,
+        remembered_pane_layouts=(
+            saved_workspace is not None
+            and has_saved_pane_layouts(LocalProjectLocation(canonical_path))
+        ),
     )
 
 
@@ -553,6 +559,7 @@ class ProjectAction(str, Enum):
     SAVE_TEMPLATE = "save_template"
     RESET = "reset"
     FORGET = "forget"
+    RESET_PANE_SIZES = "reset_pane_sizes"
 
 
 def status_badge(status: ProjectStatus) -> str:
@@ -596,12 +603,13 @@ def secondary_actions(status: ProjectStatus) -> list[ProjectAction]:
     one(s) above.
     """
     if status.saved_workspace is not None:
-        return [
+        actions = [
             ProjectAction.EDIT,
-            ProjectAction.RESET,
-            ProjectAction.FORGET,
-            ProjectAction.SAVE_TEMPLATE,
         ]
+        if status.remembered_pane_layouts:
+            actions.append(ProjectAction.RESET_PANE_SIZES)
+        actions.extend([ProjectAction.RESET, ProjectAction.FORGET, ProjectAction.SAVE_TEMPLATE])
+        return actions
     if status.workspace_metadata_error and status.session_running:
         return [ProjectAction.FORGET]
     return []

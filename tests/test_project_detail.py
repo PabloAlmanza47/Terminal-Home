@@ -21,6 +21,11 @@ from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
+from dashboard.services.pane_layout_store import (
+    PaneLayout,
+    has_saved_pane_layouts,
+    save_pane_layouts_for_location,
+)
 from dashboard.services.projects import Project, build_launch_request, gather_project_status
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.system_info import SystemInfo
@@ -568,6 +573,10 @@ def test_reset_to_default_requires_confirmation(
         ),
     )
     save_workspace(custom)
+    save_pane_layouts_for_location(
+        LocalProjectLocation(project_path.resolve()),
+        {"custom": PaneLayout("custom", 1, "80x20,0,0,0")},
+    )
     monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
     monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
 
@@ -585,6 +594,7 @@ def test_reset_to_default_requires_confirmation(
 
     unchanged = _run(scenario_cancel())
     assert unchanged == custom  # cancelling leaves the saved workspace untouched
+    assert has_saved_pane_layouts(LocalProjectLocation(project_path.resolve()))
 
     async def scenario_confirm() -> object:
         app = TerminalHomeApp()
@@ -601,6 +611,41 @@ def test_reset_to_default_requires_confirmation(
     assert reset is not None
     assert reset.windows[0].window_name == "code"
     assert reset.session_name == "demo"  # session identity preserved
+    assert not has_saved_pane_layouts(LocalProjectLocation(project_path.resolve()))
+
+
+def test_reset_remembered_pane_sizes_is_separate_and_keeps_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    workspace = build_default_workspace(
+        "demo", LocalProjectLocation(project_path.resolve()), "demo"
+    )
+    save_workspace(workspace)
+    save_pane_layouts_for_location(
+        LocalProjectLocation(project_path.resolve()),
+        {"code": PaneLayout("code", 2, "custom")},
+    )
+    monkeypatch.setattr(tmux_module, "list_tmux_sessions", lambda: [])
+    monkeypatch.setattr(tmux_module, "session_exists", lambda name: False)
+
+    async def scenario() -> None:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_project_detail(pilot, "demo")
+            assert _has_action(app.screen, "action-reset_pane_sizes")
+            await _activate_action(pilot, "action-reset_pane_sizes")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+    _run(scenario())
+    assert load_workspace(project_path) == workspace
+    assert not has_saved_pane_layouts(LocalProjectLocation(project_path.resolve()))
 
 
 def test_reset_to_default_against_future_version_store_does_not_overwrite_or_crash(

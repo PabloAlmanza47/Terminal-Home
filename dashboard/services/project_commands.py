@@ -18,6 +18,7 @@ class CommandSource(str, Enum):
     NODE_TEST = "package.json test script"
     PYTEST = "pytest project indicator"
     DJANGO = "Django manage.py"
+    STATIC_HTML = "root index.html"
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +180,33 @@ def _has_pytest_indicator(project_path: Path) -> bool:
     )
 
 
+def _has_higher_level_indicator(project_path: Path) -> bool:
+    """Return whether a recognized non-static project indicator is present."""
+    return (
+        _is_file(project_path / "package.json")
+        or any(
+            _is_file(project_path / name)
+            for name in (
+                "pyproject.toml",
+                "requirements.txt",
+                "requirements-dev.txt",
+                "setup.cfg",
+                "setup.py",
+                "manage.py",
+                "pytest.ini",
+                "tox.ini",
+                ".python-version",
+                "global.json",
+            )
+        )
+        or any(
+            _is_file(candidate)
+            for pattern in ("*.sln", "*.slnx", "*.csproj", "*.fsproj", "*.vbproj")
+            for candidate in project_path.glob(pattern)
+        )
+    )
+
+
 def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
     """Detect dev/test commands from fixed root-level project indicators."""
     node = _detect_node_commands(project_path)
@@ -187,6 +215,14 @@ def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
 
     if development is None and _is_file(project_path / "manage.py"):
         development = DetectedCommand("python manage.py runserver", CommandSource.DJANGO)
+    if (
+        development is None
+        and _is_file(project_path / "index.html")
+        and not _has_higher_level_indicator(project_path)
+    ):
+        development = DetectedCommand(
+            "python3 -m http.server 8000", CommandSource.STATIC_HTML
+        )
     if test is None and _has_pytest_indicator(project_path):
         test = DetectedCommand("pytest", CommandSource.PYTEST)
     return DetectedProjectCommands(development=development, test=test)

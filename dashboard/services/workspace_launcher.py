@@ -23,6 +23,10 @@ from dashboard.models import (
 )
 from dashboard.models.settings import CodingAgent
 from dashboard.services import pane_commands, tmux
+from dashboard.services.pane_layout_store import (
+    load_pane_layouts_for_location,
+    update_pane_layouts_for_location,
+)
 from dashboard.services.project_commands import DetectedProjectCommands, detect_project_commands
 from dashboard.services.ssh import (
     SshInteractiveResult,
@@ -33,6 +37,31 @@ from dashboard.services.ssh import (
 
 class LaunchError(Exception):
     """Raised when a LaunchRequest cannot be turned into a running session."""
+
+
+def remember_live_workspace_layout(
+    workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner
+) -> None:
+    """Best-effort checkpoint of configured windows in a live workspace."""
+    try:
+        captured = tmux.capture_tmux_window_layouts(workspace.session_name, runner=runner)
+        configured_names = {window.window_name for window in workspace.windows}
+        captured = {
+            name: layout for name, layout in captured.items() if name in configured_names
+        }
+        update_pane_layouts_for_location(workspace.project_location, captured)
+    except Exception:
+        # Layouts are user preference state and must never block attachment.
+        return
+
+
+def _remember_if_session_exists(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
+    try:
+        if _session_exists(workspace.session_name, runner):
+            remember_live_workspace_layout(workspace, runner)
+    except Exception:
+        # A disappearing or unavailable session is equivalent to no checkpoint.
+        return
 
 
 def build_pane_plans(
@@ -104,35 +133,73 @@ def _build_create_and_attach(
 
     pane_plans = build_pane_plans(workspace)
     warnings = [plan.warning for plan in pane_plans.values() if plan.warning]
+    saved_window_layouts = load_pane_layouts_for_location(workspace.project_location)
 
     if runner is tmux.run_tmux_command:
-        tmux.create_workspace_session(workspace, pane_plans)
+        if saved_window_layouts:
+            tmux.create_workspace_session(
+                workspace, pane_plans, saved_window_layouts=saved_window_layouts
+            )
+        else:
+            tmux.create_workspace_session(workspace, pane_plans)
     else:
-        tmux.create_workspace_session(workspace, pane_plans, runner=runner)
+        if saved_window_layouts:
+            tmux.create_workspace_session(
+                workspace,
+                pane_plans,
+                runner=runner,
+                saved_window_layouts=saved_window_layouts,
+            )
+        else:
+            tmux.create_workspace_session(workspace, pane_plans, runner=runner)
 
     for warning in warnings:
         print(f"Note: {warning}", file=stream)
 
     if isinstance(workspace.project_location, LocalProjectLocation):
-        argv = tmux.attach_or_switch_argv(workspace.session_name)
-        tmux.exec_attach(argv)
+        _attach_local(workspace, runner)
     else:
-        _attach_remote(workspace.session_name, runner)
+        _attach_remote(workspace, runner)
 
 
-def _attach_remote(session_name: str, runner: tmux.TmuxCommandRunner) -> None:
+def _attach_local(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
+    argv = tmux.attach_or_switch_argv(workspace.session_name)
+    remember_live_workspace_layout(workspace, runner)
+    if len(argv) > 1 and argv[1] == "switch-client":
+        # switch-client transfers the current client and offers no observable
+        # detach lifecycle to this process, so only the pre-switch checkpoint exists.
+        tmux.exec_attach(argv)
+        return
+    try:
+        result = tmux.run_interactive_tmux(argv)
+    except tmux.TmuxCommandError as exc:
+        raise LaunchError(
+            f"Could not attach to tmux session '{workspace.session_name}': {exc}"
+        ) from exc
+    finally:
+        _remember_if_session_exists(workspace, runner)
+    if result.returncode != 0:
+        raise LaunchError(
+            f"Could not attach to tmux session '{workspace.session_name}': "
+            f"tmux exited with status {result.returncode}."
+        )
+
+
+def _attach_remote(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
     if not isinstance(runner, tmux.SshTmuxCommandRunner):
         raise LaunchError("SSH workspace did not resolve to an SSH tmux runner.")
 
+    remember_live_workspace_layout(workspace, runner)
     remote_command = " ".join(
         quote_remote_argument(argument)
-        for argument in ["tmux", "attach-session", "-t", session_name]
+        for argument in ["tmux", "attach-session", "-t", workspace.session_name]
     )
     result: SshInteractiveResult = run_interactive_ssh(
         runner.destination,
         remote_command,
         request_tty=True,
     )
+    _remember_if_session_exists(workspace, runner)
     if not result.succeeded:
         detail = result.error or (
             f"interactive SSH exited with status {result.status} (return code {result.returncode})"
@@ -182,10 +249,12 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
 
     if request.action is LaunchAction.ATTACH:
         if _session_exists(session_name, runner):
-            if request.workspace is None or runner is tmux.run_tmux_command:
+            if request.workspace is None:
                 tmux.exec_attach(tmux.attach_or_switch_argv(session_name))
+            elif isinstance(request.workspace.project_location, LocalProjectLocation):
+                _attach_local(request.workspace, runner)
             else:
-                _attach_remote(session_name, runner)
+                _attach_remote(request.workspace, runner)
             return
         if request.workspace is None:
             raise LaunchError(

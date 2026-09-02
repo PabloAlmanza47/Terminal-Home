@@ -165,6 +165,63 @@ def test_unknown_repository_is_informational(
     assert info.setup_actions == ()
 
 
+def test_plain_static_web_project_uses_python_http_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tools(monkeypatch, node=False)
+    (tmp_path / "index.html").write_text("<h1>Hello</h1>", encoding="utf-8")
+    (tmp_path / "style.css").touch()
+    (tmp_path / "script.js").touch()
+
+    info = inspect_project(tmp_path)
+
+    assert info.ecosystems == (Ecosystem.STATIC_WEB,)
+    assert info.commands[0].label == "Development"
+    assert info.commands[0].argv == ("python3", "-m", "http.server", "8000")
+    assert any(e.source == "index.html" for e in info.evidence)
+    assert any(
+        finding.level is FindingLevel.PASS and "Python 3 is available" in finding.message
+        for finding in info.findings
+    )
+    assert info.setup_actions == ()
+
+
+def test_static_web_requires_python3_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _tools(monkeypatch, node=False)
+    (tmp_path / "index.html").touch()
+
+    original_which = intelligence.shutil.which
+
+    def which(name: str) -> str | None:
+        return None if name == "python3" else original_which(name)
+
+    monkeypatch.setattr(intelligence.shutil, "which", which)
+    info = inspect_project(tmp_path)
+
+    assert any(
+        finding.level is FindingLevel.FAIL and "Python 3 is not available" in finding.message
+        for finding in info.findings
+    )
+
+
+@pytest.mark.parametrize("indicator", ["package.json", "pyproject.toml", "Demo.csproj"])
+def test_higher_level_project_is_not_static_web(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indicator: str
+) -> None:
+    _tools(monkeypatch)
+    (tmp_path / "index.html").touch()
+    if indicator == "package.json":
+        (tmp_path / indicator).write_text(json.dumps({"scripts": {}}), encoding="utf-8")
+    else:
+        (tmp_path / indicator).touch()
+
+    info = inspect_project(tmp_path)
+
+    assert Ecosystem.STATIC_WEB not in info.ecosystems
+
+
 def test_dotnet_solution_restore_and_ambiguous_projects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

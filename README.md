@@ -442,7 +442,11 @@ a marketplace are not supported.
   (including the chosen Textual theme, changed via the command palette)
   under `$XDG_CONFIG_HOME/terminal-home/settings.json`. Never inside the
   project directory. Writes use atomic replacement and retain the immediately
-  previous valid generation as `<filename>.bak`.
+  previous valid generation as `<filename>.bak`. `WorkspaceSpec` describes
+  desired, reusable workspace structure; remembered pane layouts are separate
+  per-project runtime/user preferences in
+  `$XDG_DATA_HOME/terminal-home/pane-layouts.json`. This first persistence
+  phase intentionally does not add a pane-layout management UI or command.
 - **tmux orchestration** — runs strictly *after* Textual exits
   (`dashboard/services/workspace_launcher.py`); Textual and tmux can't both
   own the terminal at once. Every window and pane is targeted by the stable
@@ -592,7 +596,7 @@ tests/                       Unit tests for models/ and services/, plus Pilot te
 | Git             | `lazygit`          | `git status` then a shell; or, if the project isn't a git repo yet, a plain shell |
 | File Tree       | `tree -C .`        | `find`-based listing, then a shell          |
 | Test Terminal   | detected Node `test` script, otherwise `pytest` for supported Python indicators | interactive shell titled "tests" |
-| Development Server | detected Node `dev`, then `start`; otherwise Django `python manage.py runserver` | interactive shell titled "server" |
+| Development Server | detected Node `dev`, then `start`; otherwise Django `python manage.py runserver`, then static HTML `python3 -m http.server 8000` | interactive shell titled "server" |
 | Blank Terminal  | (none — a plain shell)                                                         |
 | Custom Command  | the exact command you enter                                                     |
 
@@ -622,6 +626,11 @@ only for root-level pytest configuration in `pyproject.toml`, `pytest.ini`,
 Development Server supports only a root Django `manage.py` and runs
 `python manage.py runserver`; Flask, FastAPI, Uvicorn, Gunicorn, and generic
 module guessing are not detected.
+
+Plain static web projects are recognized when the root contains a regular
+`index.html` and no recognized Node, Python, or .NET project indicators. Their
+Development Server uses Python 3's `python3 -m http.server 8000`; no setup or
+dependency-install actions are proposed.
 
 In mixed Node/Python projects, Node `dev` or `start` wins over Django, and a
 non-placeholder Node `test` wins over pytest. Django or pytest is used when
@@ -734,3 +743,12 @@ The independent template store follows the same atomic-write and backup policy
 at `$XDG_DATA_HOME/terminal-home/templates.json`. A missing file means no user
 templates. Unsupported future template schemas are reported and never
 overwritten or recovered from an older backup.
+
+Remembered pane layouts use the independent
+`$XDG_DATA_HOME/terminal-home/pane-layouts.json` store. They describe learned
+tmux geometry for a project and window, not desired workspace structure:
+`WorkspaceSpec` remains the source of reusable windows and panes. Automatic
+capture and save are best-effort lifecycle checkpoints: known running sessions
+are captured before attachment, and normal external detaches are captured
+afterward. When Terminal Home is already inside tmux, `switch-client` only
+provides the pre-switch checkpoint. No global tmux hooks are installed.

@@ -224,6 +224,49 @@ def test_django_is_used_when_node_has_no_development_script(tmp_path: Path) -> N
     )
 
 
+def test_root_index_html_selects_static_server(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<h1>Hello</h1>", encoding="utf-8")
+    detected = detect_project_commands(tmp_path)
+    assert detected.development is not None
+    assert detected.development.command == "python3 -m http.server 8000"
+    assert detected.development.source is CommandSource.STATIC_HTML
+
+
+def test_nested_index_html_does_not_select_static_server(tmp_path: Path) -> None:
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested/index.html").touch()
+    assert detect_project_commands(tmp_path).development is None
+
+
+def test_symlinked_root_index_html_does_not_select_static_server(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-index.html"
+    outside.write_text("<h1>Outside</h1>", encoding="utf-8")
+    try:
+        (tmp_path / "index.html").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    assert detect_project_commands(tmp_path).development is None
+
+
+def test_node_dev_takes_precedence_over_static_server(tmp_path: Path) -> None:
+    (tmp_path / "index.html").touch()
+    _write_package(tmp_path, {"dev": "vite"})
+    detected = detect_project_commands(tmp_path)
+    assert detected.development is not None
+    assert detected.development.command == "npm run dev"
+    assert detected.development.source is CommandSource.NODE_DEV
+
+
+@pytest.mark.parametrize("indicator", ["manage.py", "pyproject.toml", "Demo.csproj"])
+def test_recognized_non_static_indicator_blocks_static_fallback(
+    tmp_path: Path, indicator: str
+) -> None:
+    (tmp_path / "index.html").touch()
+    (tmp_path / indicator).touch()
+    detected = detect_project_commands(tmp_path)
+    assert detected.development is None or detected.development.source is not CommandSource.STATIC_HTML
+
+
 def test_node_test_wins_over_pytest(tmp_path: Path) -> None:
     (tmp_path / "tests").mkdir()
     _write_package(tmp_path, {"test": "ignored"})

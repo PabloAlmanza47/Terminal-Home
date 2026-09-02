@@ -7,6 +7,7 @@ ever replaces the test process.
 from __future__ import annotations
 
 import io
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -126,7 +127,11 @@ def test_creates_session_and_attaches_when_outside_tmux(
         lambda name: ["tmux", "attach-session", "-t", name],
     )
     exec_calls = []
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: exec_calls.append(argv))
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: exec_calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
 
     execute_launch_request(_request(tmp_path))
 
@@ -166,13 +171,17 @@ def test_remote_create_and_recreate_use_one_runner_and_remote_working_directory(
 
     execute_launch_request(request)
 
-    assert [argv[1] for argv in fake_runner.calls] == [
+    expected_commands = [
         "has-session",
         "has-session",
         "new-session",
         "select-window",
         "select-pane",
+        "list-windows",
+        "has-session",
+        "list-windows",
     ]
+    assert [argv[1] for argv in fake_runner.calls] == expected_commands
     new_session = next(argv for argv in fake_runner.calls if argv[1] == "new-session")
     assert new_session[new_session.index("-c") + 1] == "/srv/Project With Spaces/$HOME"
     assert isinstance(request.workspace.project_location.remote_path, str)
@@ -317,7 +326,11 @@ def test_reports_pane_warnings_before_attaching(
         launcher_module.tmux, "create_workspace_session", lambda workspace, pane_plans: None
     )
     monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 0),
+    )
     monkeypatch.setattr(
         launcher_module.pane_commands,
         "plan_for_pane",
@@ -374,7 +387,11 @@ def test_attach_attaches_directly_when_session_is_running(
         launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name]
     )
     exec_calls = []
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: exec_calls.append(argv))
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: exec_calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
 
     execute_launch_request(_request(tmp_path, action=LaunchAction.ATTACH))
 
@@ -394,7 +411,11 @@ def test_attach_recreates_when_session_has_disappeared(
         lambda workspace, pane_plans: build_calls.append(workspace),
     )
     monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 0),
+    )
 
     execute_launch_request(_request(tmp_path, action=LaunchAction.ATTACH))
 
@@ -429,7 +450,11 @@ def test_attach_without_workspace_attaches_when_session_is_running(
         launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name]
     )
     exec_calls = []
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: exec_calls.append(argv))
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: exec_calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
 
     request = LaunchRequest(
         workspace=None, init_git=False, action=LaunchAction.ATTACH, session_name="orphan"
@@ -503,7 +528,11 @@ def test_running_attach_never_detects_project_commands(
     _assume_tmux_installed(monkeypatch)
     monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: True)
     monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 0),
+    )
     monkeypatch.setattr(
         launcher_module,
         "detect_project_commands",
@@ -524,7 +553,11 @@ def test_project_command_fallback_warning_is_nonfatal(
         launcher_module.tmux, "create_workspace_session", lambda workspace, plans: None
     )
     monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux"])
-    monkeypatch.setattr(launcher_module.tmux, "exec_attach", lambda argv: None)
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 0),
+    )
     out = io.StringIO()
 
     execute_launch_request(_request(tmp_path, _pane(PaneKind.DEV_SERVER)), out=out)

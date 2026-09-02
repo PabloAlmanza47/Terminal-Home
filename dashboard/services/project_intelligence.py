@@ -39,6 +39,7 @@ class Ecosystem(str, Enum):
     NODE = "Node.js"
     PYTHON = "Python"
     DOTNET = ".NET"
+    STATIC_WEB = "Static Web"
 
 
 class FindingLevel(str, Enum):
@@ -610,6 +611,28 @@ def inspect_project(project_path: Path) -> ProjectIntelligence:
                         (Evidence("obj/project.assets.json"),),
                     )
                 )
+
+    if not ecosystems and _file(root / "index.html"):
+        ecosystems.append(Ecosystem.STATIC_WEB)
+        evidence.append(Evidence("index.html"))
+        existing = detect_project_commands(root)
+        if existing.development:
+            commands.append(
+                InferredCommand(
+                    "Development",
+                    tuple(existing.development.command.split()),
+                    (Evidence(existing.development.source.value),),
+                )
+            )
+        python3 = shutil.which("python3")
+        findings.append(
+            ReadinessFinding(
+                FindingLevel.PASS if python3 else FindingLevel.FAIL,
+                f"Python 3 is {'available' if python3 else 'not available'}"
+                + (f" ({_version_command(python3) or python3})" if python3 else " on PATH"),
+                (Evidence("PATH python3"),),
+            )
+        )
 
     for source, target, ev in _env_mapping(root):
         findings.append(

@@ -31,6 +31,12 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
+from dashboard.services.pane_layout_store import (
+    PaneLayoutStoreError,
+    forget_pane_layouts_for_location,
+    load_pane_layouts_for_location,
+    save_pane_layouts_for_location,
+)
 from dashboard.services.project_launch import prepare_project_launch_for_selector
 from dashboard.services.project_selection import RegisteredRemoteProject
 from dashboard.services.projects import (
@@ -67,6 +73,7 @@ _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.SAVE_TEMPLATE: "Save as Template",
     ProjectAction.RESET: "Reset to Default Workspace",
     ProjectAction.FORGET: "Forget Saved Workspace",
+    ProjectAction.RESET_PANE_SIZES: "Reset Remembered Pane Sizes",
 }
 
 
@@ -275,6 +282,8 @@ class ProjectDetailScreen(Screen[None]):
             self._configure_workspace()
         elif button_id == _action_id(ProjectAction.EDIT):
             self._edit_workspace()
+        elif button_id == _action_id(ProjectAction.RESET_PANE_SIZES):
+            await self._reset_remembered_pane_sizes()
         elif button_id == _action_id(ProjectAction.SAVE_TEMPLATE):
             await self._save_as_template()
         elif button_id == _action_id(ProjectAction.RESET):
@@ -386,9 +395,18 @@ class ProjectDetailScreen(Screen[None]):
             LocalProjectLocation(status.canonical_path),
             status.saved_workspace.session_name,
         )
+        location = LocalProjectLocation(status.canonical_path)
+        previous_layouts = load_pane_layouts_for_location(location)
+        layouts_cleared = False
         try:
+            layouts_cleared = forget_pane_layouts_for_location(location)
             save_workspace(workspace)
-        except (OSError, WorkspaceStoreVersionError) as exc:
+        except (OSError, WorkspaceStoreVersionError, PaneLayoutStoreError) as exc:
+            if layouts_cleared and previous_layouts:
+                try:
+                    save_pane_layouts_for_location(location, previous_layouts)
+                except Exception:
+                    pass
             # Dismissing the confirm screen above already triggers
             # on_screen_resume's own refresh -- refresh again explicitly
             # and show the error last, so it's never clobbered by that
@@ -398,21 +416,54 @@ class ProjectDetailScreen(Screen[None]):
             return
         await self._refresh_status()
 
+    async def _reset_remembered_pane_sizes(self) -> None:
+        assert self.status is not None
+        status = self.status
+        if status.saved_workspace is None or not status.remembered_pane_layouts:
+            return
+        confirmed = await self.app.push_screen_wait(
+            ConfirmScreen(
+                "Reset this project's remembered pane sizes?\n"
+                "The saved workspace and any running tmux session are not affected.",
+                confirm_label="Reset",
+            )
+        )
+        if not confirmed:
+            return
+        try:
+            forget_pane_layouts_for_location(LocalProjectLocation(status.canonical_path))
+        except (OSError, PaneLayoutStoreError) as exc:
+            await self._refresh_status()
+            self._show_error(str(exc))
+            return
+        await self._refresh_status()
+        self._show_error("Remembered pane sizes reset. They will apply on the next recreation.")
+
     async def _forget_workspace(self) -> None:
         assert self.status is not None
         status = self.status
         confirmed = await self.app.push_screen_wait(
             ConfirmScreen(
                 "Forget this project's saved workspace metadata?\n"
-                "The project folder, git history, and any tmux session are not affected.",
+                "Remembered pane sizes will also be removed; project files and any "
+                "tmux session are not affected.",
                 confirm_label="Forget",
             )
         )
         if not confirmed:
             return
+        location = LocalProjectLocation(status.canonical_path)
+        previous_layouts = load_pane_layouts_for_location(location)
+        layouts_cleared = False
         try:
+            layouts_cleared = forget_pane_layouts_for_location(location)
             forget_workspace(status.canonical_path)
-        except (OSError, WorkspaceStoreVersionError) as exc:
+        except (OSError, WorkspaceStoreVersionError, PaneLayoutStoreError) as exc:
+            if layouts_cleared and previous_layouts:
+                try:
+                    save_pane_layouts_for_location(location, previous_layouts)
+                except Exception:
+                    pass
             # See _reset_to_default: refresh explicitly, then show the
             # error last, so it isn't clobbered by on_screen_resume's own
             # refresh (triggered by dismissing the confirm screen above).

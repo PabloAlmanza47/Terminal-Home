@@ -25,10 +25,12 @@ from typing import Literal
 from dashboard.models import LocalProjectLocation, SshProjectLocation, WindowSpec, WorkspaceSpec
 from dashboard.models.layout import tmux_layout_for_pane_count
 from dashboard.services.pane_commands import PaneLaunchPlan
+from dashboard.services.pane_layout_store import PaneLayout
 from dashboard.services.ssh import SshCommandResult, quote_remote_argument, run_ssh_command
 from dashboard.services.ssh_host_store import get_ssh_host
 
 _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t#{session_attached}"
+_WINDOW_LAYOUT_FORMAT = "#{window_name}\t#{window_panes}\t#{window_layout}"
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
@@ -44,6 +46,43 @@ class TmuxSession:
     windows: int
     created: str
     attached: bool
+
+
+def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
+    """Parse tmux's tab-separated window layout report, skipping bad rows."""
+    layouts: dict[str, PaneLayout] = {}
+    ambiguous: set[str] = set()
+    for line in output.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 3:
+            continue
+        name, pane_count, layout = fields
+        try:
+            parsed_count = int(pane_count)
+            parsed = PaneLayout(name, parsed_count, layout)
+        except (TypeError, ValueError):
+            continue
+        if name in layouts or name in ambiguous:
+            # Two windows with one name cannot be associated safely.
+            ambiguous.add(name)
+            layouts.pop(name, None)
+            continue
+        layouts[name] = parsed
+    return layouts
+
+
+def capture_tmux_window_layouts(
+    session_name: str, *, runner: TmuxCommandRunner | None = None
+) -> dict[str, PaneLayout]:
+    """Capture current layouts by window name.
+
+    A failed tmux command raises ``TmuxCommandError``. Individual malformed
+    output rows are ignored so a partial or stale report cannot affect other
+    state.
+    """
+    argv = ["tmux", "list-windows", "-t", session_name, "-F", _WINDOW_LAYOUT_FORMAT]
+    result = _run_step(runner or run_tmux_command, argv)
+    return _parse_window_layouts(result.stdout)
 
 
 class TmuxCommandError(Exception):
@@ -408,6 +447,7 @@ def _create_window_panes(
     first_pane_id: str,
     project_dir: str,
     pane_plans: Mapping[tuple[str, int], PaneLaunchPlan],
+    saved_window_layouts: Mapping[str, PaneLayout] | None = None,
 ) -> list[str]:
     """Split *window_id* out to its full pane count, apply its layout, then
     apply each pane's title/startup command -- by the pane id tmux reported
@@ -421,9 +461,20 @@ def _create_window_panes(
         result = _run_step(runner, argv)
         pane_ids.append(_parse_pane_capture(result, argv))
 
-    layout = tmux_layout_for_pane_count(len(window.panes))
+    default_layout = tmux_layout_for_pane_count(len(window.panes))
+    remembered = (saved_window_layouts or {}).get(window.window_name)
+    layout = (
+        remembered.tmux_layout
+        if remembered is not None and remembered.pane_count == len(window.panes)
+        else default_layout
+    )
     if layout is not None:
-        _run_step(runner, _select_layout_argv(window_id, layout))
+        try:
+            _run_step(runner, _select_layout_argv(window_id, layout))
+        except TmuxCommandError:
+            if layout == default_layout or default_layout is None:
+                raise
+            _run_step(runner, _select_layout_argv(window_id, default_layout))
 
     for pane_index, pane_id in enumerate(pane_ids):
         plan = pane_plans.get((window.window_name, pane_index))
@@ -442,6 +493,7 @@ def create_workspace_session(
     pane_plans: Mapping[tuple[str, int], PaneLaunchPlan],
     *,
     runner: TmuxCommandRunner = run_tmux_command,
+    saved_window_layouts: Mapping[str, PaneLayout] | None = None,
 ) -> None:
     """Create *workspace* as a real tmux session by running each tmux
     command in order via *runner*.
@@ -472,14 +524,28 @@ def create_workspace_session(
         first_window_id, first_pane_id = _parse_create_capture(result, argv)
 
         first_window_pane_ids = _create_window_panes(
-            runner, first_window, first_window_id, first_pane_id, project_dir, pane_plans
+            runner,
+            first_window,
+            first_window_id,
+            first_pane_id,
+            project_dir,
+            pane_plans,
+            saved_window_layouts,
         )
 
         for window in workspace.windows[1:]:
             argv = _new_window_argv(session, window.window_name, project_dir)
             result = _run_step(runner, argv)
             window_id, pane_id = _parse_create_capture(result, argv)
-            _create_window_panes(runner, window, window_id, pane_id, project_dir, pane_plans)
+            _create_window_panes(
+                runner,
+                window,
+                window_id,
+                pane_id,
+                project_dir,
+                pane_plans,
+                saved_window_layouts,
+            )
 
         _run_step(runner, _select_window_argv(first_window_id))
         _run_step(runner, _select_pane_argv(first_window_pane_ids[0]))
@@ -511,3 +577,11 @@ def exec_attach(argv: list[str]) -> None:
     orchestration layer, after the Textual app has fully exited.
     """
     os.execvp(argv[0], argv)  # noqa: S606
+
+
+def run_interactive_tmux(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run an external tmux attach while inheriting the terminal streams."""
+    try:
+        return subprocess.run(argv, stdin=None, stdout=None, stderr=None, text=True)
+    except OSError as exc:
+        raise TmuxCommandError(f"Could not start interactive tmux: {exc}") from exc
