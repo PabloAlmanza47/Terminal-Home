@@ -17,6 +17,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Footer, Static
 
 from dashboard.models import (
@@ -32,6 +33,7 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
+from dashboard.services.git import GitStatus, load_status
 from dashboard.services.pane_layout_store import (
     PaneLayoutStoreError,
     forget_pane_layouts_for_location,
@@ -117,6 +119,37 @@ def _agent_line(status: ProjectStatus) -> str | None:
     return f"Agent:          Codex{count}  ({labels.get(selected.status.value, 'Unknown')})"
 
 
+def format_git_summary(status: GitStatus | None) -> str:
+    if status is None:
+        return "Loading Git status..."
+    if status.error and status.is_repo is None:
+        return f"Git status unavailable: {status.error}"
+    if status.is_repo is False:
+        return "Not a Git repository"
+    branch = "(detached HEAD)" if status.detached else (status.branch or "(unknown)")
+    if status.clean:
+        return f"Branch        {branch}\nWorking Tree  Clean"
+    return (
+        f"Branch        {branch}\n"
+        f"Changes       {len(status.changes)} files\n"
+        f"Staged        {status.staged_count}\n"
+        f"Modified      {status.modified_count}\n"
+        f"Untracked     {status.untracked_count}"
+    )
+
+
+def format_git_files(status: GitStatus | None) -> str:
+    if status is None or not status.changes:
+        return ""
+    lines = ["Changed Files"]
+    for change in status.changes:
+        path = change.path
+        if change.old_path is not None:
+            path = f"{change.old_path} → {change.path}"
+        lines.append(f"  {change.indicator:<2} {path}")
+    return "\n".join(lines)
+
+
 class ProjectDetailScreen(Screen[None]):
     """Read the project's status, then offer only the actions that are
     safe to take from that status.
@@ -144,6 +177,10 @@ class ProjectDetailScreen(Screen[None]):
             get_ssh_host(remote_project.location.host_id) if remote_project is not None else None
         )
         self._feedback = ""
+        self._git_status: GitStatus | None = None
+        self._git_refreshing = False
+        self._git_timer: Timer | None = None
+        self._git_rendered: tuple[str, str] | None = None
 
     def compose(self) -> ComposeResult:
         status = self.status
@@ -159,7 +196,9 @@ class ProjectDetailScreen(Screen[None]):
             with VerticalScroll(classes="panel"):
                 yield Static(f"Project: {status.project.name}", id="screen-title")
                 yield Static(f"Path:           {status.canonical_path}", id="detail-path")
-                yield Static(_git_line(status), id="detail-git")
+                yield Static("Git", id="detail-git-heading", classes="panel-heading")
+                yield Static(format_git_summary(self._git_status), id="detail-git")
+                yield Static(format_git_files(self._git_status), id="detail-git-files")
                 yield Static(_workspace_line(status), id="detail-workspace")
                 yield Static(_session_line(status), id="detail-session")
                 agent_line = _agent_line(status)
@@ -225,7 +264,12 @@ class ProjectDetailScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#project-actions", KeyboardActionList).focus()
+        actions = self.query("#project-actions")
+        if actions:
+            actions.first().focus()
+        if self.status is not None:
+            self._git_timer = self.set_interval(1.75, self._start_git_refresh)
+            self._start_git_refresh()
 
     def _compose_remote(self, project: RegisteredRemoteProject) -> ComposeResult:
         with Container(classes="screen-root"):
@@ -259,10 +303,46 @@ class ProjectDetailScreen(Screen[None]):
                 )
 
     async def on_screen_resume(self) -> None:
+        if self._git_timer is not None:
+            self._git_timer.resume()
+        self._start_git_refresh()
         await self._refresh_status()
 
+    def on_screen_suspend(self) -> None:
+        if self._git_timer is not None:
+            self._git_timer.pause()
+
     async def action_refresh(self) -> None:
+        self._start_git_refresh()
         await self._refresh_status()
+
+    def _start_git_refresh(self) -> None:
+        if self.status is None or self._git_refreshing:
+            return
+        self._git_refreshing = True
+        # The screen also uses workers for actions such as saving templates;
+        # this refresh is independently guarded by _git_refreshing and must
+        # not cancel those action workers.
+        self.run_worker(self._load_git_status, thread=True)
+
+    def _load_git_status(self) -> None:
+        assert self.status is not None
+        result = load_status(self.status.canonical_path)
+        self.app.call_from_thread(self._on_git_status, result)
+
+    def _on_git_status(self, result: GitStatus) -> None:
+        self._git_refreshing = False
+        if result.error and self._git_status is not None:
+            return
+        summary = format_git_summary(result)
+        files = format_git_files(result)
+        if self._git_rendered == (summary, files):
+            self._git_status = result
+            return
+        self._git_status = result
+        self._git_rendered = (summary, files)
+        self.query_one("#detail-git", Static).update(summary)
+        self.query_one("#detail-git-files", Static).update(files)
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
