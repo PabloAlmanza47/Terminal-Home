@@ -16,7 +16,7 @@ from datetime import datetime as RealDateTime
 from pathlib import Path
 
 import pytest
-from textual.widgets import OptionList
+from textual.widgets import Input, OptionList
 
 import dashboard.screens.home as home_module
 import dashboard.services.projects as projects_module
@@ -183,6 +183,79 @@ def test_default_focus_selects_first_recent_project_and_enter_opens_it(
     focused_id, screen_name = _run(scenario())
     assert focused_id == _project_id(projects_root / "alpha")
     assert screen_name == "ProjectDetailScreen"
+
+
+def test_project_search_filters_case_insensitively_and_escape_restores_focus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "terminal-home").mkdir()
+    (projects_root / "SHPE-Connect").mkdir()
+
+    async def scenario() -> tuple[str, str | None, bool]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            await pilot.press("/")
+            search = app.screen.query_one("#project-search", Input)
+            await pilot.press("s", "h", "p", "e")
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            focused_id = recent.get_option_at_index(recent.highlighted or 0).id
+            query = search.value
+            await pilot.press("escape")
+            await pilot.pause()
+            return query, focused_id, app.focused is recent
+
+    query, focused_id, focus_restored = _run(scenario())
+    assert query == "shpe"
+    assert focused_id == _project_id(projects_root / "SHPE-Connect")
+    assert focus_restored is True
+
+
+def test_project_search_enter_opens_filtered_project_and_empty_state_is_compact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "CSCE-331-Project-1").mkdir()
+
+    async def scenario() -> tuple[str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            await pilot.press("/")
+            await pilot.press("3", "3", "1")
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            selected = str(recent.get_option_at_index(recent.highlighted or 0).prompt)
+            await pilot.press("enter")
+            await pilot.pause()
+            opened = type(app.screen).__name__
+            return selected, opened
+
+    selected, opened = _run(scenario())
+    assert "CSCE-331-Project-1" in selected
+    assert opened == "ProjectDetailScreen"
+
+
+def test_project_search_shows_no_match_without_leaving_search_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "terminal-home").mkdir()
+
+    async def scenario() -> tuple[str, bool]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            await pilot.press("/")
+            await pilot.press("z", "z", "z")
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            return _option_labels(recent)[0], app.focused is app.screen.query_one(
+                "#project-search", Input
+            )
+
+    label, search_focused = _run(scenario())
+    assert label.strip() == 'No projects match "zzz"'
+    assert search_focused is True
 
 
 # --- Recent projects -----------------------------------------------------------

@@ -154,6 +154,9 @@ class TerminalHomeApp(App[AppResult]):
     def action_focus_search(self) -> None:
         if self._editing():
             return
+        if isinstance(self.screen, HomeScreen):
+            self.screen.action_focus_project_search()
+            return
         for widget in self.screen.query(Input):
             widget.focus()
             return

@@ -19,7 +19,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.art import artwork_for_size
@@ -193,6 +193,32 @@ def format_system_summary(info: SystemInfo, project_count: int, session_count: i
     )
 
 
+def filter_project_statuses(
+    statuses: list[ProjectStatus], query: str
+) -> list[ProjectStatus]:
+    """Return in-memory project matches with predictable name-first ranking."""
+    needle = query.strip().casefold()
+    if not needle:
+        return list(statuses)
+
+    matches: list[tuple[int, int, ProjectStatus]] = []
+    for index, status in enumerate(statuses):
+        name = status.project.name.casefold()
+        path = str(status.canonical_path).casefold()
+        if name == needle:
+            rank = 0
+        elif name.startswith(needle):
+            rank = 1
+        elif needle in name:
+            rank = 2
+        elif needle in path:
+            rank = 3
+        else:
+            continue
+        matches.append((rank, index, status))
+    return [status for _, _, status in sorted(matches, key=lambda item: (item[0], item[1]))]
+
+
 class HomeScreen(Screen[None]):
     """First screen shown on launch; every other screen is reached from here."""
 
@@ -200,6 +226,8 @@ class HomeScreen(Screen[None]):
         ("q", "quit_app", "Quit"),
         ("f5", "refresh", "Refresh"),
         ("a", "open_agent", "Open Agent"),
+        ("/", "focus_project_search", "Search projects"),
+        ("escape", "close_project_search", "Close Search"),
         ("1", "select_menu(0)", "Continue Project"),
         ("2", "select_menu(1)", "New Project"),
         ("3", "select_menu(2)", "Resume tmux"),
@@ -223,6 +251,8 @@ class HomeScreen(Screen[None]):
         self._active_section = "actions"
         self._system_summary = "Loading system summary..."
         self._initial_focus_pending = True
+        self._project_search_active = False
+        self._preferred_project_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="home", classes="screen-root"):
@@ -234,6 +264,10 @@ class HomeScreen(Screen[None]):
                     with Vertical(id="panel-recent", classes="home-panel"):
                         yield Static(
                             "▸ Projects", id="heading-recent", classes="panel-heading"
+                        )
+                        yield Input(
+                            placeholder="Search: type a project name...",
+                            id="project-search",
                         )
                         yield Static("", id="recent-project-header", classes="table-header")
                         yield OptionList(
@@ -348,6 +382,11 @@ class HomeScreen(Screen[None]):
         self._update_footer(section)
 
     def _update_footer(self, section: str) -> None:
+        if self._project_search_active:
+            self.query_one("#keyboard-footer", Static).update(
+                "↑↓ Navigate   Enter Open   Esc Close Search"
+            )
+            return
         hints = {
             "actions": "↑↓ Navigate   Enter Select   ←→ Sections   F5 Refresh   ? Help   q Quit",
             "recent": (
@@ -368,7 +407,81 @@ class HomeScreen(Screen[None]):
         if section is not None:
             self._set_active_section(section)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "project-search":
+            self._populate_recent_projects(self._last_statuses)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "project-search":
+            return
+        recent = self.query_one("#recent-projects-list", OptionList)
+        if recent.highlighted is not None:
+            self._handle_recent_project_selection(
+                recent.get_option_at_index(recent.highlighted).id
+            )
+
+    def action_focus_project_search(self) -> None:
+        if self._project_search_active:
+            return
+        self._preferred_project_id = self._selected_recent_project_id()
+        self._project_search_active = True
+        search = self.query_one("#project-search", Input)
+        search.display = True
+        search.value = ""
+        self._set_active_section("recent")
+        search.focus()
+
+    def action_close_project_search(self) -> None:
+        if self._project_search_active:
+            self._close_project_search()
+
+    def _close_project_search(self) -> None:
+        search = self.query_one("#project-search", Input)
+        self._project_search_active = False
+        search.value = ""
+        search.display = False
+        self._populate_recent_projects(self._last_statuses)
+        recent = self.query_one("#recent-projects-list", OptionList)
+        recent.focus()
+        self._set_active_section("recent")
+
+    def _selected_recent_project_id(self) -> str | None:
+        recent = self.query_one("#recent-projects-list", OptionList)
+        if recent.highlighted is None:
+            return None
+        option = recent.get_option_at_index(recent.highlighted)
+        return option.id if option.id in self._project_lookup else None
+
+    def _move_search_selection(self, direction: int) -> None:
+        recent = self.query_one("#recent-projects-list", OptionList)
+        selectable = [
+            index
+            for index in range(recent.option_count)
+            if not recent.get_option_at_index(index).disabled
+        ]
+        if not selectable:
+            return
+        current = recent.highlighted
+        if current not in selectable:
+            target = selectable[0 if direction > 0 else -1]
+        else:
+            position = selectable.index(current)
+            target = selectable[(position + direction) % len(selectable)]
+        recent.highlighted = target
+        recent.focus()
+
     def on_key(self, event: events.Key) -> None:
+        if self._project_search_active and isinstance(self.focused, Input):
+            if event.key == "escape":
+                self._close_project_search()
+                event.stop()
+                return
+            if event.key in {"up", "down"}:
+                self._move_search_selection(1 if event.key == "down" else -1)
+                event.stop()
+                return
+            # Input owns horizontal cursor movement while search is active.
+            return
         if event.key not in {"left", "right"}:
             return
         order = ["actions", "recent", "sessions"]
@@ -460,27 +573,37 @@ class HomeScreen(Screen[None]):
     def _populate_recent_projects(self, statuses: list[ProjectStatus]) -> None:
         option_list = self.query_one("#recent-projects-list", OptionList)
         header = self.query_one("#recent-project-header", Static)
+        selected_id = self._selected_recent_project_id() or self._preferred_project_id
         option_list.clear_options()
         header.update("")
-        self._project_lookup = {project_option_id(status): status.project for status in statuses}
-        self._agent_lookup = {
-            project_option_id(status): status
-            for status in statuses
-            if status.agent_sessions
-        }
 
         if self._last_scan_warning:
             option_list.add_option(Option(f"Warning: {self._last_scan_warning}", disabled=True))
 
-        if not statuses:
-            option_list.add_option(
-                Option("No projects yet in the configured project roots", disabled=True)
-            )
-            option_list.add_option(Option("Create New Project", id=_CREATE_PROJECT_FROM_EMPTY))
+        ordered = sorted(statuses, key=lambda s: s.last_modified or datetime.min, reverse=True)
+        query = (
+            self.query_one("#project-search", Input).value if self._project_search_active else ""
+        )
+        matches = filter_project_statuses(ordered, query)
+        visible = matches if self._project_search_active else matches[:_MAX_RECENT_PROJECTS]
+        if not visible:
+            if self._project_search_active:
+                option_list.add_option(
+                    Option(f'No projects match "{query.strip()}"', disabled=True)
+                )
+            elif not statuses:
+                option_list.add_option(
+                    Option("No projects yet in the configured project roots", disabled=True)
+                )
+                option_list.add_option(Option("Create New Project", id=_CREATE_PROJECT_FROM_EMPTY))
             return
 
-        recent = sorted(statuses, key=lambda s: s.last_modified or datetime.min, reverse=True)
-        visible = recent[:_MAX_RECENT_PROJECTS]
+        self._project_lookup = {project_option_id(status): status.project for status in visible}
+        self._agent_lookup = {
+            project_option_id(status): status
+            for status in visible
+            if status.agent_sessions
+        }
         # Disambiguated against only what's actually shown together -- two
         # same-named projects both landing in the visible top N get a path
         # suffix; a uniquely-named project never does, even if some other
@@ -512,6 +635,22 @@ class HomeScreen(Screen[None]):
                     id=project_option_id(status),
                 )
             )
+        preferred_index = next(
+            (
+                index
+                for index in range(option_list.option_count)
+                if option_list.get_option_at_index(index).id == selected_id
+            ),
+            next(
+                (
+                    index
+                    for index in range(option_list.option_count)
+                    if not option_list.get_option_at_index(index).disabled
+                ),
+                None,
+            ),
+        )
+        option_list.highlighted = preferred_index
         option_list.add_option(Option("View All Projects", id=_VIEW_ALL_PROJECTS))
 
     def _populate_active_sessions(

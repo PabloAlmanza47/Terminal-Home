@@ -214,6 +214,18 @@ OptionList {
     margin: 0;
 }
 
+#project-search {
+    display: none;
+    height: 3;
+    margin: 0;
+    border: none;
+    padding: 0 1;
+}
+
+#project-search:focus {
+    border: none;
+}
+
 #home-dashboard OptionList > .option-list--option-highlighted {
     color: #72d7ff;
     background: transparent;
