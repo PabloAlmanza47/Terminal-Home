@@ -18,7 +18,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Footer, Static
+from textual.widgets import Static
 
 from dashboard.models import (
     AgentDeckAttachRequest,
@@ -33,6 +33,7 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
+from dashboard.services.activity import codex_status, server_status, workspace_status
 from dashboard.services.git import GitStatus, load_status
 from dashboard.services.pane_layout_store import (
     PaneLayoutStoreError,
@@ -119,6 +120,18 @@ def _agent_line(status: ProjectStatus) -> str | None:
     return f"Agent:          Codex{count}  ({labels.get(selected.status.value, 'Unknown')})"
 
 
+def format_activity_block(status: ProjectStatus) -> str:
+    workspace = workspace_status(status)
+    server = server_status(status)
+    agent, count = codex_status(status)
+    agent_label = f"({count}) {agent.label}" if count > 1 else agent.label
+    return "\n".join(
+        [f"Workspace  {workspace.glyph} {workspace.label}",
+         f"Server     {server.glyph} {server.label}",
+         f"Codex      {agent.glyph} {agent_label}"]
+    )
+
+
 def format_git_summary(status: GitStatus | None) -> str:
     if status is None:
         return "Loading Git status..."
@@ -128,13 +141,12 @@ def format_git_summary(status: GitStatus | None) -> str:
         return "Not a Git repository"
     branch = "(detached HEAD)" if status.detached else (status.branch or "(unknown)")
     if status.clean:
-        return f"Branch        {branch}\nWorking Tree  Clean"
+        return f"{branch} · Clean"
+    change_word = "change" if len(status.changes) == 1 else "changes"
     return (
-        f"Branch        {branch}\n"
-        f"Changes       {len(status.changes)} files\n"
-        f"Staged        {status.staged_count}\n"
-        f"Modified      {status.modified_count}\n"
-        f"Untracked     {status.untracked_count}"
+        f"{branch} · {len(status.changes)} {change_word}\n"
+        f"Staged {status.staged_count}   Modified {status.modified_count}   "
+        f"Untracked {status.untracked_count}"
     )
 
 
@@ -158,6 +170,7 @@ class ProjectDetailScreen(Screen[None]):
     BINDINGS = [
         ("escape", "go_back", "Back"),
         ("f5", "refresh", "Refresh"),
+        ("a", "open_agent", "Open Agent"),
     ]
 
     def __init__(self, project: Project | RegisteredRemoteProject) -> None:
@@ -189,21 +202,29 @@ class ProjectDetailScreen(Screen[None]):
             assert self.remote_project is not None
             project = self.remote_project
             yield from self._compose_remote(project)
-            yield Footer()
+            yield Static(
+                "↑↓ Navigate   Enter Select   a Agent   Esc Back   F5 Refresh   ? Help   q Quit",
+                id="detail-footer",
+            )
             return
 
-        with Container(classes="screen-root"):
+        with Container(classes="screen-root project-detail-root"):
             with VerticalScroll(classes="panel"):
-                yield Static(f"Project: {status.project.name}", id="screen-title")
-                yield Static(f"Path:           {status.canonical_path}", id="detail-path")
+                yield Static(status.project.name, id="screen-title")
+                yield Static(format_activity_block(status), id="detail-activity")
                 yield Static("Git", id="detail-git-heading", classes="panel-heading")
                 yield Static(format_git_summary(self._git_status), id="detail-git")
                 yield Static(format_git_files(self._git_status), id="detail-git-files")
+                yield Static(
+                    "Workspace", id="detail-workspace-heading", classes="panel-heading"
+                )
                 yield Static(_workspace_line(status), id="detail-workspace")
                 yield Static(_session_line(status), id="detail-session")
-                agent_line = _agent_line(status)
-                if agent_line is not None:
-                    yield Static(agent_line, id="detail-agent")
+                yield Static(
+                    f"Path: {status.canonical_path}",
+                    id="detail-path",
+                    classes="detail-secondary",
+                )
 
                 if not status.project_dir_exists:
                     yield Static(
@@ -261,15 +282,24 @@ class ProjectDetailScreen(Screen[None]):
                         ),
                         ActionItem("back-to-list", "Back to Project List"), id="project-actions"
                     )
-        yield Footer()
+        yield Static(
+            "↑↓ Navigate   Enter Select   a Agent   Esc Back   F5 Refresh   ? Help   q Quit",
+            id="detail-footer",
+        )
 
     def on_mount(self) -> None:
         actions = self.query("#project-actions")
         if actions:
             actions.first().focus()
+        self.call_after_refresh(self._reset_scroll_position)
         if self.status is not None:
             self._git_timer = self.set_interval(1.75, self._start_git_refresh)
             self._start_git_refresh()
+
+    def _reset_scroll_position(self) -> None:
+        panel = self.query(".project-detail-root > .panel")
+        if panel:
+            panel.first().scroll_home(animate=False)
 
     def _compose_remote(self, project: RegisteredRemoteProject) -> ComposeResult:
         with Container(classes="screen-root"):

@@ -34,7 +34,7 @@ def _status(project: Project) -> ProjectStatus:
 
 def test_project_detail_git_summary_for_clean_repository() -> None:
     rendered = format_git_summary(GitStatus(True, "main", False))
-    assert rendered == "Branch        main\nWorking Tree  Clean"
+    assert rendered == "main · Clean"
 
 
 def test_project_detail_git_summary_and_files_for_dirty_repository() -> None:
@@ -52,9 +52,9 @@ def test_project_detail_git_summary_and_files_for_dirty_repository() -> None:
     )
     summary = format_git_summary(status)
     files = format_git_files(status)
-    assert "Changes       2 files" in summary
-    assert "Modified      1" in summary
-    assert "Untracked     1" in summary
+    assert "main · 2 changes" in summary
+    assert "Modified 1" in summary
+    assert "Untracked 1" in summary
     assert "  .M changed.py" in files
     assert "  ?  new.py" in files
 
@@ -102,5 +102,5 @@ def test_project_detail_refresh_updates_git_state_without_recomposing(
 
     first, second, files = asyncio.run(owned())
     assert "Clean" in first
-    assert "Changes       1 file" in second
+    assert "main · 1 change" in second
     assert "new.py" in files

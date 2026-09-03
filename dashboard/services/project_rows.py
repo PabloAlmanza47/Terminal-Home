@@ -22,6 +22,81 @@ class RecentProjectRow:
     detail: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ActivityProjectRow:
+    name: str
+    workspace: str
+    server: str
+    codex: str
+
+
+def _compact_activity_status(value: str) -> str:
+    return value.replace("Not Configured", "N/A")
+
+
+def format_activity_table_header(
+    width: int, rows: list[ActivityProjectRow] | None = None
+) -> str:
+    """Return the aligned, non-selectable header for the Home activity table."""
+    return format_activity_table(
+        [ActivityProjectRow("Project", "Workspace", "Server", "Codex")],
+        width,
+        layout_rows=rows,
+    )[0]
+
+
+def format_activity_table(
+    rows: list[ActivityProjectRow],
+    width: int,
+    *,
+    layout_rows: list[ActivityProjectRow] | None = None,
+) -> list[str]:
+    """Format compact project activity rows, truncating names before statuses."""
+    width = max(1, width)
+    gap = 2
+    measured_rows = [*rows, *(layout_rows or [])]
+    columns = [
+        [row.name for row in measured_rows] + ["Project"],
+        [row.workspace for row in measured_rows] + ["Workspace"],
+        [row.server for row in measured_rows] + ["Server"],
+        [row.codex for row in measured_rows] + ["Codex"],
+    ]
+    natural = [max(cell_len(value) for value in column) for column in columns]
+    # Status columns are deliberately stable so every row scans vertically.
+    natural[1:] = [max(value, minimum) for value, minimum in zip(natural[1:], (9, 9, 9))]
+    # Keep the status columns close to the project names on wide terminals.
+    # The table should remain a compact scan aid rather than stretching across
+    # the whole panel just because extra width is available.
+    name_width = min(28, max(8, width - sum(natural[1:]) - gap * 3))
+    if name_width + sum(natural[1:]) + gap * 3 > width:
+        name_width = max(4, width - sum(natural[1:]) - gap * 3)
+
+    def fit(value: str, limit: int) -> str:
+        if cell_len(value) <= limit:
+            return value
+        if limit <= 1:
+            return "…"
+        left_width = max(1, (limit - 1) // 3)
+        right_width = limit - left_width - 1
+        return f"{value[:left_width]}…{value[-right_width:]}"
+
+    result: list[str] = []
+    for row in rows:
+        values = [
+            row.name,
+            _compact_activity_status(row.workspace),
+            _compact_activity_status(row.server),
+            _compact_activity_status(row.codex),
+        ]
+        values[0] = fit(values[0], name_width)
+        result.append(
+            f"{values[0].ljust(name_width)}{' ' * gap}"
+            f"{values[1].ljust(natural[1])}{' ' * gap}"
+            f"{values[2].ljust(natural[2])}{' ' * gap}{values[3]}".rstrip()
+        )
+    return result
+
+
 def project_row_width(available_width: int, *, leading_indent: int = 0) -> int:
     """Return label width from the OptionList content region.
 

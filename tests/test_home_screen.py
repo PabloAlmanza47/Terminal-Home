@@ -25,6 +25,11 @@ from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
 from dashboard.services.agent_deck import AgentDeckSession, AgentDeckSnapshot, AgentStatus
+from dashboard.services.project_rows import (
+    ActivityProjectRow,
+    format_activity_table,
+    format_activity_table_header,
+)
 from dashboard.services.projects import (
     Project,
     build_launch_request,
@@ -99,6 +104,37 @@ def _option_ids(option_list: OptionList) -> list[str | None]:
     return [option_list.get_option_at_index(i).id for i in range(option_list.option_count)]
 
 
+def test_activity_table_keeps_status_columns_grouped_and_truncates_names() -> None:
+    rows = [
+        ActivityProjectRow(
+            "PabloAlmanza.github.io-with-a-long-project-name",
+            "● Running",
+            "● Running",
+            "◐ Waiting",
+        ),
+        ActivityProjectRow("dotfiles", "● Running", "— N/A", "● Working"),
+    ]
+
+    rendered = format_activity_table(rows, 120)
+
+    assert "…" in rendered[0]
+    assert rendered[0].index("● Running") == rendered[1].index("● Running")
+    assert rendered[0].index("● Running") < 40
+
+
+def test_activity_table_header_uses_data_row_column_widths() -> None:
+    rows = [
+        ActivityProjectRow("demo", "● Running", "— N/A", "— No Agent"),
+    ]
+
+    header = format_activity_table_header(120, rows)
+    rendered = format_activity_table(rows, 120)[0]
+
+    assert header.index("Workspace") == rendered.index("● Running")
+    assert header.index("Server") == rendered.index("— N/A")
+    assert header.index("Codex") == rendered.index("— No Agent")
+
+
 def _project_id(path: Path) -> str:
     """The stable option id a discovered project at *path* gets --
     canonical-path-derived, matching dashboard.services.projects.
@@ -110,7 +146,9 @@ def _project_id(path: Path) -> str:
 # --- Default focus -----------------------------------------------------------
 
 
-def test_default_focus_is_continue_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_focus_falls_back_to_actions_without_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _isolate(monkeypatch, tmp_path)
 
     async def scenario() -> tuple[int | None, bool]:
@@ -123,6 +161,28 @@ def test_default_focus_is_continue_project(tmp_path: Path, monkeypatch: pytest.M
     highlighted, is_focused = _run(scenario())
     assert highlighted == 0
     assert is_focused is True
+
+
+def test_default_focus_selects_first_recent_project_and_enter_opens_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "alpha").mkdir()
+
+    async def scenario() -> tuple[str | None, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            focused_id = recent.get_option_at_index(recent.highlighted or 0).id
+            assert app.focused is recent
+            await pilot.press("enter")
+            await pilot.pause()
+            return focused_id, type(app.screen).__name__
+
+    focused_id, screen_name = _run(scenario())
+    assert focused_id == _project_id(projects_root / "alpha")
+    assert screen_name == "ProjectDetailScreen"
 
 
 # --- Recent projects -----------------------------------------------------------
@@ -643,8 +703,8 @@ def test_wide_home_sections_share_the_first_grid_row_height(
             return actions.y, recent.y, actions.y + actions.height, recent.y + recent.height
 
     actions_y, recent_y, actions_bottom, recent_bottom = _run(scenario())
-    assert actions_y == recent_y
-    assert actions_bottom == recent_bottom
+    assert recent_y < actions_y
+    assert recent_bottom > recent_y
 
 
 def test_compact_terminal_header_has_one_plain_title(
@@ -747,10 +807,10 @@ def test_arrow_keys_move_between_home_sections_without_tab(
 
     focused_ids = _run(scenario())
     assert focused_ids == [
-        "main-menu",
         "recent-projects-list",
         "active-sessions-list",
-        "recent-projects-list",
+        "main-menu",
+        "active-sessions-list",
     ]
 
 

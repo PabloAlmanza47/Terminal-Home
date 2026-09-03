@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from rich.cells import cell_len
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
@@ -32,9 +33,13 @@ from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
-from dashboard.services.agent_deck import AgentStatus
+from dashboard.services.activity import codex_status, server_status, workspace_status
 from dashboard.services.formatting import greeting_for
-from dashboard.services.project_rows import RecentProjectRow, format_recent_project_rows
+from dashboard.services.project_rows import (
+    ActivityProjectRow,
+    format_activity_table,
+    format_activity_table_header,
+)
 from dashboard.services.projects import (
     Project,
     ProjectScanResult,
@@ -85,42 +90,53 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
 ]
 
 
-def _activity_status(
-    status: ProjectStatus,
-) -> tuple[tuple[str, str], tuple[str, str], tuple[str, str]]:
-    workspace = ("●", "Running") if status.session_running else (
-        ("○", "Stopped") if status.saved_workspace is not None else ("○", "Not Configured")
-    )
-    server = {"running": ("●", "Running"), "stopped": ("○", "Stopped"),
-              "unknown": ("?", "Unknown"), "not_configured": ("—", "Not Configured")}.get(
-                  status.server_status, ("?", "Unknown"))
-    codex = [s for s in status.agent_sessions if s.tool.casefold() == "codex"]
-    if not codex:
-        agent = ("○", "No Agent")
-    else:
-        priority = {AgentStatus.ERROR: 0, AgentStatus.WAITING: 1, AgentStatus.RUNNING: 2,
-                    AgentStatus.IDLE: 3, AgentStatus.STOPPED: 4, AgentStatus.UNKNOWN: 5}
-        selected = min(codex, key=lambda s: priority[s.status]).status
-        agent = {
-            AgentStatus.ERROR: ("●", "Error"), AgentStatus.WAITING: ("◐", "Waiting"),
-            AgentStatus.RUNNING: ("●", "Working"), AgentStatus.IDLE: ("○", "Idle"),
-            AgentStatus.STOPPED: ("○", "Stopped"), AgentStatus.UNKNOWN: ("?", "Unknown"),
-        }[selected]
-        if len(codex) > 1:
-            agent = (agent[0], f"({len(codex)}) {agent[1]}")
-    return workspace, server, agent
-
-
-def _activity_card(status: ProjectStatus, display_name: str | None = None) -> str:
-    workspace, server, agent = _activity_status(status)
+def _activity_card(
+    status: ProjectStatus, display_name: str | None = None, width: int = 100
+) -> str:
+    workspace = workspace_status(status)
+    server = server_status(status)
+    agent, agent_count = codex_status(status)
     name = display_name or status.project.name
+    name = _fit_activity_name(name, width)
     if status.workspace_metadata_error:
         name = f"{name}  [{status_badge(status)}]"
-    return "\n".join(
-        [name, f"  Workspace    {workspace[0]} {workspace[1]}",
-         f"  Server       {server[0]} {server[1]}",
-         f"  Codex        {agent[0]} {agent[1]}"]
+    count = f"({agent_count}) " if agent_count > 1 else ""
+    codex_text = f"Codex {agent.glyph} {count}{agent.label}"
+    first_status_line = (
+        f"  Workspace {workspace.glyph} {workspace.label}"
+        f"  Server {server.glyph} {server.label}"
     )
+    status_lines = [first_status_line, f"  {codex_text}"] if width < 78 else [
+        f"  {first_status_line[2:]}  {codex_text}"
+    ]
+    return "\n".join([name, *status_lines])
+
+
+def _activity_value(value) -> str:
+    return f"{value.glyph} {value.label}"
+
+
+def _fit_activity_name(value: str, width: int) -> str:
+    if cell_len(value) <= width:
+        return value
+    if width <= 1:
+        return "…"
+    left_width = max(1, (width - 1) // 3)
+    left = value[:left_width]
+    right = value[-(width - left_width - 1):]
+    return f"{left}…{right}"
+
+
+def _activity_display_name(status: ProjectStatus, display_name: str) -> str:
+    if status.workspace_metadata_error:
+        return f"{display_name}  [{status_badge(status)}]"
+    return display_name
+
+
+def _codex_activity_value(status: ProjectStatus) -> str:
+    value, count = codex_status(status)
+    prefix = f"({count}) " if count > 1 else ""
+    return f"{value.glyph} {prefix}{value.label}"
 
 
 def _session_label(session: TmuxSession, matched: ProjectStatus | None, *, compact: bool) -> str:
@@ -206,6 +222,7 @@ class HomeScreen(Screen[None]):
         self._wsl_distro: str | None = None
         self._active_section = "actions"
         self._system_summary = "Loading system summary..."
+        self._initial_focus_pending = True
 
     def compose(self) -> ComposeResult:
         with Container(id="home", classes="screen-root"):
@@ -214,9 +231,19 @@ class HomeScreen(Screen[None]):
                     yield Static(id="home-logo")
                     yield Static("Loading system summary...", id="home-meta")
                 with Container(id="home-dashboard"):
+                    with Vertical(id="panel-recent", classes="home-panel"):
+                        yield Static(
+                            "▸ Projects", id="heading-recent", classes="panel-heading"
+                        )
+                        yield Static("", id="recent-project-header", classes="table-header")
+                        yield OptionList(
+                            id="recent-projects-list",
+                            classes="-textual-compact home-list",
+                            reset_on_blur=True,
+                        )
                     with Vertical(id="panel-actions", classes="home-panel"):
                         yield Static(
-                            "▸ Primary Actions", id="heading-actions", classes="panel-heading"
+                            "  Actions", id="heading-actions", classes="panel-heading"
                         )
                         yield KeyboardActionList(
                             *[
@@ -224,15 +251,6 @@ class HomeScreen(Screen[None]):
                                 for digit, label, option_id in _MENU_ITEMS
                             ],
                             id="main-menu",
-                            reset_on_blur=True,
-                        )
-                    with Vertical(id="panel-recent", classes="home-panel"):
-                        yield Static(
-                            "  Recent Projects", id="heading-recent", classes="panel-heading"
-                        )
-                        yield OptionList(
-                            id="recent-projects-list",
-                            classes="-textual-compact home-list",
                             reset_on_blur=True,
                         )
                     with Vertical(id="panel-sessions", classes="home-panel"):
@@ -245,7 +263,7 @@ class HomeScreen(Screen[None]):
                             reset_on_blur=True,
                         )
         yield Static(
-            "↑↓ Navigate   ←→ Sections   Enter Open   Esc Back   ? Help   q Quit",
+            "↑↓ Navigate   Enter Select   ←→ Sections   F5 Refresh   ? Help   q Quit",
             id="keyboard-footer",
         )
 
@@ -253,7 +271,8 @@ class HomeScreen(Screen[None]):
         self._apply_settings()
         self._update_clock()
         self.set_interval(1.0, self._update_clock)
-        self.query_one("#main-menu", KeyboardActionList).focus()
+        self.query_one("#recent-projects-list", OptionList).focus()
+        self._update_footer("recent")
         self._start_scan()
         recovery_warning = getattr(self.app, "_settings_recovery_warning", None)
         if recovery_warning:
@@ -294,7 +313,8 @@ class HomeScreen(Screen[None]):
         # collapsing them here prevents the action list from being squeezed
         # to zero rows.
         compact_screen = height <= 24
-        for panel_id in ("#panel-recent", "#panel-sessions"):
+        self.query_one("#panel-recent").display = True
+        for panel_id in ("#panel-actions", "#panel-sessions"):
             self.query_one(panel_id).display = not compact_screen
 
         logo = self.query_one("#home-logo", Static)
@@ -325,6 +345,18 @@ class HomeScreen(Screen[None]):
                 f"{'▸' if name == section else ' '} {label}"
             )
             self.query_one(f"#{panel_id}").set_class(name == section, "active-section")
+        self._update_footer(section)
+
+    def _update_footer(self, section: str) -> None:
+        hints = {
+            "actions": "↑↓ Navigate   Enter Select   ←→ Sections   F5 Refresh   ? Help   q Quit",
+            "recent": (
+                "↑↓ Navigate   Enter Details   a Agent   ←→ Sections   "
+                "F5 Refresh   ? Help   q Quit"
+            ),
+            "sessions": "↑↓ Navigate   Enter Resume   ←→ Sections   F5 Refresh   ? Help   q Quit",
+        }
+        self.query_one("#keyboard-footer", Static).update(hints[section])
 
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         section_by_id = {
@@ -398,6 +430,9 @@ class HomeScreen(Screen[None]):
         self._wsl_distro = system_info.wsl_distro
         self._populate_recent_projects(self._last_statuses)
         self._populate_active_sessions(self._last_statuses, sessions)
+        if self._initial_focus_pending:
+            self._initial_focus_pending = False
+            self._focus_initial_section()
         self._system_summary = format_system_summary(
             system_info,
             len(scan_result.statuses),
@@ -405,11 +440,28 @@ class HomeScreen(Screen[None]):
         )
         self._update_clock()
 
+    def _focus_initial_section(self) -> None:
+        """Focus the first useful project, or fall back to Primary Actions."""
+        recent = self.query_one("#recent-projects-list", OptionList)
+        if self._last_statuses and self.app.focused is recent:
+            for index in range(recent.option_count):
+                option = recent.get_option_at_index(index)
+                if option.id in self._project_lookup:
+                    recent.highlighted = index
+                    recent.focus()
+                    return
+        if not self._last_statuses and self.app.focused is recent:
+            menu = self.query_one("#main-menu", KeyboardActionList)
+            menu.focus()
+            self._set_active_section("actions")
+
     # --- Panel population ----------------------------------------------------
 
     def _populate_recent_projects(self, statuses: list[ProjectStatus]) -> None:
         option_list = self.query_one("#recent-projects-list", OptionList)
+        header = self.query_one("#recent-project-header", Static)
         option_list.clear_options()
+        header.update("")
         self._project_lookup = {project_option_id(status): status.project for status in statuses}
         self._agent_lookup = {
             project_option_id(status): status
@@ -427,7 +479,6 @@ class HomeScreen(Screen[None]):
             option_list.add_option(Option("Create New Project", id=_CREATE_PROJECT_FROM_EMPTY))
             return
 
-        compact = self.settings.layout_mode is LayoutMode.COMPACT
         recent = sorted(statuses, key=lambda s: s.last_modified or datetime.min, reverse=True)
         visible = recent[:_MAX_RECENT_PROJECTS]
         # Disambiguated against only what's actually shown together -- two
@@ -435,16 +486,26 @@ class HomeScreen(Screen[None]):
         # suffix; a uniquely-named project never does, even if some other
         # project sharing its name exists elsewhere but didn't make the cut.
         display_names = disambiguated_display_names(visible)
-        rows = [RecentProjectRow(name=display_name, status=status_badge(status))
-                for status, display_name in zip(visible, display_names)]
         content_width = option_list.content_region.width or option_list.size.width
-        labels = format_recent_project_rows(
-            rows,
-            max(1, content_width - 2),
-            compact=compact,
-        )
-        for status, display_name, label in zip(visible, display_names, labels):
-            label = _activity_card(status, display_name)
+        table_width = max(1, content_width - 2)
+        activity_rows = [
+            ActivityProjectRow(
+                _activity_display_name(status, display_name),
+                _activity_value(workspace_status(status)),
+                _activity_value(server_status(status)),
+                _codex_activity_value(status),
+            )
+            for status, display_name in zip(visible, display_names)
+        ]
+        if table_width >= 78:
+            header.update(format_activity_table_header(table_width, activity_rows))
+            labels = format_activity_table(activity_rows, table_width)
+        else:
+            labels = [
+                _activity_card(status, display_name, table_width)
+                for status, display_name in zip(visible, display_names)
+            ]
+        for status, label in zip(visible, labels):
             option_list.add_option(
                 Option(
                     label,

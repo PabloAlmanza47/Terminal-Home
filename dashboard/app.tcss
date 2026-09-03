@@ -50,6 +50,17 @@ OptionList {
     background: transparent;
 }
 
+.project-detail-root {
+    height: 1fr;
+    padding: 1 2;
+}
+
+.project-detail-root > .panel {
+    height: auto;
+    min-height: 24;
+    max-height: 100%;
+}
+
 /* System Information needs a little more value-column room than ordinary
    panels, but remains bounded by the screen and its outer scroll container. */
 .panel.system-info-panel {
@@ -124,6 +135,7 @@ OptionList {
 #home-dashboard.layout-wide {
     layout: grid;
     grid-size: 2 2;
+    grid-columns: 2fr 1fr;
     grid-gutter: 1 2;
     grid-rows: auto auto;
     align: left top;
@@ -131,7 +143,21 @@ OptionList {
 }
 
 #panel-sessions {
+    column-span: 1;
+}
+
+#panel-recent {
     column-span: 2;
+}
+
+#panel-recent {
+    border: solid $primary;
+    padding: 1 2 1 2;
+}
+
+#panel-actions,
+#panel-sessions {
+    opacity: 0.9;
 }
 
 .home-panel {
@@ -412,6 +438,45 @@ ConfirmScreen {
     color: $text-muted;
 }
 
+#detail-activity {
+    padding: 0 1 1 1;
+    color: #d4e2f2;
+    text-style: bold;
+}
+
+#detail-git-heading,
+#detail-workspace-heading {
+    padding: 1 0 0 0;
+}
+
+#detail-git {
+    color: #d4e2f2;
+    text-style: bold;
+}
+
+#detail-git-files {
+    color: #b5c8df;
+    padding: 0 0 1 1;
+}
+
+.detail-secondary {
+    color: $text-muted;
+}
+
+#detail-footer {
+    color: #b5c8df;
+    background: transparent;
+    text-align: center;
+    height: 1;
+}
+
+.table-header {
+    color: $text-muted;
+    /* Recent Project rows reserve two cells for KeyboardOptionList's marker. */
+    padding: 0 0 0 2;
+    text-style: bold;
+}
+
 #detail-error {
     color: $error;
     padding: 1 0 0 0;
@@ -442,6 +507,11 @@ Screen {
 
 #screen-title, .panel-heading {
     color: #72d7ff;
+}
+
+#screen-title {
+    text-align: left;
+    padding: 0 0 1 0;
 }
 
 OptionList, SelectionList {

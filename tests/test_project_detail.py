@@ -178,6 +178,8 @@ async def _open_project_detail(pilot, project_name: str) -> None:
     same-named projects under different roots never collide), not its name.
     """
     await pilot.pause()
+    await pilot.press("left")  # Move from the default Recent Projects focus to Actions.
+    await pilot.pause()
     await pilot.press("enter")  # Continue Project is the first main-menu item
     await pilot.pause()
     await pilot.app.workers.wait_for_complete()
@@ -209,6 +211,8 @@ async def _open_project_detail_by_path(pilot, project_path: Path) -> None:
     path -- needed when two projects share a display name, so matching by
     name prefix (as _open_project_detail does) would be ambiguous.
     """
+    await pilot.pause()
+    await pilot.press("left")  # Move from Recent Projects to Primary Actions.
     await pilot.pause()
     await pilot.press("enter")  # Continue Project is the first main-menu item
     await pilot.pause()
