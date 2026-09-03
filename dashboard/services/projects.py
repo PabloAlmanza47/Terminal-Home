@@ -460,6 +460,7 @@ def gather_project_status(
     base_session_name_counts: dict[str, int] | None = None,
     agent_sessions: tuple[AgentDeckSession, ...] = (),
     pane_runtimes: Iterable[tmux.TmuxPaneRuntime] = (),
+    expected_session_name: str | None = None,
 ) -> ProjectStatus:
     """Gather *project*'s full status.
 
@@ -495,17 +496,21 @@ def gather_project_status(
             saved_workspace, project_location=LocalProjectLocation(canonical_path)
         )
 
-    expected_session_name = (
-        saved_workspace.session_name
-        if saved_workspace is not None
-        else _expected_new_session_name(project, canonical_path, base_session_name_counts)
+    resolved_session_name = (
+        expected_session_name
+        if expected_session_name is not None
+        else (
+            saved_workspace.session_name
+            if saved_workspace is not None
+            else _expected_new_session_name(project, canonical_path, base_session_name_counts)
+        )
     )
 
     tmux_available = tmux.is_tmux_installed()
     if running_sessions is not None:
-        session_running = expected_session_name in running_sessions
+        session_running = resolved_session_name in running_sessions
     elif tmux_available:
-        session_running = tmux.session_exists(expected_session_name)
+        session_running = tmux.session_exists(resolved_session_name)
     else:
         session_running = False
 
@@ -527,7 +532,7 @@ def gather_project_status(
             for window_name, display_name in server_panes:
                 matches = [
                     pane for pane in pane_runtimes
-                    if pane.session_name == expected_session_name
+                    if pane.session_name == resolved_session_name
                     and pane.window_name == window_name
                     and (pane.title == "server" or pane.title == display_name)
                 ]
@@ -543,7 +548,7 @@ def gather_project_status(
         saved_workspace=saved_workspace,
         workspace_metadata_error=load_result.error,
         workspace_metadata_warning=load_result.warning,
-        expected_session_name=expected_session_name,
+        expected_session_name=resolved_session_name,
         tmux_available=tmux_available,
         session_running=session_running,
         last_modified=last_modified,
@@ -591,6 +596,26 @@ def gather_single_project_status(
             session for session in agent_snapshot.sessions if session.path == project.path.resolve()
         ),
         pane_runtimes=panes,
+    )
+
+
+def refresh_single_project_status(
+    project: Project,
+    previous: ProjectStatus,
+    *,
+    store_path: Path | None = None,
+) -> ProjectStatus:
+    """Refresh one project's live runtime state without rediscovering projects."""
+    agent_snapshot = agent_deck_snapshot()
+    panes = tuple(tmux.list_tmux_panes())
+    return gather_project_status(
+        project,
+        store_path=store_path,
+        agent_sessions=tuple(
+            session for session in agent_snapshot.sessions if session.path == project.path.resolve()
+        ),
+        pane_runtimes=panes,
+        expected_session_name=previous.expected_session_name,
     )
 
 

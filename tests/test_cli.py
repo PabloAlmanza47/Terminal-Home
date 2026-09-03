@@ -6,6 +6,8 @@ starts a real tmux server or touches the user's real configuration.
 
 from __future__ import annotations
 
+import io
+import json
 import subprocess
 from pathlib import Path
 
@@ -26,6 +28,10 @@ from dashboard.models import (
     SshProjectLocation,
 )
 from dashboard.models.projects_config import ProjectsConfig
+from dashboard.services.agent_deck import AgentDeckSession, AgentStatus
+from dashboard.services.git import GitFileChange, GitStatus
+from dashboard.services.project_selection import ProjectSelectionResult
+from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.remote_project_store import create_remote_project
 from dashboard.services.ssh_host_store import create_ssh_host
@@ -42,6 +48,26 @@ def _make_project(root: Path, name: str) -> Path:
     path = root / name
     path.mkdir(parents=True)
     return path
+
+
+def _cli_status(project: Project, sessions: tuple[AgentDeckSession, ...] = ()) -> ProjectStatus:
+    return ProjectStatus(
+        project=project,
+        canonical_path=project.path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=build_default_workspace(
+            project.name, LocalProjectLocation(project.path.resolve()), project.name
+        ),
+        workspace_metadata_error=None,
+        expected_session_name=project.name,
+        tmux_available=True,
+        session_running=True,
+        last_modified=None,
+        agent_sessions=sessions,
+        server_status="running",
+    )
 
 
 def _configure_roots(*roots: Path) -> None:
@@ -972,3 +998,134 @@ def test_read_only_commands_never_mutate_anything(
     assert all(calls == [] for calls in spies.values()), spies
     assert not (tmp_path / "xdg-data" / "terminal-home" / "workspaces.json").exists()
     assert list(project.iterdir()) == []
+
+
+def test_status_command_human_and_json_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = Project("demo", tmp_path / "demo")
+    session = AgentDeckSession(
+        "session-1", "Demo agent", project.path, "codex", AgentStatus.RUNNING
+    )
+    status = _cli_status(project, (session,))
+    git = GitStatus(
+        True,
+        "main",
+        False,
+        changes=(GitFileChange("file.py", ".", "M"),),
+        modified_count=1,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_project_selector",
+        lambda _: ProjectSelectionResult(project=project),
+    )
+    monkeypatch.setattr(cli_module, "gather_single_project_status", lambda _: status)
+    monkeypatch.setattr(cli_module, "load_status", lambda _: git)
+
+    assert cli_module.run(["status", "."]) == 0
+    output = capsys.readouterr().out
+    assert "demo" in output
+    assert "Workspace  Running" in output
+    assert "Codex      Working" in output
+    assert "Modified  1" in output
+    assert "Changed Files" in output
+    assert ".M file.py" in output
+
+    assert cli_module.run(["status", ".", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["project"]["name"] == "demo"
+    assert payload["agent"] == {"count": 1, "status": "working"}
+    assert payload["git"]["clean"] is False
+    assert payload["git"]["files"][0]["worktree_status"] == "M"
+
+
+def test_agent_command_attaches_one_session_and_reports_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = Project("demo", tmp_path / "demo")
+    status = _cli_status(project)
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_project_selector",
+        lambda _: ProjectSelectionResult(project=project),
+    )
+    monkeypatch.setattr(cli_module, "gather_single_project_status", lambda _: status)
+
+    assert cli_module.run(["agent", "."]) == 1
+    assert "No Agent Deck session found" in capsys.readouterr().err
+
+    session = AgentDeckSession(
+        "session-1", "Demo agent", project.path, "codex", AgentStatus.WAITING
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "gather_single_project_status",
+        lambda _: _cli_status(project, (session,)),
+    )
+    attached: list[str] = []
+    monkeypatch.setattr(cli_module, "execute_agent_deck_attach", attached.append)
+
+    assert cli_module.run(["agent", "demo"]) == 0
+    assert attached == ["session-1"]
+
+
+def test_status_watch_refreshes_in_place_and_exits_cleanly_on_ctrl_c(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = Project("demo", tmp_path / "demo")
+    status = _cli_status(project)
+    git = GitStatus(True, "main", False)
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_project_selector",
+        lambda _: ProjectSelectionResult(project=project),
+    )
+    calls = 0
+    dirty = GitStatus(
+        True,
+        "main",
+        False,
+        changes=(GitFileChange("changed.py", ".", "M"),),
+        modified_count=1,
+    )
+
+    def collect(_project, _previous=None):
+        nonlocal calls
+        calls += 1
+        return status, git if calls == 1 else dirty
+
+    monkeypatch.setattr(cli_module, "_collect_status", collect)
+    sleeps = 0
+
+    def sleep(_interval: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_module.time, "sleep", sleep)
+    output = io.StringIO()
+    output.isatty = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(cli_module.sys, "stdout", output)
+
+    assert cli_module.run(["status", ".", "--watch"]) == 0
+    assert calls == 2
+    assert "Refreshing every 1s" in output.getvalue()
+    assert "\x1b[2J\x1b[H" in output.getvalue()
+
+
+def test_status_watch_rejects_non_tty_and_json_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = Project("demo", tmp_path / "demo")
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_project_selector",
+        lambda _: ProjectSelectionResult(project=project),
+    )
+    assert cli_module.run(["status", ".", "--watch"]) == 2
+    assert "interactive stdout" in capsys.readouterr().err
+
+    with pytest.raises(SystemExit):
+        cli_module.run(["status", ".", "--json", "--watch"])

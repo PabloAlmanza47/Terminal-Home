@@ -17,14 +17,18 @@ name launched the process.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from uuid import uuid4
 
 from dashboard import __version__
 from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
+from dashboard.services.activity import codex_status, server_status, workspace_status
+from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.cli_colors import style_table_header
 from dashboard.services.completion import (
     SHELLS,
@@ -33,6 +37,7 @@ from dashboard.services.completion import (
     render_completion,
 )
 from dashboard.services.doctor import exit_code_for, format_diagnostic, run_diagnostics
+from dashboard.services.git import GitStatus, load_status
 from dashboard.services.project_creation import (
     DEFAULT_PROJECTS_ROOT,
     ProjectCreationError,
@@ -53,6 +58,8 @@ from dashboard.services.project_selection import (
 from dashboard.services.projects import (
     ProjectStatus,
     format_scan_warnings,
+    gather_single_project_status,
+    refresh_single_project_status,
     scan_all_projects,
     status_badge,
 )
@@ -90,6 +97,16 @@ _STATUS_WORDS = {
 }
 
 
+def _watch_interval(value: str) -> float:
+    try:
+        interval = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("watch interval must be a number") from exc
+    if interval < 0.1:
+        raise argparse.ArgumentTypeError("watch interval must be at least 0.1 seconds")
+    return interval
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -105,6 +122,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "list", help="List discovered projects and their status (read-only)."
     )
     list_parser.set_defaults(handler=_run_list)
+
+    status_parser = subparsers.add_parser(
+        "status", help="Show the current workspace, server, agent, and Git status."
+    )
+    status_parser.add_argument(
+        "project", nargs="?", default=".", help="Project name or filesystem path (default: .)."
+    )
+    status_output = status_parser.add_mutually_exclusive_group()
+    status_output.add_argument(
+        "--json", action="store_true", help="Emit stable machine-readable JSON."
+    )
+    status_output.add_argument(
+        "--watch", action="store_true", help="Refresh live every second until Ctrl+C."
+    )
+    status_parser.add_argument(
+        "--interval",
+        type=_watch_interval,
+        default=1.0,
+        metavar="SECONDS",
+        help="Watch refresh interval in seconds (default: 1; minimum: 0.1).",
+    )
+    status_parser.set_defaults(handler=_run_status)
+
+    agent_parser = subparsers.add_parser(
+        "agent", help="Attach to the existing Agent Deck session for a project."
+    )
+    agent_parser.add_argument(
+        "project", nargs="?", default=".", help="Project name or filesystem path (default: .)."
+    )
+    agent_parser.set_defaults(handler=_run_agent)
 
     plan_parser = subparsers.add_parser(
         "plan",
@@ -422,6 +469,207 @@ def _run_list(args: argparse.Namespace) -> int:
     if warning:
         print(warning, file=sys.stderr)
 
+    return 0
+
+
+def _resolve_local_project(selector: str):
+    resolved = resolve_project_selector(selector)
+    if not resolved.ok:
+        print(f"error: {resolved.error}", file=sys.stderr)
+        return None
+    if isinstance(resolved.project, RegisteredRemoteProject):
+        print("error: status and agent commands support local projects only", file=sys.stderr)
+        return None
+    assert resolved.project is not None
+    return resolved.project
+
+
+def _agent_cli_state(status: ProjectStatus) -> tuple[str, int]:
+    value, count = codex_status(status)
+    labels = {
+        "Working": "working",
+        "Waiting": "waiting",
+        "Idle": "idle",
+        "Stopped": "stopped",
+        "Error": "error",
+        "Unknown": "unknown",
+        "No Agent": "none",
+    }
+    return labels.get(value.label, "unknown"), count
+
+
+def _status_payload(status: ProjectStatus, git: GitStatus) -> dict[str, object]:
+    agent_state, agent_count = _agent_cli_state(status)
+    workspace = workspace_status(status)
+    server = server_status(status)
+    return {
+        "project": {"name": status.project.name, "path": str(status.canonical_path)},
+        "workspace": {"status": workspace.label.casefold().replace(" ", "_")},
+        "server": {"status": server.label.casefold().replace(" ", "_")},
+        "agent": {"status": agent_state, "count": agent_count},
+        "git": {
+            "branch": git.branch,
+            "detached": git.detached,
+            "clean": git.clean,
+            "changes": len(git.changes),
+            "staged": git.staged_count,
+            "modified": git.modified_count,
+            "untracked": git.untracked_count,
+            "available": git.available,
+            "files": [
+                {
+                    "path": change.path,
+                    "index_status": change.index_status,
+                    "worktree_status": change.worktree_status,
+                    **(
+                        {"old_path": change.old_path}
+                        if change.old_path is not None
+                        else {}
+                    ),
+                }
+                for change in git.changes
+            ],
+        },
+    }
+
+
+def _status_text(
+    status: ProjectStatus, git: GitStatus, *, watch: bool = False, interval: float = 1.0
+) -> str:
+    agent_state, agent_count = _agent_cli_state(status)
+    workspace = workspace_status(status)
+    server = server_status(status)
+    agent_label = "No Agent" if agent_state == "none" else agent_state.title()
+    if agent_state == "working":
+        agent_label = "Working"
+    if agent_count > 1:
+        agent_label = f"{agent_label} ({agent_count})"
+    lines = [status.project.name, str(status.canonical_path), ""]
+    lines.extend(
+        [
+            f"Workspace  {workspace.label}",
+            f"Server     {server.label}",
+            f"Codex      {agent_label}",
+            "",
+            "Git",
+        ]
+    )
+    if git.is_repo is False:
+        lines.append("  Status    Not a Git repository")
+    elif git.error:
+        lines.append(f"  Status    Unavailable ({git.error})")
+    else:
+        branch = "(detached HEAD)" if git.detached else (git.branch or "(unknown)")
+        lines.append(f"  Branch    {branch}")
+        if git.clean:
+            lines.append("  Status    Clean")
+        else:
+            lines.extend(
+                [
+                    f"  Changes   {len(git.changes)}",
+                    f"  Staged    {git.staged_count}",
+                    f"  Modified  {git.modified_count}",
+                    f"  Untracked {git.untracked_count}",
+                ]
+            )
+            if git.changes:
+                lines.append("")
+                lines.append("Changed Files")
+                for change in git.changes:
+                    path = (
+                        f"{change.old_path} -> {change.path}"
+                        if change.old_path is not None
+                        else change.path
+                    )
+                    lines.append(f"  {change.indicator:<2} {path}")
+    if watch:
+        lines.extend(["", f"Refreshing every {interval:g}s · Ctrl+C to exit"])
+    return "\n".join(lines)
+
+
+def _print_status(status: ProjectStatus, git: GitStatus) -> None:
+    print(_status_text(status, git))
+
+
+def _collect_status(project, previous: ProjectStatus | None = None):
+    status = (
+        gather_single_project_status(project)
+        if previous is None
+        else refresh_single_project_status(project, previous)
+    )
+    return status, load_status(status.canonical_path)
+
+
+def _run_status_watch(project, interval: float) -> int:
+    if not sys.stdout.isatty():
+        print("error: --watch requires an interactive stdout terminal", file=sys.stderr)
+        return 2
+    previous: ProjectStatus | None = None
+    previous_render: str | None = None
+    try:
+        while True:
+            status, git = _collect_status(project, previous)
+            rendered = _status_text(status, git, watch=True, interval=interval)
+            if rendered != previous_render:
+                if previous_render is not None:
+                    sys.stdout.write("\x1b[2J\x1b[H")
+                sys.stdout.write(rendered + "\n")
+                sys.stdout.flush()
+                previous_render = rendered
+            previous = status
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 0
+    except (OSError, WorkspaceStoreVersionError) as exc:
+        print(f"error: could not refresh project status: {exc}", file=sys.stderr)
+        return 1
+
+
+def _run_status(args: argparse.Namespace) -> int:
+    if args.watch and args.json:
+        print("error: --json and --watch cannot be used together", file=sys.stderr)
+        return 2
+    project = _resolve_local_project(args.project)
+    if project is None:
+        return 2
+    if args.watch:
+        return _run_status_watch(project, args.interval)
+    try:
+        status, git = _collect_status(project)
+    except (OSError, WorkspaceStoreVersionError) as exc:
+        print(f"error: could not gather project status: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(_status_payload(status, git), indent=2, sort_keys=True))
+    else:
+        _print_status(status, git)
+    return 0
+
+
+def _run_agent(args: argparse.Namespace) -> int:
+    project = _resolve_local_project(args.project)
+    if project is None:
+        return 2
+    try:
+        status = gather_single_project_status(project)
+    except (OSError, WorkspaceStoreVersionError) as exc:
+        print(f"error: could not inspect project: {exc}", file=sys.stderr)
+        return 1
+    sessions = list(status.agent_sessions)
+    if not sessions:
+        print(f"No Agent Deck session found for {project.name}.", file=sys.stderr)
+        return 1
+    if len(sessions) > 1:
+        print(f"Multiple Agent Deck sessions found for {project.name}:", file=sys.stderr)
+        for session in sessions:
+            print(f"  {session.id}  {session.title}  ({session.status.value})", file=sys.stderr)
+        print("Specify a session identifier in a future version.", file=sys.stderr)
+        return 2
+    try:
+        execute_agent_deck_attach(sessions[0].id)
+    except AgentDeckLaunchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
