@@ -471,6 +471,59 @@ ConfirmScreen {
     padding: 0 0 1 1;
 }
 
+#detail-git-files-list {
+    height: auto;
+    max-height: 12;
+    margin: 0 0 1 0;
+    border: none;
+    background: transparent;
+}
+
+#detail-git-files-list:focus {
+    border: none;
+}
+
+#detail-git-files-list > .option-list--option,
+#detail-git-files-list > .option-list--option-highlighted {
+    color: #d4e2f2;
+    background: transparent;
+    height: 1;
+    opacity: 1;
+}
+
+#detail-git-files-list:focus > .option-list--option-highlighted {
+    color: #72d7ff;
+    background: #23344d;
+    text-style: bold;
+}
+
+.diff-root {
+    height: 1fr;
+}
+
+.diff-panel {
+    height: 1fr;
+    max-height: 100%;
+    overflow-x: auto;
+}
+
+#diff-title {
+    color: $text-accent;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#diff-content {
+    color: #d4e2f2;
+}
+
+#diff-footer {
+    color: #b5c8df;
+    background: transparent;
+    text-align: center;
+    height: 1;
+}
+
 .detail-secondary {
     color: $text-muted;
 }

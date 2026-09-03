@@ -19,6 +19,7 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static
+from textual.widgets.option_list import Option
 
 from dashboard.models import (
     AgentDeckAttachRequest,
@@ -29,12 +30,13 @@ from dashboard.models import (
     template_from_workspace,
 )
 from dashboard.screens.confirm import ConfirmScreen
+from dashboard.screens.diff_view import DiffScreen
 from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
 from dashboard.services.activity import codex_status, server_status, workspace_status
-from dashboard.services.git import GitStatus, load_status
+from dashboard.services.git import GitDiffResult, GitFileChange, GitStatus, load_diff, load_status
 from dashboard.services.pane_layout_store import (
     PaneLayoutStoreError,
     forget_pane_layouts_for_location,
@@ -67,6 +69,7 @@ from dashboard.services.workspace_store import (
     save_workspace,
 )
 from dashboard.widgets import ActionItem, KeyboardActionList
+from dashboard.widgets import KeyboardOptionList as OptionList
 
 _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.RESUME: "Resume Session",
@@ -79,6 +82,40 @@ _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.FORGET: "Forget Saved Workspace",
     ProjectAction.RESET_PANE_SIZES: "Reset Remembered Pane Sizes",
 }
+
+
+class GitFileList(OptionList):
+    """Selectable Git files with a local diff shortcut."""
+
+    async def handle_key(self, event) -> bool:
+        if event.key == "d":
+            screen = self.screen
+            if isinstance(screen, ProjectDetailScreen):
+                screen.action_open_diff()
+                event.stop()
+                return True
+        if event.key == "down" and self.highlighted == self.option_count - 1:
+            screen = self.screen
+            if isinstance(screen, ProjectDetailScreen):
+                screen.query_one("#project-actions", KeyboardActionList).focus()
+                event.stop()
+                return True
+        return await super().handle_key(event)
+
+
+class ProjectActionList(KeyboardActionList):
+    """Project actions that can move back to the changed-file list."""
+
+    def on_key(self, event) -> None:
+        if event.key == "up" and self.selected_index == 0:
+            screen = self.screen
+            if isinstance(screen, ProjectDetailScreen) and screen.remote_project is None:
+                files = screen.query_one("#detail-git-files-list", OptionList)
+                if files.display and files.option_count:
+                    files.focus()
+                    event.stop()
+                    return
+        super().on_key(event)
 
 
 def _action_id(action: ProjectAction) -> str:
@@ -171,6 +208,7 @@ class ProjectDetailScreen(Screen[None]):
         ("escape", "go_back", "Back"),
         ("f5", "refresh", "Refresh"),
         ("a", "open_agent", "Open Agent"),
+        ("d", "open_diff", "Diff"),
     ]
 
     def __init__(self, project: Project | RegisteredRemoteProject) -> None:
@@ -194,6 +232,10 @@ class ProjectDetailScreen(Screen[None]):
         self._git_refreshing = False
         self._git_timer: Timer | None = None
         self._git_rendered: tuple[str, str] | None = None
+        self._diff_opening = False
+        self._selected_diff_change: GitFileChange | None = None
+        self._restore_file_focus = False
+        self._restore_file_path: str | None = None
 
     def compose(self) -> ComposeResult:
         status = self.status
@@ -203,7 +245,7 @@ class ProjectDetailScreen(Screen[None]):
             project = self.remote_project
             yield from self._compose_remote(project)
             yield Static(
-                "↑↓ Navigate   Enter Select   a Agent   Esc Back   F5 Refresh   ? Help   q Quit",
+                "↑↓ Navigate   d Diff   a Agent   Esc Back   F5 Refresh   ? Help   q Quit",
                 id="detail-footer",
             )
             return
@@ -214,7 +256,14 @@ class ProjectDetailScreen(Screen[None]):
                 yield Static(format_activity_block(status), id="detail-activity")
                 yield Static("Git", id="detail-git-heading", classes="panel-heading")
                 yield Static(format_git_summary(self._git_status), id="detail-git")
-                yield Static(format_git_files(self._git_status), id="detail-git-files")
+                yield Static(
+                    "Changed Files", id="detail-git-files", classes="panel-heading"
+                )
+                yield GitFileList(
+                    Option("Loading...", disabled=True),
+                    id="detail-git-files-list",
+                    reset_on_blur=False,
+                )
                 yield Static(
                     "Workspace", id="detail-workspace-heading", classes="panel-heading"
                 )
@@ -265,7 +314,7 @@ class ProjectDetailScreen(Screen[None]):
                         actions.append(ActionItem("open-agent", "Open Codex Agent"))
                     actions.append(ActionItem("back-to-list", "Back to Project List"))
                     yield Static("Actions", classes="panel-heading")
-                    yield KeyboardActionList(*actions, id="project-actions")
+                    yield ProjectActionList(*actions, id="project-actions")
                 else:
                     yield Static(
                         "No actions are available for this project right now.",
@@ -274,7 +323,7 @@ class ProjectDetailScreen(Screen[None]):
                     )
 
                 if not primary:
-                    yield KeyboardActionList(
+                    yield ProjectActionList(
                         *(
                             [ActionItem("open-agent", "Open Codex Agent")]
                             if status.agent_sessions
@@ -283,11 +332,29 @@ class ProjectDetailScreen(Screen[None]):
                         ActionItem("back-to-list", "Back to Project List"), id="project-actions"
                     )
         yield Static(
-            "↑↓ Navigate   Enter Select   a Agent   Esc Back   F5 Refresh   ? Help   q Quit",
+            "↑↓ Navigate   Enter Select   d Diff   a Agent   Esc Back   "
+            "F5 Refresh   ? Help   q Quit",
             id="detail-footer",
         )
 
     def on_mount(self) -> None:
+        # Keep the empty placeholders out of the initial layout. Once the
+        # first live Git result arrives, _update_git_files explicitly makes
+        # both widgets visible when there are changes.
+        heading = self.query_one("#detail-git-files", Static)
+        files = self.query_one("#detail-git-files-list", OptionList)
+        if self._git_status is None:
+            heading.display = True
+            files.display = True
+        else:
+            heading.display = False
+            files.display = False
+        # A worker result may arrive between Screen construction and the
+        # dynamic widgets finishing their mount. In that case the status
+        # snapshot is already current, but the first callback could not paint
+        # the file rows. Reconcile it now that the mounted instance exists.
+        if self._git_status is not None:
+            self._update_git_files(self._git_status)
         actions = self.query("#project-actions")
         if actions:
             actions.first().focus()
@@ -295,6 +362,39 @@ class ProjectDetailScreen(Screen[None]):
         if self.status is not None:
             self._git_timer = self.set_interval(1.75, self._start_git_refresh)
             self._start_git_refresh()
+
+    def on_descendant_focus(self, event) -> None:
+        if event.widget.id == "detail-git-files-list":
+            self.query_one("#detail-footer", Static).update(
+                "↑↓ Navigate   d Diff   a Agent   Esc Back   F5 Refresh   ? Help   q Quit"
+            )
+        elif event.widget.id == "project-actions":
+            self.query_one("#detail-footer", Static).update(
+                "↑↓ Navigate   Enter Select   d Diff   a Agent   Esc Back   "
+                "F5 Refresh   ? Help   q Quit"
+            )
+
+    def on_key(self, event) -> None:
+        files = self.query_one("#detail-git-files-list", OptionList)
+        if event.key == "d" and self.app.focused is files:
+            self.action_open_diff()
+            event.stop()
+            return
+        if event.key == "up" and self.app.focused is self.query_one(
+            "#project-actions", KeyboardActionList
+        ):
+            if files.display and files.option_count:
+                files.focus()
+                event.stop()
+                return
+        if event.key == "down" and self.app.focused is self.query_one(
+            "#detail-git-files-list", OptionList
+        ):
+            files = self.query_one("#detail-git-files-list", OptionList)
+            if files.highlighted == files.option_count - 1:
+                self.query_one("#project-actions", KeyboardActionList).focus()
+                event.stop()
+                return
 
     def _reset_scroll_position(self) -> None:
         panel = self.query(".project-detail-root > .panel")
@@ -326,17 +426,23 @@ class ProjectDetailScreen(Screen[None]):
                 )
                 yield Static(self._feedback, id="detail-error")
                 yield Static("Actions", classes="panel-heading")
-                yield KeyboardActionList(
+                yield ProjectActionList(
                     ActionItem("action-resume", "Launch Remote Workspace"),
                     ActionItem("back-to-list", "Back to Project List"),
                     id="project-actions",
                 )
 
     async def on_screen_resume(self) -> None:
+        restore_files = self._restore_file_focus
+        restore_path = self._restore_file_path
+        self._restore_file_focus = False
+        self._restore_file_path = None
         if self._git_timer is not None:
             self._git_timer.resume()
         self._start_git_refresh()
         await self._refresh_status()
+        if restore_files:
+            self._restore_changed_file_focus(restore_path)
 
     def on_screen_suspend(self) -> None:
         if self._git_timer is not None:
@@ -364,15 +470,120 @@ class ProjectDetailScreen(Screen[None]):
         self._git_refreshing = False
         if result.error and self._git_status is not None:
             return
+        previous_path = self._selected_git_file_path()
         summary = format_git_summary(result)
         files = format_git_files(result)
         if self._git_rendered == (summary, files):
             self._git_status = result
+            mounted_files = self.query("#detail-git-files-list")
+            if mounted_files and result.changes:
+                file_list = mounted_files.first(OptionList)
+                loading_placeholder = (
+                    file_list.option_count == 1
+                    and file_list.get_option_at_index(0).disabled
+                )
+                if loading_placeholder or file_list.option_count != len(result.changes):
+                    self._update_git_files(result, previous_path)
             return
         self._git_status = result
         self._git_rendered = (summary, files)
         self.query_one("#detail-git", Static).update(summary)
-        self.query_one("#detail-git-files", Static).update(files)
+        self._update_git_files(result, previous_path)
+
+    def _selected_git_file_path(self) -> str | None:
+        file_widgets = self.query("#detail-git-files-list")
+        if not file_widgets:
+            # A worker callback can arrive during the small mount window
+            # before compose() has attached the dynamic Git file list.
+            return None
+        files = file_widgets.first(OptionList)
+        if files.highlighted is None or self._git_status is None:
+            return None
+        if files.highlighted >= len(self._git_status.changes):
+            return None
+        return self._git_status.changes[files.highlighted].path
+
+    def _update_git_files(self, status: GitStatus, previous_path: str | None = None) -> None:
+        files = self.query_one("#detail-git-files-list", OptionList)
+        heading = self.query_one("#detail-git-files", Static)
+        if previous_path is None:
+            previous_path = self._selected_git_file_path()
+        was_focused = self.app.focused is files
+        files.clear_options()
+        if not status.changes:
+            heading.display = False
+            files.display = False
+            if was_focused:
+                self.query_one("#project-actions", KeyboardActionList).focus()
+            return
+        heading.display = True
+        files.display = True
+        for index, change in enumerate(status.changes):
+            path = (
+                f"{change.old_path} -> {change.path}"
+                if change.old_path is not None
+                else change.path
+            )
+            files.add_option(Option(f"{change.indicator:<2} {path}", id=str(index)))
+        # OptionList options are rendered internally rather than as child
+        # widgets, so content-sized layout cannot always infer their height
+        # after they are added to a mounted widget. Set the row height
+        # explicitly, capped so the surrounding detail panel can scroll for
+        # large repositories.
+        files.styles.height = min(len(status.changes), 12)
+        # Options are virtual rows inside OptionList. Force both the virtual
+        # row map and the mounted widget layout to be refreshed after the
+        # dynamic update so the rows are painted in the current frame.
+        files.refresh(layout=True)
+        selected = next(
+            (
+                index
+                for index, change in enumerate(status.changes)
+                if change.path == previous_path
+            ),
+            0,
+        )
+        files.highlighted = selected
+        if was_focused:
+            files.focus()
+
+    def action_open_diff(self) -> None:
+        files = self.query_one("#detail-git-files-list", OptionList)
+        if (
+            self._diff_opening
+            or self.app.focused is not files
+            or files.highlighted is None
+            or self._git_status is None
+        ):
+            self.app.notify("Select a changed file first.", severity="warning")
+            return
+        if files.highlighted >= len(self._git_status.changes):
+            self.app.notify("Select a changed file first.", severity="warning")
+            return
+        self._selected_diff_change = self._git_status.changes[files.highlighted]
+        self._restore_file_focus = True
+        self._restore_file_path = self._selected_diff_change.path
+        self._diff_opening = True
+        self.run_worker(self._load_selected_diff, thread=True)
+
+    def _load_selected_diff(self) -> None:
+        assert self.status is not None
+        assert self._selected_diff_change is not None
+        result = load_diff(self.status.canonical_path, self._selected_diff_change)
+        self.app.call_from_thread(self._on_diff_loaded, result)
+
+    def _on_diff_loaded(self, result: GitDiffResult) -> None:
+        self._diff_opening = False
+        self.app.push_screen(DiffScreen(result))
+
+    def _restore_changed_file_focus(self, path: str | None) -> None:
+        files = self.query_one("#detail-git-files-list", OptionList)
+        if self._git_status is None or not self._git_status.changes:
+            files.display = False
+            self.query_one("#project-actions", KeyboardActionList).focus()
+            return
+        self._update_git_files(self._git_status, path)
+        files.focus()
 
     def action_go_back(self) -> None:
         self.app.pop_screen()

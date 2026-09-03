@@ -10,6 +10,8 @@ from pathlib import Path
 
 _TIMEOUT_SECONDS = 3
 _STATUS_COMMAND = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]
+_DIFF_TIMEOUT_SECONDS = 3
+_UNTRACKED_PREVIEW_LIMIT = 256 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,23 @@ class GitStatus:
         if self.is_repo is not True:
             return None
         return not self.changes
+
+
+@dataclass(frozen=True, slots=True)
+class GitDiffResult:
+    """Read-only diff data for one changed file."""
+
+    repository_path: Path
+    path: str
+    old_path: str | None
+    tracked: bool
+    available: bool
+    staged: str | None = None
+    working_tree: str | None = None
+    untracked_content: str | None = None
+    truncated: bool = False
+    binary: bool = False
+    error: str | None = None
 
 
 GitRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
@@ -130,3 +149,151 @@ def load_status(path: Path, *, runner: GitRunner = run_git_status) -> GitStatus:
         not_repo = "not a git repository" in (result.stderr or "").casefold()
         return GitStatus(False if not_repo else None, None, False, error="Git status unavailable")
     return parse_status(result.stdout)
+
+
+GitDiffRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+
+def run_git_diff(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, capture_output=True, text=True, timeout=_DIFF_TIMEOUT_SECONDS)
+
+
+def _safe_project_file(repository_path: Path, relative_path: str) -> Path | None:
+    try:
+        repository = repository_path.resolve()
+        candidate = (repository / relative_path).resolve()
+        candidate.relative_to(repository)
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+def _diff_argv(
+    repository_path: Path,
+    change: GitFileChange,
+    *,
+    staged: bool,
+) -> list[str]:
+    command = ["git", "-C", str(repository_path), "diff"]
+    if staged:
+        command.append("--cached")
+    command.extend(["--no-ext-diff", "--no-textconv", "--no-color", "--"])
+    if change.old_path is not None:
+        command.append(change.old_path)
+    command.append(change.path)
+    return command
+
+
+def _run_one_diff(
+    repository_path: Path,
+    change: GitFileChange,
+    *,
+    staged: bool,
+    runner: GitDiffRunner,
+) -> tuple[str | None, str | None, bool]:
+    try:
+        result = runner(_diff_argv(repository_path, change, staged=staged))
+    except subprocess.TimeoutExpired:
+        return None, "Git diff timed out", False
+    except OSError as exc:
+        return None, str(exc), False
+    if result.returncode != 0:
+        return None, "Git diff unavailable", False
+    text = result.stdout
+    if "Binary files " in text or "GIT binary patch" in text:
+        return None, "Binary file; text preview unavailable", True
+    if len(text.encode("utf-8", errors="replace")) > _UNTRACKED_PREVIEW_LIMIT:
+        return (
+            text[:_UNTRACKED_PREVIEW_LIMIT]
+            + "\n\n[Diff truncated; file is too large to display.]",
+            None,
+            False,
+        )
+    return text, None, False
+
+
+def load_diff(
+    repository_path: Path,
+    change: GitFileChange,
+    *,
+    runner: GitDiffRunner = run_git_diff,
+    read_file: Callable[[Path], bytes] | None = None,
+) -> GitDiffResult:
+    """Load staged/working-tree diff data for one status entry."""
+    repository_path = repository_path.resolve()
+    if runner is run_git_diff and shutil.which("git") is None:
+        return GitDiffResult(
+            repository_path, change.path, change.old_path, change.index_status != "?", False,
+            error="Git is not installed",
+        )
+    if _safe_project_file(repository_path, change.path) is None or (
+        change.old_path is not None and _safe_project_file(repository_path, change.old_path) is None
+    ):
+        return GitDiffResult(
+            repository_path, change.path, change.old_path, change.index_status != "?", False,
+            error="File path is outside the project",
+        )
+    untracked = change.index_status == "?" or change.worktree_status == "?"
+    if untracked:
+        candidate = _safe_project_file(repository_path, change.path)
+        if candidate is None:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, False, False,
+                error="File path is outside the project",
+            )
+        try:
+            content = (read_file or Path.read_bytes)(candidate)
+        except OSError as exc:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, False, False,
+                error=f"Unable to read untracked file: {exc}",
+            )
+        if b"\0" in content:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, False, False,
+                binary=True, error="Binary file; text preview unavailable",
+            )
+        truncated = len(content) > _UNTRACKED_PREVIEW_LIMIT
+        content = content[:_UNTRACKED_PREVIEW_LIMIT]
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, False, False,
+                binary=True, error="Binary file; text preview unavailable",
+            )
+        if truncated:
+            text += "\n\n[File truncated; preview is limited to 256 KiB.]"
+        return GitDiffResult(
+            repository_path, change.path, change.old_path, False, True,
+            untracked_content=text, truncated=truncated,
+        )
+
+    staged_text = working_text = None
+    if change.index_status not in {"."}:
+        staged_text, error, binary = _run_one_diff(
+            repository_path, change, staged=True, runner=runner
+        )
+        if error is not None:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, True, False,
+                binary=binary, error=error,
+            )
+    if change.worktree_status not in {"."}:
+        working_text, error, binary = _run_one_diff(
+            repository_path, change, staged=False, runner=runner
+        )
+        if error is not None:
+            return GitDiffResult(
+                repository_path, change.path, change.old_path, True, False,
+                staged=staged_text, binary=binary, error=error,
+            )
+    if not staged_text and not working_text:
+        return GitDiffResult(
+            repository_path, change.path, change.old_path, True, False,
+            error="File has no current diff",
+        )
+    return GitDiffResult(
+        repository_path, change.path, change.old_path, True, True,
+        staged=staged_text, working_tree=working_text,
+    )
