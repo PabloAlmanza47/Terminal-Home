@@ -33,6 +33,7 @@ from dashboard.services.ssh import (
     quote_remote_argument,
     run_interactive_ssh,
 )
+from dashboard.services.terminal import clear_terminal_display
 
 
 class LaunchError(Exception):
@@ -178,6 +179,7 @@ def _attach_local(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> N
         ) from exc
     finally:
         _remember_if_session_exists(workspace, runner)
+        clear_terminal_display()
     if result.returncode != 0:
         raise LaunchError(
             f"Could not attach to tmux session '{workspace.session_name}': "
@@ -199,6 +201,7 @@ def _attach_remote(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> 
         remote_command,
         request_tty=True,
     )
+    clear_terminal_display()
     _remember_if_session_exists(workspace, runner)
     if not result.succeeded:
         detail = result.error or (

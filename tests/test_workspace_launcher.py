@@ -132,11 +132,44 @@ def test_creates_session_and_attaches_when_outside_tmux(
         "run_interactive_tmux",
         lambda argv: exec_calls.append(argv) or subprocess.CompletedProcess(argv, 0),
     )
+    cleanup_calls: list[object] = []
+
+    def record_cleanup() -> None:
+        cleanup_calls.append(1)
+
+    monkeypatch.setattr(launcher_module, "clear_terminal_display", record_cleanup)
 
     execute_launch_request(_request(tmp_path))
 
     assert len(build_calls) == 1
     assert exec_calls == [["tmux", "attach-session", "-t", "demo"]]
+    assert cleanup_calls == [1]
+
+
+def test_nonzero_tmux_attach_keeps_return_code_behavior_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _assume_tmux_installed(monkeypatch)
+    monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: True)
+    monkeypatch.setattr(
+        launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name]
+    )
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 23),
+    )
+    cleanup_calls: list[object] = []
+
+    def record_cleanup() -> None:
+        cleanup_calls.append(1)
+
+    monkeypatch.setattr(launcher_module, "clear_terminal_display", record_cleanup)
+
+    with pytest.raises(LaunchError, match="status 23"):
+        execute_launch_request(_request(tmp_path, action=LaunchAction.ATTACH))
+
+    assert cleanup_calls == [1]
 
 
 @pytest.mark.parametrize("action", [LaunchAction.CREATE, LaunchAction.ATTACH])

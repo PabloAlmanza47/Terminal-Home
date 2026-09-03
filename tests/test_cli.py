@@ -15,6 +15,7 @@ import dashboard.app as app_module
 import dashboard.cli as cli_module
 import dashboard.services.project_creation as project_creation_module
 import dashboard.services.project_launch as project_launch_module
+import dashboard.services.terminal as terminal_module
 import dashboard.services.tmux as tmux_module
 import dashboard.services.workspace_launcher as workspace_launcher_module
 import dashboard.services.workspace_store as workspace_store_module
@@ -75,6 +76,24 @@ def test_read_only_commands_never_call_the_tui(
     monkeypatch.setattr(app_module, "main", lambda: calls.append(1))
 
     cli_module.run(argv)
+
+    assert calls == []
+
+
+def test_read_only_commands_never_clear_terminal_display(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    _assume_no_tmux_sessions(monkeypatch)
+    calls: list[object] = []
+
+    def record_cleanup() -> None:
+        calls.append(1)
+
+    monkeypatch.setattr(terminal_module, "clear_terminal_display", record_cleanup)
+
+    cli_module.run(["list"])
+    cli_module.run(["doctor"])
 
     assert calls == []
 
