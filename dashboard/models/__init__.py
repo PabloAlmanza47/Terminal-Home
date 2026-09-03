@@ -34,6 +34,7 @@ from dashboard.models.template import (
 from dashboard.models.workspace import (
     MAX_PANES_PER_WINDOW,
     PANE_KIND_LABELS,
+    AgentDeckAttachRequest,
     LaunchAction,
     LaunchRequest,
     PaneKind,
@@ -47,6 +48,7 @@ from dashboard.models.workspace import (
 __all__ = [
     "LaunchAction",
     "LaunchRequest",
+    "AgentDeckAttachRequest",
     "TmuxSessionAttachRequest",
     "CodingAgent",
     "TableHeaderColor",

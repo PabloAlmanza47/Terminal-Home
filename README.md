@@ -60,6 +60,10 @@ dashboard.
   accent is the default; Blue, Cyan, Green, Magenta, Yellow, White, and No color
   are also available. Headers stay plain when output is redirected, `NO_COLOR` is
   set, or No color is selected.
+- Optional Agent Deck integration detects `agent-deck` automatically and adds live
+  Codex agent state to the Home project dashboard. Select a project and press `a`
+  to open its existing Agent Deck session; Ctrl+Q returns to Terminal Home.
+  Terminal Home owns projects and workspaces; Agent Deck owns agent sessions.
 
 ## Demo workflow
 

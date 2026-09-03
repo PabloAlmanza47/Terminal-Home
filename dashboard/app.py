@@ -17,9 +17,10 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import Button, Checkbox, Input, TextArea
 
-from dashboard.models import LaunchRequest, TmuxSessionAttachRequest
+from dashboard.models import AgentDeckAttachRequest, LaunchRequest, TmuxSessionAttachRequest
 from dashboard.models.settings import AppSettings
 from dashboard.screens.home import HomeScreen
+from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import (
@@ -29,7 +30,7 @@ from dashboard.services.workspace_launcher import (
 )
 from dashboard.widgets import KeyboardActionList
 
-AppResult = LaunchRequest | TmuxSessionAttachRequest | None
+AppResult = LaunchRequest | TmuxSessionAttachRequest | AgentDeckAttachRequest | None
 
 
 class TerminalHomeApp(App[AppResult]):
@@ -190,20 +191,22 @@ def main() -> None:
     the one place that knows how to run Textual to completion and hand off
     to tmux, regardless of which command name launched the process.
     """
-    app = TerminalHomeApp()
-    launch_request = app.run()
-
-    if launch_request is None:
-        return
-
-    try:
-        if isinstance(launch_request, TmuxSessionAttachRequest):
-            execute_tmux_session_attach(launch_request)
-        else:
-            execute_launch_request(launch_request)
-    except (LaunchError, TmuxCommandError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        sys.exit(1)
+    while True:
+        app = TerminalHomeApp()
+        launch_request = app.run()
+        if launch_request is None:
+            return
+        try:
+            if isinstance(launch_request, AgentDeckAttachRequest):
+                execute_agent_deck_attach(launch_request.session_id)
+                continue
+            if isinstance(launch_request, TmuxSessionAttachRequest):
+                execute_tmux_session_attach(launch_request)
+            else:
+                execute_launch_request(launch_request)
+        except (LaunchError, TmuxCommandError, AgentDeckLaunchError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -19,10 +19,12 @@ import pytest
 from textual.widgets import OptionList
 
 import dashboard.screens.home as home_module
+import dashboard.services.projects as projects_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux as tmux_module
+from dashboard.services.agent_deck import AgentDeckSession, AgentDeckSnapshot, AgentStatus
 from dashboard.services.projects import (
     Project,
     build_launch_request,
@@ -454,6 +456,45 @@ def test_unmatched_session_selection_produces_orphan_attach_request(
     assert result.action is LaunchAction.ATTACH
     assert result.workspace is None
     assert result.session_name == "side-quest"
+
+
+def test_active_sessions_hides_agent_deck_tmux_sessions_but_keeps_unmatched_user_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "demo"
+    project_path.mkdir()
+    agent_tmux = "agentdeck_demo_123"
+    monkeypatch.setattr(
+        tmux_module,
+        "list_tmux_sessions",
+        lambda: [
+            TmuxSession(agent_tmux, 1, "now", False),
+            TmuxSession("side-quest", 1, "now", False),
+        ],
+    )
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "agent-1", "demo", project_path, "codex", AgentStatus.WAITING, agent_tmux
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            return _option_labels(app.screen.query_one("#active-sessions-list", OptionList))
+
+    labels = _run(scenario())
+    assert not any(agent_tmux in label for label in labels)
+    assert any("side-quest" in label for label in labels)
 
 
 # --- F5 refresh and clock/scan independence ------------------------------------

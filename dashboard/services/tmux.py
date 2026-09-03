@@ -31,6 +31,10 @@ from dashboard.services.ssh_host_store import get_ssh_host
 
 _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t#{session_attached}"
 _WINDOW_LAYOUT_FORMAT = "#{window_name}\t#{window_panes}\t#{window_layout}"
+_PANE_STATUS_FORMAT = (
+    "#{session_name}\t#{window_name}\t#{pane_title}\t"
+    "#{pane_current_command}\t#{pane_dead}"
+)
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
@@ -46,6 +50,15 @@ class TmuxSession:
     windows: int
     created: str
     attached: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TmuxPaneRuntime:
+    session_name: str
+    window_name: str
+    title: str
+    current_command: str
+    dead: bool
 
 
 def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
@@ -258,6 +271,26 @@ def list_tmux_sessions(*, runner: TmuxCommandRunner = run_tmux_command) -> list[
             )
         )
     return sessions
+
+
+def list_tmux_panes(*, runner: TmuxCommandRunner = run_tmux_command) -> list[TmuxPaneRuntime]:
+    """Capture all local pane runtime fields in one tmux query."""
+    if runner is run_tmux_command and not is_tmux_installed():
+        return []
+    try:
+        result = runner(["tmux", "list-panes", "-a", "-F", _PANE_STATUS_FORMAT])
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    panes: list[TmuxPaneRuntime] = []
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 5:
+            continue
+        session, window, title, command, dead = fields
+        panes.append(TmuxPaneRuntime(session, window, title, command, dead == "1"))
+    return panes
 
 
 def get_tmux_version(*, runner: TmuxCommandRunner = run_tmux_command) -> str | None:

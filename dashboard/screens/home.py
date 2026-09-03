@@ -22,7 +22,7 @@ from textual.widgets import Static
 from textual.widgets.option_list import Option
 
 from dashboard.art import artwork_for_size
-from dashboard.models import LaunchAction, LaunchRequest
+from dashboard.models import AgentDeckAttachRequest, LaunchAction, LaunchRequest
 from dashboard.models.settings import AppSettings, LayoutMode
 from dashboard.screens.new_project import NewProjectScreen
 from dashboard.screens.project_detail import ProjectDetailScreen
@@ -32,7 +32,8 @@ from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
-from dashboard.services.formatting import format_relative_time, greeting_for
+from dashboard.services.agent_deck import AgentStatus
+from dashboard.services.formatting import greeting_for
 from dashboard.services.project_rows import RecentProjectRow, format_recent_project_rows
 from dashboard.services.projects import (
     Project,
@@ -84,11 +85,62 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
 ]
 
 
+def _activity_status(
+    status: ProjectStatus,
+) -> tuple[tuple[str, str], tuple[str, str], tuple[str, str]]:
+    workspace = ("●", "Running") if status.session_running else (
+        ("○", "Stopped") if status.saved_workspace is not None else ("○", "Not Configured")
+    )
+    server = {"running": ("●", "Running"), "stopped": ("○", "Stopped"),
+              "unknown": ("?", "Unknown"), "not_configured": ("—", "Not Configured")}.get(
+                  status.server_status, ("?", "Unknown"))
+    codex = [s for s in status.agent_sessions if s.tool.casefold() == "codex"]
+    if not codex:
+        agent = ("○", "No Agent")
+    else:
+        priority = {AgentStatus.ERROR: 0, AgentStatus.WAITING: 1, AgentStatus.RUNNING: 2,
+                    AgentStatus.IDLE: 3, AgentStatus.STOPPED: 4, AgentStatus.UNKNOWN: 5}
+        selected = min(codex, key=lambda s: priority[s.status]).status
+        agent = {
+            AgentStatus.ERROR: ("●", "Error"), AgentStatus.WAITING: ("◐", "Waiting"),
+            AgentStatus.RUNNING: ("●", "Working"), AgentStatus.IDLE: ("○", "Idle"),
+            AgentStatus.STOPPED: ("○", "Stopped"), AgentStatus.UNKNOWN: ("?", "Unknown"),
+        }[selected]
+        if len(codex) > 1:
+            agent = (agent[0], f"({len(codex)}) {agent[1]}")
+    return workspace, server, agent
+
+
+def _activity_card(status: ProjectStatus, display_name: str | None = None) -> str:
+    workspace, server, agent = _activity_status(status)
+    name = display_name or status.project.name
+    if status.workspace_metadata_error:
+        name = f"{name}  [{status_badge(status)}]"
+    return "\n".join(
+        [name, f"  Workspace    {workspace[0]} {workspace[1]}",
+         f"  Server       {server[0]} {server[1]}",
+         f"  Codex        {agent[0]} {agent[1]}"]
+    )
+
+
 def _session_label(session: TmuxSession, matched: ProjectStatus | None, *, compact: bool) -> str:
     name = matched.project.name if matched is not None else f"{session.name}  (unmatched session)"
     if compact:
         return name
     return f"{name}  ·  {session.windows} window(s)"
+
+
+def _terminal_home_sessions(
+    sessions: list[TmuxSession], statuses: list[ProjectStatus]
+) -> list[TmuxSession]:
+    """Remove only tmux sessions explicitly owned by Agent Deck metadata."""
+    agent_tmux_names = {
+        agent.tmux_session
+        for status in statuses
+        for agent in status.agent_sessions
+        if agent.tmux_session
+    }
+    return [session for session in sessions if session.name not in agent_tmux_names]
 
 
 def format_system_status(info: SystemInfo) -> str:
@@ -131,6 +183,7 @@ class HomeScreen(Screen[None]):
     BINDINGS = [
         ("q", "quit_app", "Quit"),
         ("f5", "refresh", "Refresh"),
+        ("a", "open_agent", "Open Agent"),
         ("1", "select_menu(0)", "Continue Project"),
         ("2", "select_menu(1)", "New Project"),
         ("3", "select_menu(2)", "Resume tmux"),
@@ -146,6 +199,7 @@ class HomeScreen(Screen[None]):
         self._scanning = False
         self._project_lookup: dict[str, Project] = {}
         self._session_lookup: dict[str, ProjectStatus] = {}
+        self._agent_lookup: dict[str, ProjectStatus] = {}
         self._last_statuses: list[ProjectStatus] = []
         self._last_sessions: list[TmuxSession] = []
         self._last_scan_warning: str = ""
@@ -327,7 +381,7 @@ class HomeScreen(Screen[None]):
         filesystem/subprocess calls.
         """
         scan_result = scan_all_projects()
-        sessions = tmux.list_tmux_sessions() if tmux.is_tmux_installed() else []
+        sessions = list(scan_result.tmux_sessions)
         system_info = gather_system_info()
         self.app.call_from_thread(self._on_scan_complete, scan_result, sessions, system_info)
 
@@ -345,7 +399,9 @@ class HomeScreen(Screen[None]):
         self._populate_recent_projects(self._last_statuses)
         self._populate_active_sessions(self._last_statuses, sessions)
         self._system_summary = format_system_summary(
-            system_info, len(scan_result.statuses), len(sessions)
+            system_info,
+            len(scan_result.statuses),
+            len(_terminal_home_sessions(sessions, self._last_statuses)),
         )
         self._update_clock()
 
@@ -355,6 +411,11 @@ class HomeScreen(Screen[None]):
         option_list = self.query_one("#recent-projects-list", OptionList)
         option_list.clear_options()
         self._project_lookup = {project_option_id(status): status.project for status in statuses}
+        self._agent_lookup = {
+            project_option_id(status): status
+            for status in statuses
+            if status.agent_sessions
+        }
 
         if self._last_scan_warning:
             option_list.add_option(Option(f"Warning: {self._last_scan_warning}", disabled=True))
@@ -374,26 +435,16 @@ class HomeScreen(Screen[None]):
         # suffix; a uniquely-named project never does, even if some other
         # project sharing its name exists elsewhere but didn't make the cut.
         display_names = disambiguated_display_names(visible)
-        rows = [
-            RecentProjectRow(
-                name=display_name,
-                status=status_badge(status),
-                branch=status.git_branch,
-                detail=(
-                    f"· {format_relative_time(status.last_modified)}"
-                    if status.last_modified is not None
-                    else None
-                ),
-            )
-            for status, display_name in zip(visible, display_names)
-        ]
+        rows = [RecentProjectRow(name=display_name, status=status_badge(status))
+                for status, display_name in zip(visible, display_names)]
         content_width = option_list.content_region.width or option_list.size.width
         labels = format_recent_project_rows(
             rows,
             max(1, content_width - 2),
             compact=compact,
         )
-        for status, label in zip(visible, labels):
+        for status, display_name, label in zip(visible, display_names, labels):
+            label = _activity_card(status, display_name)
             option_list.add_option(
                 Option(
                     label,
@@ -412,6 +463,7 @@ class HomeScreen(Screen[None]):
         if not tmux.is_tmux_installed():
             option_list.add_option(Option("tmux is not installed", disabled=True))
             return
+        sessions = _terminal_home_sessions(sessions, statuses)
         if not sessions:
             option_list.add_option(Option("No tmux sessions are running", disabled=True))
             return
@@ -497,6 +549,26 @@ class HomeScreen(Screen[None]):
                     session_name=option_id,
                 )
             )
+
+    def action_open_agent(self) -> None:
+        option_list = self.query_one("#recent-projects-list", OptionList)
+        option = (
+            option_list.get_option_at_index(option_list.highlighted)
+            if option_list.highlighted is not None
+            else None
+        )
+        if option is None:
+            self.app.notify("Select a project first.", severity="warning")
+            return
+        status = self._agent_lookup.get(option.id or "")
+        if status is None:
+            self.app.notify("No matching Codex Agent Deck session.", severity="warning")
+            return
+        codex = [session for session in status.agent_sessions if session.tool.casefold() == "codex"]
+        if not codex:
+            self.app.notify("No matching Codex Agent Deck session.", severity="warning")
+            return
+        self.app.exit(AgentDeckAttachRequest(codex[0].id))
 
     # --- Global shortcuts ----------------------------------------------------
 

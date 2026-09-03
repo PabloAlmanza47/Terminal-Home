@@ -20,6 +20,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from dashboard.models import (
+    AgentDeckAttachRequest,
     LaunchAction,
     LaunchRequest,
     LocalProjectLocation,
@@ -104,6 +105,18 @@ def _session_line(status: ProjectStatus) -> str:
     return f"tmux session:   {status.expected_session_name}  ({state})"
 
 
+def _agent_line(status: ProjectStatus) -> str | None:
+    codex = [s for s in status.agent_sessions if s.tool.casefold() == "codex"]
+    if not codex:
+        return None
+    order = {"error": 0, "waiting": 1, "running": 2, "idle": 3, "stopped": 4, "unknown": 5}
+    selected = min(codex, key=lambda session: order.get(session.status.value, 5))
+    labels = {"error": "Error", "waiting": "Waiting", "running": "Working",
+              "idle": "Idle", "stopped": "Stopped", "unknown": "Unknown"}
+    count = f" ({len(codex)})" if len(codex) > 1 else ""
+    return f"Agent:          Codex{count}  ({labels.get(selected.status.value, 'Unknown')})"
+
+
 class ProjectDetailScreen(Screen[None]):
     """Read the project's status, then offer only the actions that are
     safe to take from that status.
@@ -149,6 +162,9 @@ class ProjectDetailScreen(Screen[None]):
                 yield Static(_git_line(status), id="detail-git")
                 yield Static(_workspace_line(status), id="detail-workspace")
                 yield Static(_session_line(status), id="detail-session")
+                agent_line = _agent_line(status)
+                if agent_line is not None:
+                    yield Static(agent_line, id="detail-agent")
 
                 if not status.project_dir_exists:
                     yield Static(
@@ -185,6 +201,8 @@ class ProjectDetailScreen(Screen[None]):
                         ActionItem(_action_id(action), _ACTION_LABELS[action])
                         for action in (*primary, *secondary)
                     ]
+                    if status.agent_sessions:
+                        actions.append(ActionItem("open-agent", "Open Codex Agent"))
                     actions.append(ActionItem("back-to-list", "Back to Project List"))
                     yield Static("Actions", classes="panel-heading")
                     yield KeyboardActionList(*actions, id="project-actions")
@@ -197,6 +215,11 @@ class ProjectDetailScreen(Screen[None]):
 
                 if not primary:
                     yield KeyboardActionList(
+                        *(
+                            [ActionItem("open-agent", "Open Codex Agent")]
+                            if status.agent_sessions
+                            else []
+                        ),
                         ActionItem("back-to-list", "Back to Project List"), id="project-actions"
                     )
         yield Footer()
@@ -276,6 +299,8 @@ class ProjectDetailScreen(Screen[None]):
             self.app.pop_screen()
         elif button_id in (_action_id(ProjectAction.RESUME), _action_id(ProjectAction.RECREATE)):
             self._resume_or_recreate()
+        elif button_id == "open-agent":
+            self._open_agent()
         elif button_id == _action_id(ProjectAction.OPEN_DEFAULT):
             self._open_default_workspace()
         elif button_id == _action_id(ProjectAction.CONFIGURE):
@@ -300,6 +325,13 @@ class ProjectDetailScreen(Screen[None]):
             return
         assert self.status is not None
         self.app.exit(build_launch_request(self.status))
+
+    def _open_agent(self) -> None:
+        if self.status is None:
+            return
+        codex = [s for s in self.status.agent_sessions if s.tool.casefold() == "codex"]
+        if codex:
+            self.app.exit(AgentDeckAttachRequest(codex[0].id))
 
     def _launch_remote(self) -> None:
         assert self.remote_project is not None

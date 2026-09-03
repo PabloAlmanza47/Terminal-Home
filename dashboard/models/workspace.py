@@ -267,3 +267,14 @@ class TmuxSessionAttachRequest:
     def __post_init__(self) -> None:
         if not self.session_name.strip():
             raise WorkspaceValidationError("A tmux session name is required.")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentDeckAttachRequest:
+    """A post-TUI request to attach to an existing Agent Deck session."""
+
+    session_id: str
+
+    def __post_init__(self) -> None:
+        if not self.session_id.strip():
+            raise WorkspaceValidationError("An Agent Deck session id is required.")

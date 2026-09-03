@@ -16,6 +16,8 @@ from pathlib import Path
 from dashboard.models import LaunchAction, LaunchRequest, LocalProjectLocation, WorkspaceSpec
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.services import tmux
+from dashboard.services.agent_deck import AgentDeckSession, AgentDeckSnapshot
+from dashboard.services.agent_deck import snapshot as agent_deck_snapshot
 from dashboard.services.git_info import gather_git_info
 from dashboard.services.pane_layout_store import has_saved_pane_layouts
 from dashboard.services.projects_config_store import (
@@ -249,6 +251,8 @@ class ProjectStatus:
     last_modified: datetime | None
     workspace_metadata_warning: str | None = None
     remembered_pane_layouts: bool = False
+    agent_sessions: tuple[AgentDeckSession, ...] = ()
+    server_status: str = "not_configured"
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +267,8 @@ class ProjectScanResult:
     statuses: tuple[ProjectStatus, ...]
     truncated: bool
     warnings: tuple[str, ...]
+    tmux_sessions: tuple[tmux.TmuxSession, ...] = ()
+    agent_snapshot: AgentDeckSnapshot | None = None
 
 
 def scan_all_projects(
@@ -286,7 +292,10 @@ def scan_all_projects(
         config = config_result.value
         config_warning = config_result.warning
     discovery = discover_projects(config)
-    running_sessions = {session.name for session in tmux.list_tmux_sessions()}
+    tmux_sessions = tuple(tmux.list_tmux_sessions())
+    running_sessions = {session.name for session in tmux_sessions}
+    panes = tuple(tmux.list_tmux_panes())
+    agent_snapshot = agent_deck_snapshot()
     base_session_name_counts = _base_session_name_counts(discovery.projects)
     statuses = tuple(
         gather_project_status(
@@ -294,6 +303,12 @@ def scan_all_projects(
             store_path=store_path,
             running_sessions=running_sessions,
             base_session_name_counts=base_session_name_counts,
+            agent_sessions=tuple(
+                session
+                for session in agent_snapshot.sessions
+                if session.path == project.path.resolve()
+            ),
+            pane_runtimes=panes,
         )
         for project in discovery.projects
     )
@@ -308,7 +323,11 @@ def scan_all_projects(
         )
     )
     return ProjectScanResult(
-        statuses=statuses, truncated=discovery.truncated, warnings=tuple(warnings)
+        statuses=statuses,
+        truncated=discovery.truncated,
+        warnings=tuple(dict.fromkeys(warnings)),
+        tmux_sessions=tmux_sessions,
+        agent_snapshot=agent_snapshot,
     )
 
 
@@ -439,6 +458,8 @@ def gather_project_status(
     store_path: Path | None = None,
     running_sessions: set[str] | None = None,
     base_session_name_counts: dict[str, int] | None = None,
+    agent_sessions: tuple[AgentDeckSession, ...] = (),
+    pane_runtimes: Iterable[tmux.TmuxPaneRuntime] = (),
 ) -> ProjectStatus:
     """Gather *project*'s full status.
 
@@ -493,6 +514,26 @@ def gather_project_status(
     except OSError:
         last_modified = None
 
+    server_status = "not_configured"
+    if saved_workspace is not None:
+        server_panes = [
+            (window.window_name, pane.display_name)
+            for window in saved_workspace.windows
+            for pane in window.panes
+            if pane.kind.value == "dev_server"
+        ]
+        if server_panes:
+            server_status = "stopped" if not session_running else "unknown"
+            for window_name, display_name in server_panes:
+                matches = [
+                    pane for pane in pane_runtimes
+                    if pane.session_name == expected_session_name
+                    and pane.window_name == window_name
+                    and (pane.title == "server" or pane.title == display_name)
+                ]
+                if matches:
+                    server_status = "stopped" if matches[0].dead else "running"
+                    break
     return ProjectStatus(
         project=project,
         canonical_path=canonical_path,
@@ -510,6 +551,8 @@ def gather_project_status(
             saved_workspace is not None
             and has_saved_pane_layouts(LocalProjectLocation(canonical_path))
         ),
+        agent_sessions=agent_sessions,
+        server_status=server_status,
     )
 
 
@@ -538,8 +581,16 @@ def gather_single_project_status(
     config = config if config is not None else load_projects_config()
     discovery = discover_projects(config)
     base_session_name_counts = _base_session_name_counts(discovery.projects)
+    agent_snapshot = agent_deck_snapshot()
+    panes = tuple(tmux.list_tmux_panes())
     return gather_project_status(
-        project, store_path=store_path, base_session_name_counts=base_session_name_counts
+        project,
+        store_path=store_path,
+        base_session_name_counts=base_session_name_counts,
+        agent_sessions=tuple(
+            session for session in agent_snapshot.sessions if session.path == project.path.resolve()
+        ),
+        pane_runtimes=panes,
     )
 
 

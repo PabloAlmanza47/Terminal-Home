@@ -18,6 +18,7 @@ from dashboard.services.tmux import (
     TmuxSession,
     get_tmux_version,
     is_tmux_installed,
+    list_tmux_panes,
     list_tmux_sessions,
     run_local_tmux_command,
 )
@@ -154,6 +155,21 @@ def test_existing_query_callers_work_without_a_runner(monkeypatch: pytest.Monkey
 
     assert get_tmux_version() == "tmux 3.4"
     assert list_tmux_sessions() == []
+
+
+def test_list_panes_parses_runtime_fields() -> None:
+    def fake_runner(argv: list[str]) -> _FakeCompletedProcess:
+        assert argv[1:3] == ["list-panes", "-a"]
+        return _FakeCompletedProcess(
+            stdout="demo\tmain\tserver\tnpm\t0\n"
+            "demo\tmain\tdead-server\tnpm\t1\n"
+            "broken\n"
+        )
+
+    assert list_tmux_panes(runner=fake_runner) == [
+        tmux_module.TmuxPaneRuntime("demo", "main", "server", "npm", False),
+        tmux_module.TmuxPaneRuntime("demo", "main", "dead-server", "npm", True),
+    ]
 
 
 def test_ssh_runner_quotes_each_tmux_argument_and_keeps_destination_separate() -> None:
