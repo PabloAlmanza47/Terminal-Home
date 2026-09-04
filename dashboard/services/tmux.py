@@ -293,6 +293,20 @@ def list_tmux_panes(*, runner: TmuxCommandRunner = run_tmux_command) -> list[Tmu
     return panes
 
 
+def current_client_session(*, runner: TmuxCommandRunner = run_tmux_command) -> str | None:
+    """Return the session belonging to the current tmux client, if any."""
+    if runner is run_tmux_command and not is_tmux_installed():
+        return None
+    try:
+        result = runner(["tmux", "display-message", "-p", "-F", "#{client_session}"])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
 def get_tmux_version(*, runner: TmuxCommandRunner = run_tmux_command) -> str | None:
     """Return the `tmux -V` output, or None if tmux is unavailable."""
     if runner is run_tmux_command and not is_tmux_installed():

@@ -170,6 +170,7 @@ th              # open the dashboard
 th list         # list discovered projects and their status
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
+th switch          # open the fast workspace switcher
 th new my-project  # create a local project with safe defaults
 th new my-project --no-git
 th new my-project --no-launch
@@ -186,6 +187,12 @@ th setup <project> --dry-run  # print the complete setup plan only
 th completion bash  # print Bash completion setup
 th completion zsh   # print Zsh completion setup
 ```
+
+When Terminal Home is already running inside tmux, a convenient popup binding
+is `bind-key S display-popup -E "th switch"`. The switcher uses the current
+tmux client, so selecting a running workspace transfers that client with
+`switch-client`; stopped saved workspaces go through the same recreation path
+as `th up`.
 
 `list`, `plan`, and `doctor` never create, attach to, or modify a tmux
 session, and `plan` never saves a workspace or touches the filesystem — it

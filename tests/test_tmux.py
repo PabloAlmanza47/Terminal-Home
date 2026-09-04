@@ -172,6 +172,17 @@ def test_list_panes_parses_runtime_fields() -> None:
     ]
 
 
+def test_current_client_session_queries_tmux_client() -> None:
+    calls: list[list[str]] = []
+
+    def fake_runner(argv: list[str]) -> _FakeCompletedProcess:
+        calls.append(argv)
+        return _FakeCompletedProcess(stdout="terminal-home\n")
+
+    assert tmux_module.current_client_session(runner=fake_runner) == "terminal-home"
+    assert calls == [["tmux", "display-message", "-p", "-F", "#{client_session}"]]
+
+
 def test_ssh_runner_quotes_each_tmux_argument_and_keeps_destination_separate() -> None:
     calls: list[tuple[str, str, dict[str, object]]] = []
 

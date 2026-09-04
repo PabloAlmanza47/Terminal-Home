@@ -166,6 +166,11 @@ def _build_parser() -> argparse.ArgumentParser:
     up_parser.add_argument("project", help="Project name (if unique) or filesystem path.")
     up_parser.set_defaults(handler=_run_up)
 
+    switch_parser = subparsers.add_parser(
+        "switch", help="Open the popup-sized Terminal Home workspace switcher."
+    )
+    switch_parser.set_defaults(handler=_run_switch)
+
     new_parser = subparsers.add_parser(
         "new",
         help="Create a new local project without opening the dashboard.",
@@ -707,6 +712,13 @@ def _run_up(args: argparse.Namespace) -> int:
     except (LaunchError, TmuxCommandError, OSError, subprocess.TimeoutExpired) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _run_switch(args: argparse.Namespace) -> int:
+    from dashboard.switch import main as switch_main
+
+    switch_main()
     return 0
 
 

@@ -4,6 +4,109 @@ Screen {
     background: transparent;
 }
 
+.quick-switch-root {
+    align: left top;
+    width: 100%;
+    height: auto;
+    padding: 0;
+}
+
+.quick-switch-panel {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 90%;
+    padding: 1 1 0 1;
+    background: transparent;
+}
+
+#quick-switch-title {
+    text-align: left;
+    text-style: bold;
+    color: $text;
+    padding: 0 2 1 2;
+    height: 2;
+}
+
+#quick-switch-search-bar {
+    layout: horizontal;
+    align: left middle;
+    height: 3;
+    margin: 0 1 1 1;
+    padding: 0 1;
+    border-bottom: solid #30445f;
+}
+
+#quick-switch-search-prefix {
+    width: 1;
+    height: 3;
+    content-align: left middle;
+    color: $text-accent;
+    text-style: bold;
+}
+
+#quick-switch-search {
+    width: 1fr;
+    height: 3;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+#quick-switch-search:focus {
+    border: none;
+}
+
+#quick-switch-status {
+    color: $text-muted;
+    height: auto;
+    margin: 0 2 1 2;
+}
+
+#quick-switch-list {
+    width: 100%;
+    height: auto;
+    max-height: 8;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+#quick-switch-list > .option-list--option {
+    width: 100%;
+    padding: 0 2;
+    text-wrap: nowrap;
+    overflow-x: hidden;
+}
+
+#quick-switch-list > .option-list--option-highlighted {
+    color: #d4e2f2;
+    background: #20364a;
+    text-style: bold;
+}
+
+#quick-switch-list > .option-list--option-disabled {
+    color: $text-muted;
+    text-style: bold;
+    padding: 1 2 0 2;
+    height: 2;
+}
+
+#quick-switch-help {
+    width: 100%;
+    height: 2;
+    min-height: 2;
+    margin: 1 0 0 0;
+    padding: 1 2 0 2;
+    border-top: solid #30445f;
+    color: $text-muted;
+    text-align: left;
+}
+
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
    long-form screens usable without letting the scrollbar dominate split
    terminals; containers that fit content do not render one. */
