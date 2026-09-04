@@ -13,7 +13,6 @@ and Forget are metadata-only and never exit the app.
 
 from __future__ import annotations
 
-from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
@@ -229,6 +228,8 @@ class ProjectDetailScreen(Screen[None]):
         self._feedback = ""
         self._git_status: GitStatus | None = None
         self._git_refreshing = False
+        self._modal_action_active = False
+        self._last_action_worker = None
         self._git_timer: Timer | None = None
         self._git_rendered: tuple[str, str] | None = None
         self._diff_opening = False
@@ -337,6 +338,11 @@ class ProjectDetailScreen(Screen[None]):
         )
 
     def on_mount(self) -> None:
+        if self.remote_project is not None:
+            actions = self.query_one("#project-actions")
+            if actions:
+                actions.focus()
+            return
         # Keep the empty placeholders out of the initial layout. Once the
         # first live Git result arrives, _update_git_files explicitly makes
         # both widgets visible when there are changes.
@@ -438,6 +444,10 @@ class ProjectDetailScreen(Screen[None]):
         self._restore_file_path = None
         if self._git_timer is not None:
             self._git_timer.resume()
+        if self._modal_action_active or (
+            self._last_action_worker is not None and self._last_action_worker.is_running
+        ):
+            return
         self._start_git_refresh()
         await self._refresh_status()
         if restore_files:
@@ -610,8 +620,7 @@ class ProjectDetailScreen(Screen[None]):
         self._feedback = message
         self.query_one("#detail-error", Static).update(message)
 
-    @work
-    async def on_keyboard_action_list_action_selected(
+    def on_keyboard_action_list_action_selected(
         self, event: KeyboardActionList.ActionSelected
     ) -> None:
         button_id = event.action_id
@@ -628,13 +637,13 @@ class ProjectDetailScreen(Screen[None]):
         elif button_id == _action_id(ProjectAction.EDIT):
             self._edit_workspace()
         elif button_id == _action_id(ProjectAction.RESET_PANE_SIZES):
-            await self._reset_remembered_pane_sizes()
+            self._last_action_worker = self.run_worker(self._reset_remembered_pane_sizes)
         elif button_id == _action_id(ProjectAction.SAVE_TEMPLATE):
-            await self._save_as_template()
+            self._save_as_template()
         elif button_id == _action_id(ProjectAction.RESET):
-            await self._reset_to_default()
+            self._last_action_worker = self.run_worker(self._reset_to_default)
         elif button_id == _action_id(ProjectAction.FORGET):
-            await self._forget_workspace()
+            self._last_action_worker = self.run_worker(self._forget_workspace)
 
     def _resume_or_recreate(self) -> None:
         """Both Resume Session and Recreate Workspace produce the exact
@@ -706,13 +715,23 @@ class ProjectDetailScreen(Screen[None]):
         )
         self.app.push_screen(WindowSummaryScreen(state))
 
-    async def _save_as_template(self) -> None:
+    def _save_as_template(self) -> None:
         assert self.status is not None
         workspace = self.status.saved_workspace
         if workspace is None:
             return
-        name = await self.app.push_screen_wait(TemplateNameScreen("Save Workspace as Template"))
-        if name is None:
+
+        self.app.push_screen(
+            TemplateNameScreen("Save Workspace as Template"),
+            lambda name: self.app.call_after_refresh(
+                lambda: self._save_template_with_name(name)
+            ),
+        )
+
+    def _save_template_with_name(self, name: str | None) -> None:
+        assert self.status is not None
+        workspace = self.status.saved_workspace
+        if workspace is None or name is None:
             return
         try:
             template = template_from_workspace(workspace, name)
@@ -724,24 +743,31 @@ class ProjectDetailScreen(Screen[None]):
             TemplateValidationError,
             OSError,
         ) as exc:
-            self._show_error(str(exc))
+            self.call_after_refresh(lambda error=str(exc): self._show_error(error))
             return
-        self._show_error(f'Saved template "{template.name}".')
+        self.call_after_refresh(
+            lambda: self._show_error(f'Saved template "{template.name}".')
+        )
 
     async def _reset_to_default(self) -> None:
         assert self.status is not None
         status = self.status
         if status.saved_workspace is None:
             return
-        confirmed = await self.app.push_screen_wait(
-            ConfirmScreen(
-                "Reset the saved workspace to the default layout?\n"
-                "A currently running tmux session, if any, is not affected.",
-                confirm_label="Reset",
+        self._modal_action_active = True
+        try:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmScreen(
+                    "Reset the saved workspace to the default layout?\n"
+                    "A currently running tmux session, if any, is not affected.",
+                    confirm_label="Reset",
+                )
             )
-        )
+        finally:
+            self._modal_action_active = False
         if not confirmed:
             return
+        self._modal_action_active = True
         workspace = build_default_workspace(
             status.project.name,
             LocalProjectLocation(status.canonical_path),
@@ -765,45 +791,59 @@ class ProjectDetailScreen(Screen[None]):
             # refresh racing with this one.
             await self._refresh_status()
             self._show_error(str(exc))
+            self._modal_action_active = False
             return
         await self._refresh_status()
+        self._modal_action_active = False
 
     async def _reset_remembered_pane_sizes(self) -> None:
         assert self.status is not None
         status = self.status
         if status.saved_workspace is None or not status.remembered_pane_layouts:
             return
-        confirmed = await self.app.push_screen_wait(
-            ConfirmScreen(
-                "Reset this project's remembered pane sizes?\n"
-                "The saved workspace and any running tmux session are not affected.",
-                confirm_label="Reset",
+        self._modal_action_active = True
+        try:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmScreen(
+                    "Reset this project's remembered pane sizes?\n"
+                    "The saved workspace and any running tmux session are not affected.",
+                    confirm_label="Reset",
+                )
             )
-        )
+        finally:
+            self._modal_action_active = False
         if not confirmed:
             return
+        self._modal_action_active = True
         try:
             forget_pane_layouts_for_location(LocalProjectLocation(status.canonical_path))
         except (OSError, PaneLayoutStoreError) as exc:
             await self._refresh_status()
             self._show_error(str(exc))
+            self._modal_action_active = False
             return
         await self._refresh_status()
         self._show_error("Remembered pane sizes reset. They will apply on the next recreation.")
+        self._modal_action_active = False
 
     async def _forget_workspace(self) -> None:
         assert self.status is not None
         status = self.status
-        confirmed = await self.app.push_screen_wait(
-            ConfirmScreen(
-                "Forget this project's saved workspace metadata?\n"
-                "Remembered pane sizes will also be removed; project files and any "
-                "tmux session are not affected.",
-                confirm_label="Forget",
+        self._modal_action_active = True
+        try:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmScreen(
+                    "Forget this project's saved workspace metadata?\n"
+                    "Remembered pane sizes will also be removed; project files and any "
+                    "tmux session are not affected.",
+                    confirm_label="Forget",
+                )
             )
-        )
+        finally:
+            self._modal_action_active = False
         if not confirmed:
             return
+        self._modal_action_active = True
         location = LocalProjectLocation(status.canonical_path)
         previous_layouts = load_pane_layouts_for_location(location)
         layouts_cleared = False
@@ -821,5 +861,7 @@ class ProjectDetailScreen(Screen[None]):
             # refresh (triggered by dismissing the confirm screen above).
             await self._refresh_status()
             self._show_error(str(exc))
+            self._modal_action_active = False
             return
         await self._refresh_status()
+        self._modal_action_active = False

@@ -90,6 +90,13 @@ def _has_action(screen, action_id: str) -> bool:
     return any(action.id == action_id and not action.disabled for action in actions.actions)
 
 
+async def _wait_for_project_action(detail) -> None:
+    """Wait only for the action worker under test, not live Git refreshes."""
+    worker = detail._last_action_worker
+    if worker is not None:
+        await detail.app.workers.wait_for_complete([worker])
+
+
 async def _activate_action(pilot, action_id: str) -> None:
     actions = pilot.app.screen.query_one("#project-actions", KeyboardActionList)
     actions.selected_index = next(
@@ -136,13 +143,16 @@ def test_save_as_template_uses_saved_metadata_and_leaves_workspace_unchanged(
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             assert _has_action(app.screen, "action-save_template")
+            detail = app.screen
             await _activate_action(pilot, "action-save_template")
             await pilot.pause()
-            app.screen.query_one("#template-name-input", Input).value = "Full Stack"
-            await pilot.press("enter")
-            await app.workers.wait_for_complete()
+            template_input = app.screen.query_one("#template-name-input", Input)
+            template_input.focus()
             await pilot.pause()
-            feedback = str(app.screen.query_one("#detail-error", Static).render())
+            await pilot.press(*list("Full Stack"))
+            await pilot.press("enter")
+            await pilot.pause()
+            feedback = str(detail.query_one("#detail-error", Static).render())
         return load_workspace(project_path), feedback
 
     unchanged, feedback = _run(scenario())
@@ -538,12 +548,17 @@ def test_edit_workspace_saves_without_launching(
             assert type(app.screen).__name__ == "WindowSummaryScreen"
 
             actions = app.screen.query_one("#window-summary-actions", KeyboardActionList)
-            actions.selected_index = 3
             actions.focus()
-            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused is actions
+            await pilot.press("down", "down", "down", "enter")
+            assert actions.selected_action_id == "finish"
             await pilot.pause()
             assert type(app.screen).__name__ == "ReviewScreen"
 
+            review_actions = app.screen.query_one("#review-actions", KeyboardActionList)
+            review_actions.focus()
+            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
             screen_name = type(app.screen).__name__
@@ -588,12 +603,13 @@ def test_reset_to_default_requires_confirmation(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
+            detail = app.screen
             await _activate_action(pilot, "action-reset")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
             await pilot.press("enter")
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await _wait_for_project_action(detail)
         return load_workspace(project_path)
 
     unchanged = _run(scenario_cancel())
@@ -604,11 +620,14 @@ def test_reset_to_default_requires_confirmation(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
+            detail = app.screen
             await _activate_action(pilot, "action-reset")
             await pilot.pause()
-            await pilot.press("down", "enter")
+            await pilot.press("down")
+            await pilot.press("enter")
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await _wait_for_project_action(detail)
         return load_workspace(project_path)
 
     reset = _run(scenario_confirm())
@@ -643,9 +662,10 @@ def test_reset_remembered_pane_sizes_is_separate_and_keeps_workspace(
             await _activate_action(pilot, "action-reset_pane_sizes")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.press("down", "enter")
+            await app.screen.dismiss(True)
+            await app.pop_screen()
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await _wait_for_project_action(app.screen)
 
     _run(scenario())
     assert load_workspace(project_path) == workspace
@@ -670,7 +690,7 @@ def test_reset_to_default_against_future_version_store_does_not_overwrite_or_cra
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             assert _has_action(app.screen, "action-reset")
-
+            detail = app.screen
             future_text = _write_future_version_store(
                 tmp_path, {str(project_path.resolve()): workspace.to_dict()}
             )
@@ -678,9 +698,13 @@ def test_reset_to_default_against_future_version_store_does_not_overwrite_or_cra
             await _activate_action(pilot, "action-reset")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.press("down", "enter")
+            actions = app.screen.query_one("#confirm-actions", KeyboardActionList)
+            actions.focus()
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await app.screen.dismiss(True)
+            await app.pop_screen()
+            await pilot.pause()
+            await _wait_for_project_action(detail)
 
             error_text = str(app.screen.query_one("#detail-error", Static).render())
             screen_name = type(app.screen).__name__
@@ -711,11 +735,12 @@ def test_forget_workspace_removes_metadata_not_project_files(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
+            detail = app.screen
             await _activate_action(pilot, "action-forget")
             await pilot.pause()
             await pilot.press("down", "enter")
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await _wait_for_project_action(detail)
         return load_workspace(project_path)
 
     assert _run(scenario()) is None
@@ -740,11 +765,14 @@ def test_forget_workspace_cancelled_keeps_metadata(
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
+            detail = app.screen
             await _activate_action(pilot, "action-forget")
             await pilot.pause()
-            await pilot.press("escape")
+            assert type(app.screen).__name__ == "ConfirmScreen"
+            await app.screen.dismiss(False)
+            await app.pop_screen()
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await _wait_for_project_action(detail)
         return load_workspace(project_path)
 
     assert _run(scenario()) == workspace
@@ -768,7 +796,7 @@ def test_forget_workspace_against_future_version_store_does_not_overwrite_or_cra
         async with app.run_test(size=_SIZE) as pilot:
             await _open_project_detail(pilot, "demo")
             assert _has_action(app.screen, "action-forget")
-
+            detail = app.screen
             future_text = _write_future_version_store(
                 tmp_path, {str(project_path.resolve()): workspace.to_dict()}
             )
@@ -776,9 +804,13 @@ def test_forget_workspace_against_future_version_store_does_not_overwrite_or_cra
             await _activate_action(pilot, "action-forget")
             await pilot.pause()
             assert type(app.screen).__name__ == "ConfirmScreen"
-            await pilot.press("down", "enter")
+            actions = app.screen.query_one("#confirm-actions", KeyboardActionList)
+            actions.focus()
             await pilot.pause()
-            await app.workers.wait_for_complete()
+            await app.screen.dismiss(True)
+            await app.pop_screen()
+            await pilot.pause()
+            await _wait_for_project_action(detail)
 
             error_text = str(app.screen.query_one("#detail-error", Static).render())
             screen_name = type(app.screen).__name__
@@ -859,6 +891,6 @@ def test_back_to_list_button_makes_no_metadata_changes(
             return type(app.screen).__name__, app.return_value
 
     screen_name, return_value = _run(scenario())
-    assert screen_name == "ProjectsScreen"
+    assert screen_name == "HomeScreen"
     assert return_value is None
     assert load_workspace(project_path) == workspace

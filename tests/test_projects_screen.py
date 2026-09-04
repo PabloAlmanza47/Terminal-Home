@@ -77,10 +77,15 @@ def _run(coro):
 
 
 async def _open_projects_screen(pilot) -> None:
-    """From Home, select "Continue Project" (the first main-menu item), and
-    wait for the background scan to complete.
+    """From Home, select "Continue Project" and wait for its scan.
+
+    Home initially focuses Recent Projects; move to Primary Actions before
+    activating the first action.
     """
     await pilot.pause()
+    if pilot.app.focused.id != "main-menu":
+        await pilot.press("left")
+        await pilot.pause()
     await pilot.press("enter")
     await pilot.pause()
     await pilot.app.workers.wait_for_complete()

@@ -162,6 +162,10 @@ class ReviewScreen(Screen[None]):
             # Never launches -- a currently running session (if any) for
             # this project is left completely untouched.
             self.app.pop_screen()
+            # The review is reached from the window-summary step.  Return
+            # to the detail screen as one edit flow rather than leaving the
+            # intermediate summary screen visible.
+            self.app.pop_screen()
             return
 
         self.app.exit(
