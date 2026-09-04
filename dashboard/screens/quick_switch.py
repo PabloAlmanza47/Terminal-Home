@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Input, Static
 from textual.widgets.option_list import Option
@@ -16,6 +16,7 @@ from dashboard.services.quick_switch import (
     QuickSwitchEntry,
     build_quick_switch_entries,
     filter_quick_switch_entries,
+    format_quick_switch_row,
 )
 from dashboard.services.workspace_store import WorkspaceStoreVersionError
 from dashboard.widgets import KeyboardOptionList as OptionList
@@ -32,8 +33,10 @@ class QuickSwitchScreen(Screen[LaunchRequest | None]):
     def compose(self) -> ComposeResult:
         with Container(classes="quick-switch-root"):
             with Vertical(classes="quick-switch-panel"):
-                yield Static("Quick Switch", id="quick-switch-title")
-                yield Input(placeholder="Search…", id="quick-switch-search")
+                yield Static("Switch Workspace", id="quick-switch-title")
+                with Horizontal(id="quick-switch-search-bar"):
+                    yield Static("›", id="quick-switch-search-prefix")
+                    yield Input(placeholder="Search projects…", id="quick-switch-search")
                 yield Static("Loading projects…", id="quick-switch-status")
                 yield OptionList(id="quick-switch-list")
                 yield Static("↑↓ Select   Enter Switch   Esc Close", id="quick-switch-help")
@@ -63,20 +66,24 @@ class QuickSwitchScreen(Screen[LaunchRequest | None]):
         active = [entry for entry in visible if entry.is_running]
         recent = [entry for entry in visible if not entry.is_running]
         if active:
-            option_list.add_option(Option("Active", disabled=True))
+            option_list.add_option(Option("ACTIVE", disabled=True))
             self._add_entry_rows(option_list, active)
         if recent:
-            option_list.add_option(Option("Recent", disabled=True))
+            option_list.add_option(Option("RECENT", disabled=True))
             self._add_entry_rows(option_list, recent)
         if not visible:
             option_list.add_option(Option("No matching projects", disabled=True))
 
     @staticmethod
     def _add_entry_rows(option_list: OptionList, entries: list[QuickSwitchEntry]) -> None:
+        # Leave room for KeyboardOptionList's focus marker and the row
+        # padding. The formatter then uses terminal cell width and truncates
+        # the name before the status can collide or wrap.
+        width = max(12, (option_list.content_region.width or 64) - 6)
         for entry in entries:
-            marker = "●" if entry.is_running else "○"
-            current = "  CURRENT" if entry.is_current else ""
-            option_list.add_option(Option(f"{marker} {entry.label}{current}", id=entry.option_id))
+            option_list.add_option(
+                Option(format_quick_switch_row(entry, width), id=entry.option_id)
+            )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "quick-switch-search":

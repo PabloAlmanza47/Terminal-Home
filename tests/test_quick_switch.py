@@ -7,7 +7,11 @@ from pathlib import Path
 
 from dashboard.services.agent_deck import AgentDeckSession, AgentDeckSnapshot, AgentStatus
 from dashboard.services.projects import Project, ProjectScanResult, ProjectStatus
-from dashboard.services.quick_switch import build_quick_switch_entries, filter_quick_switch_entries
+from dashboard.services.quick_switch import (
+    build_quick_switch_entries,
+    filter_quick_switch_entries,
+    format_quick_switch_row,
+)
 
 
 def _status(path: Path, *, running: bool, session: str | None = None) -> ProjectStatus:
@@ -64,3 +68,15 @@ def test_duplicate_names_use_canonical_path_ids(tmp_path: Path) -> None:
     entries = build_quick_switch_entries(ProjectScanResult((first, second), False, ()))
     assert len({entry.option_id for entry in entries}) == 2
     assert all("demo —" in entry.label for entry in entries)
+
+
+def test_row_formatter_keeps_status_on_one_line_and_truncates_name(tmp_path: Path) -> None:
+    entry = build_quick_switch_entries(
+        ProjectScanResult(
+            (_status(tmp_path / "a-very-long-project-name", running=True),), False, ()
+        )
+    )[0]
+    row = format_quick_switch_row(entry, 30)
+    assert "running" in row
+    assert "…" in row
+    assert "\n" not in row
