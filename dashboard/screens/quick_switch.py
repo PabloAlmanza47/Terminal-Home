@@ -52,6 +52,13 @@ class QuickSwitchScreen(Screen[LaunchRequest | None]):
             else:
                 status_widget.display = False
             self._refresh_rows()
+            # Adding the first selectable project makes OptionList ensure it
+            # is visible, which can scroll past the non-selectable ACTIVE
+            # heading. Reset only the initial viewport; the selection stays
+            # on the first project and subsequent keyboard scrolling remains
+            # unchanged.
+            option_list = self.query_one("#quick-switch-list", OptionList)
+            self.call_after_refresh(lambda: option_list.scroll_home(animate=False))
             self.query_one("#quick-switch-search", Input).focus()
         except (OSError, ValueError, WorkspaceStoreVersionError) as exc:
             self.query_one("#quick-switch-status", Static).update(f"Could not load projects: {exc}")

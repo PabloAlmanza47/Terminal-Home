@@ -33,6 +33,22 @@ def test_active_rows_are_first_and_current_is_marked(tmp_path: Path) -> None:
     assert entries[1].is_current is False
 
 
+def test_current_workspace_is_kept_when_agent_deck_reports_same_session(
+    tmp_path: Path,
+) -> None:
+    current = _status(tmp_path / "terminal-home", running=True, session="terminal-home")
+    agent = AgentDeckSession(
+        "a1", "Agent", current.canonical_path, "claude", AgentStatus.RUNNING, "terminal-home"
+    )
+    scan = ProjectScanResult(
+        (current,), False, (), agent_snapshot=AgentDeckSnapshot(True, (agent,))
+    )
+    entries = build_quick_switch_entries(scan, "terminal-home")
+    assert len(entries) == 1
+    assert entries[0].is_current is True
+    assert "● current" in format_quick_switch_row(entries[0], 40)
+
+
 def test_entries_naturally_form_active_then_recent_sections(tmp_path: Path) -> None:
     active = _status(tmp_path / "active", running=True)
     recent = _status(tmp_path / "recent", running=False)
