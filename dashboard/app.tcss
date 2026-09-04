@@ -4,6 +4,50 @@ Screen {
     background: transparent;
 }
 
+.quick-switch-root {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+}
+
+.quick-switch-panel {
+    width: 52;
+    max-width: 100%;
+    height: auto;
+    max-height: 90%;
+    border: solid $primary;
+    padding: 1 2;
+    background: $surface;
+}
+
+#quick-switch-title {
+    text-align: center;
+    text-style: bold;
+    color: $text-accent;
+}
+
+#quick-switch-search {
+    margin: 1 0;
+}
+
+#quick-switch-status,
+#quick-switch-help {
+    color: $text-muted;
+    height: auto;
+}
+
+#quick-switch-status {
+    margin: 0 0 1 0;
+}
+
+#quick-switch-list {
+    height: auto;
+    max-height: 10;
+    margin: 0 0 1 0;
+    border: none;
+    background: transparent;
+}
+
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
    long-form screens usable without letting the scrollbar dominate split
    terminals; containers that fit content do not render one. */
