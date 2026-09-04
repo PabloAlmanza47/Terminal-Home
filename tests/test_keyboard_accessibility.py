@@ -32,21 +32,21 @@ def test_help_overlay_is_keyboard_openable_and_restores_focus(
 ) -> None:
     _isolated(monkeypatch, tmp_path)
 
-    async def scenario() -> tuple[str, str, str]:
+    async def scenario() -> tuple[str | None, str, str | None]:
         app = TerminalHomeApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            original = type(app.focused).__name__
+            original = app.focused.id if app.focused else None
             await pilot.press("?")
             await pilot.pause()
             assert isinstance(app.screen, HelpScreen)
             assert app.focused.id == "help-actions"
             await pilot.press("escape")
             await pilot.pause()
-            return original, type(app.screen).__name__, type(app.focused).__name__
+            return original, type(app.screen).__name__, app.focused.id if app.focused else None
 
     original, screen, focused = _run(scenario())
-    assert (original, screen, focused) == ("KeyboardActionList", "HomeScreen", original)
+    assert (original, screen, focused) == ("recent-projects-list", "HomeScreen", original)
 
 
 def test_global_shortcuts_open_screens_and_escape_returns(
@@ -109,9 +109,12 @@ def test_arrow_and_space_activate_home_menu(
 
     async def scenario() -> tuple[str, int | None]:
         app = TerminalHomeApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(80, 40)) as pilot:
             await pilot.pause()
-            menu = app.screen.query_one("#main-menu")
+            menu = app.screen.query_one("#main-menu", KeyboardActionList)
+            await pilot.press("left")
+            await pilot.pause()
+            assert app.focused is menu
             await pilot.press("down")
             assert menu.selected_index == 1
             await pilot.press("space")
