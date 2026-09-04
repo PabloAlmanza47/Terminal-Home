@@ -27,7 +27,7 @@ DEFAULT_ROOT = Path.home() / "projects"
 # names exist. Excluding a name means it is skipped entirely: neither
 # returned as a project nor recursed into.
 DEFAULT_EXCLUDED_NAMES = frozenset(
-    {"terminal-home", ".git", "node_modules", ".venv", "venv", "__pycache__"}
+    {".git", "node_modules", ".venv", "venv", "__pycache__"}
 )
 
 # Immediate children of each root only -- matches the original,

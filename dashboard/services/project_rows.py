@@ -27,7 +27,7 @@ class ActivityProjectRow:
     name: str
     workspace: str
     server: str
-    codex: str
+    agent: str
 
 
 def _compact_activity_status(value: str) -> str:
@@ -39,7 +39,7 @@ def format_activity_table_header(
 ) -> str:
     """Return the aligned, non-selectable header for the Home activity table."""
     return format_activity_table(
-        [ActivityProjectRow("Project", "Workspace", "Server", "Codex")],
+        [ActivityProjectRow("Project", "Workspace", "Server", "Agent")],
         width,
         layout_rows=rows,
     )[0]
@@ -59,7 +59,7 @@ def format_activity_table(
         [row.name for row in measured_rows] + ["Project"],
         [row.workspace for row in measured_rows] + ["Workspace"],
         [row.server for row in measured_rows] + ["Server"],
-        [row.codex for row in measured_rows] + ["Codex"],
+        [row.agent for row in measured_rows] + ["Agent"],
     ]
     natural = [max(cell_len(value) for value in column) for column in columns]
     # Status columns are deliberately stable so every row scans vertically.
@@ -86,7 +86,7 @@ def format_activity_table(
             row.name,
             _compact_activity_status(row.workspace),
             _compact_activity_status(row.server),
-            _compact_activity_status(row.codex),
+            _compact_activity_status(row.agent),
         ]
         values[0] = fit(values[0], name_width)
         result.append(

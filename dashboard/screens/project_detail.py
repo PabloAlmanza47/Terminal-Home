@@ -35,7 +35,7 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
-from dashboard.services.activity import codex_status, server_status, workspace_status
+from dashboard.services.activity import agent_display_name, agent_status, effective_agent_session, server_status, workspace_status
 from dashboard.services.git import GitDiffResult, GitFileChange, GitStatus, load_diff, load_status
 from dashboard.services.pane_layout_store import (
     PaneLayoutStoreError,
@@ -146,26 +146,25 @@ def _session_line(status: ProjectStatus) -> str:
 
 
 def _agent_line(status: ProjectStatus) -> str | None:
-    codex = [s for s in status.agent_sessions if s.tool.casefold() == "codex"]
-    if not codex:
+    selected, count = effective_agent_session(status.agent_sessions)
+    if selected is None:
         return None
-    order = {"error": 0, "waiting": 1, "running": 2, "idle": 3, "stopped": 4, "unknown": 5}
-    selected = min(codex, key=lambda session: order.get(session.status.value, 5))
     labels = {"error": "Error", "waiting": "Waiting", "running": "Working",
               "idle": "Idle", "stopped": "Stopped", "unknown": "Unknown"}
-    count = f" ({len(codex)})" if len(codex) > 1 else ""
-    return f"Agent:          Codex{count}  ({labels.get(selected.status.value, 'Unknown')})"
+    count_label = f" ({count})" if count > 1 else ""
+    return f"Agent:          {agent_display_name(selected.tool)}{count_label}  ({labels.get(selected.status.value, 'Unknown')})"
 
 
 def format_activity_block(status: ProjectStatus) -> str:
     workspace = workspace_status(status)
     server = server_status(status)
-    agent, count = codex_status(status)
+    agent, count, selected = agent_status(status)
     agent_label = f"({count}) {agent.label}" if count > 1 else agent.label
+    agent_name = agent_display_name(selected.tool) if selected is not None else "No Agent"
     return "\n".join(
         [f"Workspace  {workspace.glyph} {workspace.label}",
          f"Server     {server.glyph} {server.label}",
-         f"Codex      {agent.glyph} {agent_label}"]
+         f"Agent     {agent_name} {agent.glyph} {agent_label}"]
     )
 
 
@@ -311,7 +310,7 @@ class ProjectDetailScreen(Screen[None]):
                         for action in (*primary, *secondary)
                     ]
                     if status.agent_sessions:
-                        actions.append(ActionItem("open-agent", "Open Codex Agent"))
+                        actions.append(ActionItem("open-agent", "Open Agent Deck Session"))
                     actions.append(ActionItem("back-to-list", "Back to Project List"))
                     yield Static("Actions", classes="panel-heading")
                     yield ProjectActionList(*actions, id="project-actions")
@@ -325,7 +324,7 @@ class ProjectDetailScreen(Screen[None]):
                 if not primary:
                     yield ProjectActionList(
                         *(
-                            [ActionItem("open-agent", "Open Codex Agent")]
+                            [ActionItem("open-agent", "Open Agent Deck Session")]
                             if status.agent_sessions
                             else []
                         ),
@@ -650,9 +649,9 @@ class ProjectDetailScreen(Screen[None]):
     def _open_agent(self) -> None:
         if self.status is None:
             return
-        codex = [s for s in self.status.agent_sessions if s.tool.casefold() == "codex"]
-        if codex:
-            self.app.exit(AgentDeckAttachRequest(codex[0].id))
+        selected, _ = effective_agent_session(self.status.agent_sessions)
+        if selected is not None:
+            self.app.exit(AgentDeckAttachRequest(selected.id))
 
     def _launch_remote(self) -> None:
         assert self.remote_project is not None

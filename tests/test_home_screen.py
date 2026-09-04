@@ -132,7 +132,7 @@ def test_activity_table_header_uses_data_row_column_widths() -> None:
 
     assert header.index("Workspace") == rendered.index("● Running")
     assert header.index("Server") == rendered.index("— N/A")
-    assert header.index("Codex") == rendered.index("— No Agent")
+    assert header.index("Agent") == rendered.index("— No Agent")
 
 
 def _project_id(path: Path) -> str:

@@ -66,12 +66,12 @@ def test_discovers_immediate_child_directories(tmp_path: Path) -> None:
     assert result.warnings == ()
 
 
-def test_excludes_terminal_home_by_default(tmp_path: Path) -> None:
+def test_discovers_terminal_home_by_default(tmp_path: Path) -> None:
     root = _make_tree(tmp_path, dirs=["alpha", "terminal-home", "beta"])
 
     result = discover_projects(ProjectsConfig(roots=(root,)))
 
-    assert [p.name for p in result.projects] == ["alpha", "beta"]
+    assert [p.name for p in result.projects] == ["alpha", "beta", "terminal-home"]
 
 
 def test_ignores_files_only_lists_directories(tmp_path: Path) -> None:

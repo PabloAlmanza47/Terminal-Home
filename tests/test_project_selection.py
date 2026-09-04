@@ -40,6 +40,17 @@ def test_resolves_unique_name(tmp_path: Path) -> None:
     assert result.project.path.resolve() == (root / "alpha").resolve()
 
 
+def test_terminal_home_is_a_normal_discovered_project_and_selector(tmp_path: Path) -> None:
+    root = _make_root(tmp_path, "roots", ["terminal-home", "node_modules"])
+    config = ProjectsConfig(roots=(root,))
+
+    selectable = list_selectable_projects(config)
+    assert [project.name for project in selectable] == ["terminal-home"]
+    result = resolve_project_selector("terminal-home", config=config)
+    assert result.ok and result.project is not None
+    assert result.project.path == root / "terminal-home"
+
+
 def test_resolves_unique_name_case_insensitively(tmp_path: Path) -> None:
     root = _make_root(tmp_path, "roots", ["Alpha"])
     config = ProjectsConfig(roots=(root,))

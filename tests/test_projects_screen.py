@@ -314,7 +314,7 @@ def test_lists_registered_remote_projects_and_opens_offline_detail(
     assert "metadata only" in status_text
 
 
-def test_excludes_terminal_home_and_hidden_dirs(
+def test_includes_terminal_home_and_excludes_hidden_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = _isolate(monkeypatch, tmp_path)
@@ -328,7 +328,10 @@ def test_excludes_terminal_home_and_hidden_dirs(
             await _open_projects_screen(pilot)
             return _option_ids(pilot)
 
-    assert _run(scenario()) == [_project_id(projects_root / "alpha")]
+    assert _run(scenario()) == [
+        _project_id(projects_root / "alpha"),
+        _project_id(projects_root / "terminal-home"),
+    ]
 
 
 def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

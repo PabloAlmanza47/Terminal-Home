@@ -1027,7 +1027,7 @@ def test_status_command_human_and_json_output(
     output = capsys.readouterr().out
     assert "demo" in output
     assert "Workspace  Running" in output
-    assert "Codex      Working" in output
+    assert "Agent      Codex Working" in output
     assert "Modified  1" in output
     assert "Changed Files" in output
     assert ".M file.py" in output
@@ -1035,7 +1035,7 @@ def test_status_command_human_and_json_output(
     assert cli_module.run(["status", ".", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["project"]["name"] == "demo"
-    assert payload["agent"] == {"count": 1, "status": "working"}
+    assert payload["agent"] == {"count": 1, "status": "working", "tool": "codex"}
     assert payload["git"]["clean"] is False
     assert payload["git"]["files"][0]["worktree_status"] == "M"
 

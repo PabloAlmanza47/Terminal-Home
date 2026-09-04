@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from dashboard import __version__
 from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
-from dashboard.services.activity import codex_status, server_status, workspace_status
+from dashboard.services.activity import agent_status, agent_display_name, server_status, workspace_status
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.cli_colors import style_table_header
 from dashboard.services.completion import (
@@ -484,8 +484,8 @@ def _resolve_local_project(selector: str):
     return resolved.project
 
 
-def _agent_cli_state(status: ProjectStatus) -> tuple[str, int]:
-    value, count = codex_status(status)
+def _agent_cli_state(status: ProjectStatus):
+    value, count, selected = agent_status(status)
     labels = {
         "Working": "working",
         "Waiting": "waiting",
@@ -495,18 +495,18 @@ def _agent_cli_state(status: ProjectStatus) -> tuple[str, int]:
         "Unknown": "unknown",
         "No Agent": "none",
     }
-    return labels.get(value.label, "unknown"), count
+    return labels.get(value.label, "unknown"), count, selected
 
 
 def _status_payload(status: ProjectStatus, git: GitStatus) -> dict[str, object]:
-    agent_state, agent_count = _agent_cli_state(status)
+    agent_state, agent_count, selected = _agent_cli_state(status)
     workspace = workspace_status(status)
     server = server_status(status)
     return {
         "project": {"name": status.project.name, "path": str(status.canonical_path)},
         "workspace": {"status": workspace.label.casefold().replace(" ", "_")},
         "server": {"status": server.label.casefold().replace(" ", "_")},
-        "agent": {"status": agent_state, "count": agent_count},
+        "agent": {"status": agent_state, "count": agent_count, "tool": selected.tool if selected else None},
         "git": {
             "branch": git.branch,
             "detached": git.detached,
@@ -536,7 +536,7 @@ def _status_payload(status: ProjectStatus, git: GitStatus) -> dict[str, object]:
 def _status_text(
     status: ProjectStatus, git: GitStatus, *, watch: bool = False, interval: float = 1.0
 ) -> str:
-    agent_state, agent_count = _agent_cli_state(status)
+    agent_state, agent_count, selected = _agent_cli_state(status)
     workspace = workspace_status(status)
     server = server_status(status)
     agent_label = "No Agent" if agent_state == "none" else agent_state.title()
@@ -544,12 +544,13 @@ def _status_text(
         agent_label = "Working"
     if agent_count > 1:
         agent_label = f"{agent_label} ({agent_count})"
+    agent_name = agent_display_name(selected.tool) if selected else "No Agent"
     lines = [status.project.name, str(status.canonical_path), ""]
     lines.extend(
         [
             f"Workspace  {workspace.label}",
             f"Server     {server.label}",
-            f"Codex      {agent_label}",
+            f"Agent      {agent_name} {agent_label}",
             "",
             "Git",
         ]

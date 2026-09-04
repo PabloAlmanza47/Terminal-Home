@@ -28,8 +28,9 @@ def test_defaults() -> None:
 
 
 def test_default_excluded_names_cover_common_expensive_directories() -> None:
-    for name in ("terminal-home", ".git", "node_modules", ".venv", "venv", "__pycache__"):
+    for name in (".git", "node_modules", ".venv", "venv", "__pycache__"):
         assert name in DEFAULT_EXCLUDED_NAMES
+    assert "terminal-home" not in DEFAULT_EXCLUDED_NAMES
 
 
 def test_round_trip_to_dict_from_dict(tmp_path: Path) -> None:

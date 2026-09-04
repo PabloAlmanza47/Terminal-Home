@@ -113,6 +113,19 @@ def test_discovery_candidates_include_manual_projects_and_ignore_missing_roots(
     assert completion_module.discover_project_selector_candidates() == ("Manual Project",)
 
 
+def test_discovery_candidates_include_terminal_home_without_directory_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "projects"
+    root.mkdir()
+    (root / "terminal-home").mkdir()
+    (root / "node_modules").mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    save_projects_config(ProjectsConfig(roots=(root,)))
+
+    assert completion_module.discover_project_selector_candidates() == ("terminal-home",)
+
+
 def test_discovery_inherits_canonical_symlink_deduplication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

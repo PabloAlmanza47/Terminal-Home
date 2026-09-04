@@ -33,7 +33,7 @@ from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
-from dashboard.services.activity import codex_status, server_status, workspace_status
+from dashboard.services.activity import agent_display_name, agent_status, server_status, workspace_status
 from dashboard.services.formatting import greeting_for
 from dashboard.services.project_rows import (
     ActivityProjectRow,
@@ -95,19 +95,20 @@ def _activity_card(
 ) -> str:
     workspace = workspace_status(status)
     server = server_status(status)
-    agent, agent_count = codex_status(status)
+    agent, agent_count, selected = agent_status(status)
     name = display_name or status.project.name
     name = _fit_activity_name(name, width)
     if status.workspace_metadata_error:
         name = f"{name}  [{status_badge(status)}]"
     count = f"({agent_count}) " if agent_count > 1 else ""
-    codex_text = f"Codex {agent.glyph} {count}{agent.label}"
+    agent_name = agent_display_name(selected.tool) if selected is not None else "Agent"
+    agent_text = f"Agent {agent_name} {agent.glyph} {count}{agent.label}"
     first_status_line = (
         f"  Workspace {workspace.glyph} {workspace.label}"
         f"  Server {server.glyph} {server.label}"
     )
-    status_lines = [first_status_line, f"  {codex_text}"] if width < 78 else [
-        f"  {first_status_line[2:]}  {codex_text}"
+    status_lines = [first_status_line, f"  {agent_text}"] if width < 78 else [
+        f"  {first_status_line[2:]}  {agent_text}"
     ]
     return "\n".join([name, *status_lines])
 
@@ -133,10 +134,11 @@ def _activity_display_name(status: ProjectStatus, display_name: str) -> str:
     return display_name
 
 
-def _codex_activity_value(status: ProjectStatus) -> str:
-    value, count = codex_status(status)
+def _agent_activity_value(status: ProjectStatus) -> str:
+    value, count, selected = agent_status(status)
     prefix = f"({count}) " if count > 1 else ""
-    return f"{value.glyph} {prefix}{value.label}"
+    tool = f"{agent_display_name(selected.tool)} " if selected is not None else ""
+    return f"{value.glyph} {prefix}{tool}{value.label}"
 
 
 def _session_label(session: TmuxSession, matched: ProjectStatus | None, *, compact: bool) -> str:
@@ -616,7 +618,7 @@ class HomeScreen(Screen[None]):
                 _activity_display_name(status, display_name),
                 _activity_value(workspace_status(status)),
                 _activity_value(server_status(status)),
-                _codex_activity_value(status),
+                _agent_activity_value(status),
             )
             for status, display_name in zip(visible, display_names)
         ]
@@ -762,13 +764,13 @@ class HomeScreen(Screen[None]):
             return
         status = self._agent_lookup.get(option.id or "")
         if status is None:
-            self.app.notify("No matching Codex Agent Deck session.", severity="warning")
+            self.app.notify("No Agent Deck session found for this project.", severity="warning")
             return
-        codex = [session for session in status.agent_sessions if session.tool.casefold() == "codex"]
-        if not codex:
-            self.app.notify("No matching Codex Agent Deck session.", severity="warning")
+        _, _, selected = agent_status(status)
+        if selected is None:
+            self.app.notify("No Agent Deck session found for this project.", severity="warning")
             return
-        self.app.exit(AgentDeckAttachRequest(codex[0].id))
+        self.app.exit(AgentDeckAttachRequest(selected.id))
 
     # --- Global shortcuts ----------------------------------------------------
 
