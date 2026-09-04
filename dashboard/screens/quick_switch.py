@@ -33,13 +33,12 @@ class QuickSwitchScreen(Screen[LaunchRequest | None]):
     def compose(self) -> ComposeResult:
         with Container(classes="quick-switch-root"):
             with Vertical(classes="quick-switch-panel"):
-                yield Static("Switch Workspace", id="quick-switch-title")
                 with Horizontal(id="quick-switch-search-bar"):
                     yield Static("›", id="quick-switch-search-prefix")
                     yield Input(placeholder="Search projects…", id="quick-switch-search")
                 yield Static("Loading projects…", id="quick-switch-status")
                 yield OptionList(id="quick-switch-list")
-                yield Static("↑↓ Select   Enter Switch   Esc Close", id="quick-switch-help")
+                yield Static("↑↓ navigate   ↵ switch   esc close", id="quick-switch-help")
 
     def on_mount(self) -> None:
         try:

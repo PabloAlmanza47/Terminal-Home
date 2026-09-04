@@ -51,9 +51,7 @@ def _truncate_label(value: str, width: int) -> str:
 def format_quick_switch_row(entry: QuickSwitchEntry, width: int) -> str:
     """Format one single-line, cell-width-aware Quick Switch row."""
     width = max(1, width)
-    status = "● current" if entry.is_current else (
-        "● running" if entry.is_running else "○ stopped"
-    )
+    status = "current" if entry.is_current else ("running" if entry.is_running else "stopped")
     name_width = max(1, width - cell_len(status) - 2)
     name = _truncate_label(entry.label, name_width)
     return f"{name}{' ' * max(0, name_width - cell_len(name))}  {status}"

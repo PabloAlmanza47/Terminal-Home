@@ -46,7 +46,7 @@ def test_current_workspace_is_kept_when_agent_deck_reports_same_session(
     entries = build_quick_switch_entries(scan, "terminal-home")
     assert len(entries) == 1
     assert entries[0].is_current is True
-    assert "● current" in format_quick_switch_row(entries[0], 40)
+    assert "current" in format_quick_switch_row(entries[0], 40)
 
 
 def test_entries_naturally_form_active_then_recent_sections(tmp_path: Path) -> None:
