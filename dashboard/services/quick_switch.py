@@ -84,8 +84,15 @@ def build_quick_switch_entries(
 ) -> list[QuickSwitchEntry]:
     """Build active-then-recent rows from the normal project scan."""
     agent_sessions = _agent_owned_sessions(scan.agent_snapshot)
+    # The workspace from which the popup was opened remains selectable even
+    # when Agent Deck reports metadata for that same session. Agent-owned
+    # sessions are still omitted from the switcher when they are not the
+    # current Terminal Home workspace.
     statuses = [
-        status for status in scan.statuses if status.expected_session_name not in agent_sessions
+        status
+        for status in scan.statuses
+        if status.expected_session_name not in agent_sessions
+        or status.expected_session_name == current_session
     ]
     names = _display_names(statuses)
     statuses.sort(
