@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from rich.cells import cell_len
+
 from dashboard.services.agent_deck import AgentDeckSnapshot
 from dashboard.services.projects import ProjectScanResult, ProjectStatus, project_option_id
 
@@ -16,6 +18,45 @@ class QuickSwitchEntry:
     option_id: str
     is_running: bool
     is_current: bool
+
+
+def _truncate_label(value: str, width: int) -> str:
+    """Fit a project label to terminal cells, preserving both ends."""
+    if width <= 0:
+        return ""
+    if cell_len(value) <= width:
+        return value
+    if width == 1:
+        return "…"
+    left_budget = max(1, (width - 1) // 3)
+    left: list[str] = []
+    used = 0
+    for character in value:
+        cells = cell_len(character)
+        if used + cells > left_budget:
+            break
+        left.append(character)
+        used += cells
+    right: list[str] = []
+    used_right = 0
+    for character in reversed(value):
+        cells = cell_len(character)
+        if used_right + cells > width - used - 1:
+            break
+        right.append(character)
+        used_right += cells
+    return "".join(left) + "…" + "".join(reversed(right))
+
+
+def format_quick_switch_row(entry: QuickSwitchEntry, width: int) -> str:
+    """Format one single-line, cell-width-aware Quick Switch row."""
+    width = max(1, width)
+    status = "● current" if entry.is_current else (
+        "● running" if entry.is_running else "○ stopped"
+    )
+    name_width = max(1, width - cell_len(status) - 2)
+    name = _truncate_label(entry.label, name_width)
+    return f"{name}{' ' * max(0, name_width - cell_len(name))}  {status}"
 
 
 def _agent_owned_sessions(snapshot: AgentDeckSnapshot | None) -> set[str]:
