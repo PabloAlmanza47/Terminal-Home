@@ -4,18 +4,15 @@ Screen {
     background: transparent;
 }
 
-.quick-switch-root {
-    align: left top;
-    width: 100%;
-    height: 100%;
-    padding: 0;
+.quick-switch-app {
+    background: transparent;
 }
 
-.quick-switch-panel {
+.quick-switch-root {
+    align: left top;
+    layout: vertical;
     width: 100%;
-    max-width: 100%;
     height: 100%;
-    max-height: 100%;
     padding: 0 1 0 1;
     background: transparent;
 }
@@ -26,13 +23,14 @@ Screen {
     height: 1;
     margin: 0 1 1 1;
     padding: 0;
+    background: transparent;
 }
 
 #quick-switch-search-prefix {
     width: 1;
     height: 1;
     content-align: left middle;
-    color: $text-accent;
+    color: $text;
     text-style: bold;
 }
 
@@ -54,6 +52,7 @@ Screen {
     color: $text-muted;
     height: auto;
     margin: 0 2 1 2;
+    background: transparent;
 }
 
 #quick-switch-list {
@@ -64,6 +63,9 @@ Screen {
     padding: 0;
     border: none;
     background: transparent;
+    scrollbar-color: $text-muted;
+    scrollbar-color-hover: $text-muted;
+    scrollbar-color-active: $text-muted;
 }
 
 #quick-switch-list > .option-list--option {
@@ -74,8 +76,8 @@ Screen {
 }
 
 #quick-switch-list > .option-list--option-highlighted {
-    color: #d4e2f2;
-    background: #20364a;
+    color: $text;
+    background: transparent;
     text-style: bold;
 }
 
@@ -87,15 +89,17 @@ Screen {
 }
 
 #quick-switch-help {
+    dock: bottom;
     width: 100%;
     height: 1;
     min-height: 1;
     max-height: 1;
-    margin: 1 0 0 0;
+    margin: 0;
     padding: 0 2;
     content-align: left middle;
     color: $text-muted;
     text-align: left;
+    background: transparent;
 }
 
 /* Textual 8.x supports scrollbar-size as horizontal vertical. Keep genuine
