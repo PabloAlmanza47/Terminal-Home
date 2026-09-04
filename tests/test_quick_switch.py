@@ -12,6 +12,12 @@ from dashboard.services.quick_switch import (
     filter_quick_switch_entries,
     format_quick_switch_row,
 )
+from dashboard.switch import (
+    build_quick_switch_rows,
+    decode_key,
+    move_selection,
+    position_rendered_rows,
+)
 
 
 def _status(path: Path, *, running: bool, session: str | None = None) -> ProjectStatus:
@@ -96,3 +102,35 @@ def test_row_formatter_keeps_status_on_one_line_and_truncates_name(tmp_path: Pat
     assert "running" in row
     assert "…" in row
     assert "\n" not in row
+
+
+def test_raw_switch_decodes_navigation_and_editing_keys() -> None:
+    assert decode_key(b"\x1b", b"[A") == "up"
+    assert decode_key(b"\x1b", b"[B") == "down"
+    assert decode_key(b"\r") == "enter"
+    assert decode_key(b"\x7f") == "backspace"
+    assert decode_key(b"\x1b") == "escape"
+    assert decode_key(b"x") == "x"
+
+
+def test_raw_switch_selection_skips_non_selectable_section_rows(tmp_path: Path) -> None:
+    active = _status(tmp_path / "active", running=True)
+    recent = _status(tmp_path / "recent", running=False)
+    entries = build_quick_switch_entries(ProjectScanResult((active, recent), False, ()))
+    rows = build_quick_switch_rows(entries)
+    assert [row.text for row in rows if row.heading] == ["ACTIVE", "RECENT"]
+    assert [row.entry_index for row in rows if row.entry_index is not None] == [0, 1]
+    assert move_selection(0, 2, -1) == 0
+    assert move_selection(0, 2, 1) == 1
+    assert move_selection(1, 2, 1) == 1
+
+
+def test_raw_switch_rows_use_absolute_positions_without_newline_drift() -> None:
+    rendered = position_rendered_rows(["ACTIVE", "> project                         running", ""], 3)
+    assert rendered == (
+        "\x1b[1;1H\x1b[2KACTIVE"
+        "\x1b[2;1H\x1b[2K> project                         running"
+        "\x1b[3;1H\x1b[2K"
+    )
+    assert "\n" not in rendered
+    assert "\r" not in rendered

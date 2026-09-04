@@ -189,7 +189,7 @@ th completion zsh   # print Zsh completion setup
 ```
 
 When Terminal Home is already running inside tmux, a convenient popup binding
-is `bind-key S display-popup -E -T " Quick Switch " -w 55% -h 50% "th switch"`.
+is `bind-key S display-popup -E -T " Quick Switch " -w 50% -h 45% "th switch"`.
 The switcher uses the current
 tmux client, so selecting a running workspace transfers that client with
 `switch-client`; stopped saved workspaces go through the same recreation path
