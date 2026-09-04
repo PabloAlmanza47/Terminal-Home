@@ -102,6 +102,36 @@ def test_save_and_load_workspace_round_trips(tmp_path: Path) -> None:
     assert loaded == workspace
 
 
+def test_semantic_coding_agent_role_persists_without_runtime_snapshot(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "workspaces.json"
+    project_path = tmp_path / "projects" / "demo"
+    project_path.mkdir(parents=True)
+    workspace = WorkspaceSpec.for_local_project(
+        project_name="demo",
+        project_path=project_path,
+        session_name="custom-demo",
+        windows=(
+            WindowSpec(
+                "main",
+                (
+                    PaneSpec(PaneKind.CODING_AGENT, "Coding Agent"),
+                    PaneSpec(PaneKind.BLANK_TERMINAL, "Blank Terminal"),
+                ),
+            ),
+        ),
+    )
+
+    save_workspace(workspace, store_path=store_path)
+    loaded = load_workspace(project_path, store_path=store_path)
+
+    assert loaded is not None
+    assert loaded.session_name == "custom-demo"
+    assert loaded.windows[0].panes[0].kind is PaneKind.CODING_AGENT
+    assert loaded.windows[0].panes[1].kind is PaneKind.BLANK_TERMINAL
+
+
 def test_save_workspace_creates_parent_directories(tmp_path: Path) -> None:
     store_path = tmp_path / "does" / "not" / "exist" / "workspaces.json"
     workspace = _make_workspace(tmp_path / "demo")

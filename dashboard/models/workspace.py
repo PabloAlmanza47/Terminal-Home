@@ -32,7 +32,11 @@ class PaneKind(str, Enum):
     """The fixed catalogue of pane types offered by the New Project wizard."""
 
     CODE_EDITOR = "code_editor"
-    CLAUDE_CODE = "claude_code"
+    # The persisted value is retained for compatibility with existing stores;
+    # the semantic role is a generic Coding Agent and the selected executable
+    # comes from AppSettings at recreation time.
+    CODING_AGENT = "claude_code"
+    CLAUDE_CODE = "claude_code"  # backwards-compatible enum name
     GIT = "git"
     FILE_TREE = "file_tree"
     TEST_TERMINAL = "test_terminal"
@@ -43,7 +47,7 @@ class PaneKind(str, Enum):
 
 PANE_KIND_LABELS: dict[PaneKind, str] = {
     PaneKind.CODE_EDITOR: "Code Editor",
-    PaneKind.CLAUDE_CODE: "Coding Agent",
+    PaneKind.CODING_AGENT: "Coding Agent",
     PaneKind.GIT: "Git",
     PaneKind.FILE_TREE: "File Tree",
     PaneKind.TEST_TERMINAL: "Test Terminal",

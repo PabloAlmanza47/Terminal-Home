@@ -65,7 +65,7 @@ def plan_for_pane(
             warning="Neovim was not found on PATH -- opened a shell instead.",
         )
 
-    if pane.kind is PaneKind.CLAUDE_CODE:
+    if pane.kind is PaneKind.CODING_AGENT:
         command = {
             CodingAgent.NONE: None,
             CodingAgent.CODEX: "codex",

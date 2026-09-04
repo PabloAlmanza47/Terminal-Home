@@ -577,6 +577,33 @@ def test_running_attach_never_detects_project_commands(
     )
 
 
+def test_running_attach_preserves_live_processes_and_saved_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live tmux session is authoritative; saved pane plans are unused."""
+    _assume_tmux_installed(monkeypatch)
+    monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: True)
+    monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name])
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "run_interactive_tmux",
+        lambda argv: subprocess.CompletedProcess(argv, 0),
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "build_pane_plans",
+        lambda *args, **kwargs: pytest.fail("live attach must not rebuild pane roles"),
+    )
+    request = _request(
+        tmp_path,
+        _pane(PaneKind.CODE_EDITOR, "old editor role"),
+        _pane(PaneKind.BLANK_TERMINAL),
+        action=LaunchAction.ATTACH,
+    )
+
+    execute_launch_request(request)
+
+
 def test_project_command_fallback_warning_is_nonfatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

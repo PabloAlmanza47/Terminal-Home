@@ -27,7 +27,7 @@ def test_coding_agent_preference_resolves_codex_and_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pane_commands_module.shutil, "which", _which_only("codex"))
-    pane = PaneSpec(kind=PaneKind.CLAUDE_CODE, display_name="Coding Agent")
+    pane = PaneSpec(kind=PaneKind.CODING_AGENT, display_name="Coding Agent")
     assert plan_for_pane(pane, tmp_path, coding_agent=CodingAgent.CODEX).startup_command == "codex"
     none_plan = plan_for_pane(pane, tmp_path, coding_agent=CodingAgent.NONE)
     assert none_plan.startup_command is None
