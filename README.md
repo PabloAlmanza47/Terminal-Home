@@ -190,6 +190,13 @@ th completion zsh   # print Zsh completion setup
 
 When Terminal Home is already running inside tmux, a convenient popup binding
 is `bind-key S display-popup -E -T " Quick Switch " -w 50% -h 45% "th switch"`.
+
+Terminal Home workspaces also provide `prefix + g` for Lazygit. It opens Git
+management in a centered popup (about 90% of the terminal) in the focused
+pane's current directory, so it does not take up a permanent workspace pane.
+Lazygit is optional; if it is not installed, the popup prints a short
+installation message and waits for Enter. Closing Lazygit returns to the
+existing workspace without changing its panes or layout.
 The switcher uses the current
 tmux client, so selecting a running workspace transfers that client with
 `switch-client`; stopped saved workspaces go through the same recreation path

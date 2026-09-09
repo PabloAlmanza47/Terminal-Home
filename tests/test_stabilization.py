@@ -247,8 +247,11 @@ def test_tmux_attach_revalidates_and_uses_existing_argv_helpers(
     monkeypatch.setattr(tmux, "session_exists", lambda name: name == "dev")
     monkeypatch.setattr(tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name])
     monkeypatch.setattr(tmux, "exec_attach", calls.append)
+    monkeypatch.setattr(
+        tmux, "install_lazygit_popup", lambda name, **kwargs: calls.append(["popup", name])
+    )
     execute_tmux_session_attach(TmuxSessionAttachRequest("dev"))
-    assert calls == [["tmux", "attach", "dev"]]
+    assert calls == [["popup", "dev"], ["tmux", "attach", "dev"]]
 
 
 def test_tmux_attach_reports_disappearance(monkeypatch: pytest.MonkeyPatch) -> None:

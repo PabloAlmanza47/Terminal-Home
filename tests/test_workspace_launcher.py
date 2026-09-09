@@ -210,6 +210,9 @@ def test_remote_create_and_recreate_use_one_runner_and_remote_working_directory(
         "new-session",
         "select-window",
         "select-pane",
+        "show-options",
+        "set-option",
+        "bind-key",
         "list-windows",
         "has-session",
         "list-windows",
@@ -484,9 +487,7 @@ def test_attach_without_workspace_attaches_when_session_is_running(
     )
     exec_calls = []
     monkeypatch.setattr(
-        launcher_module.tmux,
-        "run_interactive_tmux",
-        lambda argv: exec_calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+        launcher_module.tmux, "exec_attach", lambda argv: exec_calls.append(argv)
     )
 
     request = LaunchRequest(
@@ -583,7 +584,9 @@ def test_running_attach_preserves_live_processes_and_saved_roles(
     """A live tmux session is authoritative; saved pane plans are unused."""
     _assume_tmux_installed(monkeypatch)
     monkeypatch.setattr(launcher_module.tmux, "session_exists", lambda name: True)
-    monkeypatch.setattr(launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name])
+    monkeypatch.setattr(
+        launcher_module.tmux, "attach_or_switch_argv", lambda name: ["tmux", "attach", name]
+    )
     monkeypatch.setattr(
         launcher_module.tmux,
         "run_interactive_tmux",

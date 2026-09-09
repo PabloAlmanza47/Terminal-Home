@@ -40,6 +40,16 @@ class LaunchError(Exception):
     """Raised when a LaunchRequest cannot be turned into a running session."""
 
 
+def _enable_lazygit_popup(session_name: str, runner: tmux.TmuxCommandRunner) -> None:
+    """Install the workspace's optional popup binding without blocking launch."""
+    try:
+        tmux.install_lazygit_popup(session_name, runner=runner)
+    except Exception:
+        # The workspace itself is fully usable if a tmux version/config rejects
+        # the optional binding; do not rebuild or disturb its panes for this.
+        return
+
+
 def remember_live_workspace_layout(
     workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner
 ) -> None:
@@ -157,6 +167,8 @@ def _build_create_and_attach(
     for warning in warnings:
         print(f"Note: {warning}", file=stream)
 
+    _enable_lazygit_popup(workspace.session_name, runner)
+
     if isinstance(workspace.project_location, LocalProjectLocation):
         _attach_local(workspace, runner)
     else:
@@ -255,8 +267,10 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
             if request.workspace is None:
                 tmux.exec_attach(tmux.attach_or_switch_argv(session_name))
             elif isinstance(request.workspace.project_location, LocalProjectLocation):
+                _enable_lazygit_popup(session_name, runner)
                 _attach_local(request.workspace, runner)
             else:
+                _enable_lazygit_popup(session_name, runner)
                 _attach_remote(request.workspace, runner)
             return
         if request.workspace is None:
@@ -288,6 +302,7 @@ def execute_tmux_session_attach(request: TmuxSessionAttachRequest) -> None:
         raise LaunchError(
             f"tmux session '{request.session_name}' disappeared before it could be resumed."
         )
+    _enable_lazygit_popup(request.session_name, tmux.run_tmux_command)
     try:
         tmux.exec_attach(tmux.attach_or_switch_argv(request.session_name))
     except OSError as exc:

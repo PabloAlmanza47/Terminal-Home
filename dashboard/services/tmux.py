@@ -38,6 +38,20 @@ _PANE_STATUS_FORMAT = (
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
+_TERMINAL_HOME_OPTION = "@terminal_home_workspace"
+_LAZYGIT_POPUP_COMMAND = (
+    "if command -v lazygit >/dev/null 2>&1; then "
+    "config=$(mktemp \"${TMPDIR:-/tmp}/terminal-home-lazygit.XXXXXX\") "
+    "&& trap 'rm -f \"$config\"' EXIT "
+    "&& printf '%s\\n' 'gui:' '  nerdFontsVersion: \"3\"' 'git:' '  log:' "
+    "'    order: topo-order' "
+    "'    showGraph: always' '    showWholeGraph: true' >\"$config\" "
+    "&& LG_CONFIG_FILE=\"${LG_CONFIG_FILE:-$HOME/.config/lazygit/config.yml},$config\" "
+    "lazygit; "
+    "else printf '%s\\n' 'Terminal Home: Lazygit is not installed.' "
+    "'Install Lazygit and press prefix + g again.'; read -r _; fi"
+)
+
 TmuxCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 TmuxRunnerResolutionStatus = Literal["resolved", "missing-host"]
 
@@ -162,6 +176,56 @@ def workspace_project_dir(workspace: WorkspaceSpec) -> str:
     if isinstance(location, SshProjectLocation):
         return location.remote_path
     raise TypeError("Unsupported workspace project location.")
+
+
+def lazygit_popup_argv(session_name: str) -> list[str]:
+    """Return the prefix-g binding for the Lazygit popup.
+
+    tmux key tables are server-wide, so the binding checks a session option
+    before opening anything.  The popup's ``-d`` format is evaluated for the
+    focused pane when the key is pressed, which keeps it useful from editors,
+    servers, test panes, and shells alike.
+    """
+    popup = (
+        "display-popup -E -w 90% -h 90% -d '#{pane_current_path}' "
+        "-T ' Lazygit ' "
+        f"\"{_LAZYGIT_POPUP_COMMAND}\""
+    )
+    return [
+        "tmux",
+        "bind-key",
+        "-T",
+        "prefix",
+        "g",
+        "if-shell",
+        f"-F '#{{==:#{{{_TERMINAL_HOME_OPTION}}},1}}'",
+        popup,
+    ]
+
+
+def install_lazygit_popup(
+    session_name: str, *, runner: TmuxCommandRunner | None = None
+) -> None:
+    """Enable the Lazygit popup for one Terminal Home workspace session.
+
+    The session option is the idempotency marker. Key bindings are server-wide
+    in tmux, so the binding itself checks that marker before opening the popup.
+    """
+    command_runner = runner or run_tmux_command
+    try:
+        marker = command_runner(
+            ["tmux", "show-options", "-t", session_name, "-qv", _TERMINAL_HOME_OPTION]
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        marker = None
+    marker_output = getattr(marker, "stdout", "") or ""
+    if marker is not None and marker.returncode == 0 and marker_output.strip() == "1":
+        return
+    _run_step(
+        command_runner,
+        ["tmux", "set-option", "-t", session_name, _TERMINAL_HOME_OPTION, "1"],
+    )
+    _run_step(command_runner, lazygit_popup_argv(session_name))
 
 
 def is_tmux_installed() -> bool:
