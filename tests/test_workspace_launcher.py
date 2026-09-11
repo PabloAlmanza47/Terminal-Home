@@ -212,7 +212,9 @@ def test_remote_create_and_recreate_use_one_runner_and_remote_working_directory(
         "select-pane",
         "show-options",
         "set-option",
+        "show-options",
         "bind-key",
+        "set-option",
         "list-windows",
         "has-session",
         "list-windows",
@@ -489,12 +491,19 @@ def test_attach_without_workspace_attaches_when_session_is_running(
     monkeypatch.setattr(
         launcher_module.tmux, "exec_attach", lambda argv: exec_calls.append(argv)
     )
+    popup_calls: list[str] = []
+    monkeypatch.setattr(
+        launcher_module.tmux,
+        "install_lazygit_popup",
+        lambda name, **kwargs: popup_calls.append(name),
+    )
 
     request = LaunchRequest(
         workspace=None, init_git=False, action=LaunchAction.ATTACH, session_name="orphan"
     )
     execute_launch_request(request)
 
+    assert popup_calls == ["orphan"]
     assert exec_calls == [["tmux", "attach", "orphan"]]
 
 

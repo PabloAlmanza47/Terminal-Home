@@ -86,7 +86,8 @@ def test_local_attach_checkpoints_before_and_after_detach(
         "main", 2, "after"
     )
     assert [command[1] for command in runner.commands] == [
-        "has-session", "show-options", "set-option", "bind-key", "list-windows",
+        "has-session", "show-options", "set-option", "show-options", "bind-key",
+        "set-option", "list-windows",
         "has-session", "list-windows"
     ]
 

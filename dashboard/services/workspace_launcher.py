@@ -264,13 +264,14 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
 
     if request.action is LaunchAction.ATTACH:
         if _session_exists(session_name, runner):
+            # All managed existing-session flows converge here, including the
+            # Home screen's workspace=None fast path for a running session.
+            _enable_lazygit_popup(session_name, runner)
             if request.workspace is None:
                 tmux.exec_attach(tmux.attach_or_switch_argv(session_name))
             elif isinstance(request.workspace.project_location, LocalProjectLocation):
-                _enable_lazygit_popup(session_name, runner)
                 _attach_local(request.workspace, runner)
             else:
-                _enable_lazygit_popup(session_name, runner)
                 _attach_remote(request.workspace, runner)
             return
         if request.workspace is None:

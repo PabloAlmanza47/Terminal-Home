@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Iterable, Mapping
@@ -39,6 +40,7 @@ _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 _TERMINAL_HOME_OPTION = "@terminal_home_workspace"
+_LAZYGIT_POPUP_OPTION = "@terminal_home_lazygit_popup"
 _LAZYGIT_POPUP_COMMAND = (
     "if command -v lazygit >/dev/null 2>&1; then "
     "config=$(mktemp \"${TMPDIR:-/tmp}/terminal-home-lazygit.XXXXXX\") "
@@ -186,11 +188,22 @@ def lazygit_popup_argv(session_name: str) -> list[str]:
     focused pane when the key is pressed, which keeps it useful from editors,
     servers, test panes, and shells alike.
     """
-    popup = (
-        "display-popup -E -w 90% -h 90% -d '#{pane_current_path}' "
-        "-T ' Lazygit ' "
-        f"\"{_LAZYGIT_POPUP_COMMAND}\""
-    )
+    display_popup_argv = [
+        "display-popup",
+        "-E",
+        "-w",
+        "90%",
+        "-h",
+        "90%",
+        "-d",
+        "#{pane_current_path}",
+        "-T",
+        " Lazygit ",
+        _LAZYGIT_POPUP_COMMAND,
+    ]
+    # tmux parses the command following if-shell as one tmux command string.
+    # Keep the nested display-popup invocation in one argv item so its flags
+    # are not mistaken for if-shell flags by tmux.
     return [
         "tmux",
         "bind-key",
@@ -198,8 +211,9 @@ def lazygit_popup_argv(session_name: str) -> list[str]:
         "prefix",
         "g",
         "if-shell",
-        f"-F '#{{==:#{{{_TERMINAL_HOME_OPTION}}},1}}'",
-        popup,
+        "-F",
+        f"#{{==:#{{{_TERMINAL_HOME_OPTION}}},1}}",
+        shlex.join(display_popup_argv),
     ]
 
 
@@ -208,24 +222,33 @@ def install_lazygit_popup(
 ) -> None:
     """Enable the Lazygit popup for one Terminal Home workspace session.
 
-    The session option is the idempotency marker. Key bindings are server-wide
-    in tmux, so the binding itself checks that marker before opening the popup.
+    ``@terminal_home_workspace`` identifies managed sessions. The dedicated
+    Lazygit option records successful binding installation. Key bindings are
+    server-wide in tmux, so the binding itself checks the management marker.
     """
     command_runner = runner or run_tmux_command
-    try:
-        marker = command_runner(
-            ["tmux", "show-options", "-t", session_name, "-qv", _TERMINAL_HOME_OPTION]
+
+    def option_value(option: str) -> str:
+        try:
+            result = command_runner(["tmux", "show-options", "-t", session_name, "-qv", option])
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return (getattr(result, "stdout", "") or "").strip()
+
+    if option_value(_TERMINAL_HOME_OPTION) != "1":
+        _run_step(
+            command_runner,
+            ["tmux", "set-option", "-t", session_name, _TERMINAL_HOME_OPTION, "1"],
         )
-    except (OSError, subprocess.TimeoutExpired):
-        marker = None
-    marker_output = getattr(marker, "stdout", "") or ""
-    if marker is not None and marker.returncode == 0 and marker_output.strip() == "1":
+    if option_value(_LAZYGIT_POPUP_OPTION) == "1":
         return
+    _run_step(command_runner, lazygit_popup_argv(session_name))
     _run_step(
         command_runner,
-        ["tmux", "set-option", "-t", session_name, _TERMINAL_HOME_OPTION, "1"],
+        ["tmux", "set-option", "-t", session_name, _LAZYGIT_POPUP_OPTION, "1"],
     )
-    _run_step(command_runner, lazygit_popup_argv(session_name))
 
 
 def is_tmux_installed() -> bool:
