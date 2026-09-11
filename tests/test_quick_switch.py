@@ -126,7 +126,9 @@ def test_raw_switch_selection_skips_non_selectable_section_rows(tmp_path: Path) 
 
 
 def test_raw_switch_rows_use_absolute_positions_without_newline_drift() -> None:
-    rendered = position_rendered_rows(["ACTIVE", "> project                         running", ""], 3)
+    rendered = position_rendered_rows(
+        ["ACTIVE", "> project                         running", ""], 3
+    )
     assert rendered == (
         "\x1b[1;1H\x1b[2KACTIVE"
         "\x1b[2;1H\x1b[2K> project                         running"

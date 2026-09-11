@@ -27,7 +27,12 @@ from uuid import uuid4
 
 from dashboard import __version__
 from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
-from dashboard.services.activity import agent_status, agent_display_name, server_status, workspace_status
+from dashboard.services.activity import (
+    agent_display_name,
+    agent_status,
+    server_status,
+    workspace_status,
+)
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.cli_colors import style_table_header
 from dashboard.services.completion import (
@@ -511,7 +516,11 @@ def _status_payload(status: ProjectStatus, git: GitStatus) -> dict[str, object]:
         "project": {"name": status.project.name, "path": str(status.canonical_path)},
         "workspace": {"status": workspace.label.casefold().replace(" ", "_")},
         "server": {"status": server.label.casefold().replace(" ", "_")},
-        "agent": {"status": agent_state, "count": agent_count, "tool": selected.tool if selected else None},
+        "agent": {
+            "status": agent_state,
+            "count": agent_count,
+            "tool": selected.tool if selected else None,
+        },
         "git": {
             "branch": git.branch,
             "detached": git.detached,

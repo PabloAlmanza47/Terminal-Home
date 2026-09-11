@@ -33,7 +33,12 @@ from dashboard.screens.system_info import SystemInfoScreen
 from dashboard.screens.tmux_sessions import TmuxSessionsScreen
 from dashboard.screens.workspace_templates import WorkspaceTemplatesScreen
 from dashboard.services import tmux
-from dashboard.services.activity import agent_display_name, agent_status, server_status, workspace_status
+from dashboard.services.activity import (
+    agent_display_name,
+    agent_status,
+    server_status,
+    workspace_status,
+)
 from dashboard.services.formatting import greeting_for
 from dashboard.services.project_rows import (
     ActivityProjectRow,

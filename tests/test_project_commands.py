@@ -264,7 +264,10 @@ def test_recognized_non_static_indicator_blocks_static_fallback(
     (tmp_path / "index.html").touch()
     (tmp_path / indicator).touch()
     detected = detect_project_commands(tmp_path)
-    assert detected.development is None or detected.development.source is not CommandSource.STATIC_HTML
+    assert (
+        detected.development is None
+        or detected.development.source is not CommandSource.STATIC_HTML
+    )
 
 
 def test_node_test_wins_over_pytest(tmp_path: Path) -> None:

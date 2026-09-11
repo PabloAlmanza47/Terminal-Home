@@ -1,16 +1,16 @@
 from pathlib import Path
 
+from dashboard.cli import _status_payload, _status_text
+from dashboard.screens.home import _activity_card
+from dashboard.screens.project_detail import _agent_line, format_activity_block
 from dashboard.services.activity import (
     agent_display_name,
     agent_status,
     effective_agent_session,
 )
 from dashboard.services.agent_deck import AgentDeckSession, AgentStatus
-from dashboard.services.projects import Project, ProjectStatus
-from dashboard.cli import _status_payload, _status_text
-from dashboard.screens.home import _activity_card
-from dashboard.screens.project_detail import _agent_line, format_activity_block
 from dashboard.services.git import GitStatus
+from dashboard.services.projects import Project, ProjectStatus
 
 
 def _session(name: str, tool: str, state: AgentStatus) -> AgentDeckSession:

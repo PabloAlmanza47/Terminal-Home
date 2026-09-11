@@ -19,6 +19,7 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static
 from textual.widgets.option_list import Option
+from textual.worker import Worker
 
 from dashboard.models import (
     AgentDeckAttachRequest,
@@ -34,7 +35,13 @@ from dashboard.screens.new_project.state import WizardState
 from dashboard.screens.new_project.step_window_summary import WindowSummaryScreen
 from dashboard.screens.new_project.step_workspace_start import WorkspaceStartScreen
 from dashboard.screens.template_name import TemplateNameScreen
-from dashboard.services.activity import agent_display_name, agent_status, effective_agent_session, server_status, workspace_status
+from dashboard.services.activity import (
+    agent_display_name,
+    agent_status,
+    effective_agent_session,
+    server_status,
+    workspace_status,
+)
 from dashboard.services.git import GitDiffResult, GitFileChange, GitStatus, load_diff, load_status
 from dashboard.services.pane_layout_store import (
     PaneLayoutStoreError,
@@ -151,7 +158,8 @@ def _agent_line(status: ProjectStatus) -> str | None:
     labels = {"error": "Error", "waiting": "Waiting", "running": "Working",
               "idle": "Idle", "stopped": "Stopped", "unknown": "Unknown"}
     count_label = f" ({count})" if count > 1 else ""
-    return f"Agent:          {agent_display_name(selected.tool)}{count_label}  ({labels.get(selected.status.value, 'Unknown')})"
+    status_label = labels.get(selected.status.value, "Unknown")
+    return f"Agent:          {agent_display_name(selected.tool)}{count_label}  ({status_label})"
 
 
 def format_activity_block(status: ProjectStatus) -> str:
@@ -229,7 +237,7 @@ class ProjectDetailScreen(Screen[None]):
         self._git_status: GitStatus | None = None
         self._git_refreshing = False
         self._modal_action_active = False
-        self._last_action_worker = None
+        self._last_action_worker: Worker[None] | None = None
         self._git_timer: Timer | None = None
         self._git_rendered: tuple[str, str] | None = None
         self._diff_opening = False
@@ -339,9 +347,9 @@ class ProjectDetailScreen(Screen[None]):
 
     def on_mount(self) -> None:
         if self.remote_project is not None:
-            actions = self.query_one("#project-actions")
-            if actions:
-                actions.focus()
+            remote_actions = self.query(KeyboardActionList).filter("#project-actions")
+            if remote_actions:
+                remote_actions.first().focus()
             return
         # Keep the empty placeholders out of the initial layout. Once the
         # first live Git result arrives, _update_git_files explicitly makes
@@ -360,7 +368,7 @@ class ProjectDetailScreen(Screen[None]):
         # the file rows. Reconcile it now that the mounted instance exists.
         if self._git_status is not None:
             self._update_git_files(self._git_status)
-        actions = self.query("#project-actions")
+        actions = self.query(KeyboardActionList).filter("#project-actions")
         if actions:
             actions.first().focus()
         self.call_after_refresh(self._reset_scroll_position)
@@ -721,11 +729,12 @@ class ProjectDetailScreen(Screen[None]):
         if workspace is None:
             return
 
+        def save_template(name: str | None) -> None:
+            self.app.call_after_refresh(lambda: self._save_template_with_name(name))
+
         self.app.push_screen(
             TemplateNameScreen("Save Workspace as Template"),
-            lambda name: self.app.call_after_refresh(
-                lambda: self._save_template_with_name(name)
-            ),
+            save_template,
         )
 
     def _save_template_with_name(self, name: str | None) -> None:
