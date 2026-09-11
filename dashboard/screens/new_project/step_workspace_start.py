@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Static
@@ -20,7 +21,10 @@ TEMPLATE_PREFIX = "template:"
 
 
 class WorkspaceStartScreen(Screen[None]):
-    BINDINGS = [("escape", "back", "Back")]
+    # Escape is a screen-level navigation command.  Make it priority so the
+    # focused layout list cannot consume it before the wizard gets a chance to
+    # return to the previous screen.
+    BINDINGS = [Binding("escape", "back", "Back", priority=True)]
 
     def __init__(self, state: WizardState) -> None:
         super().__init__()
@@ -113,6 +117,11 @@ class WorkspaceStartScreen(Screen[None]):
             self.app.switch_screen(NewProjectScreen(self.state))
         else:
             self.app.pop_screen()
+            # A configure flow can briefly retain the start screen underneath
+            # the replacement created while entering its first window.  Keep
+            # Back atomic from the user's perspective and return to detail.
+            if isinstance(self.app.screen, WorkspaceStartScreen):
+                self.app.pop_screen()
 
     def action_cancel(self) -> None:
         self.app.pop_screen()

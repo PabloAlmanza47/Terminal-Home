@@ -66,9 +66,13 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 async def _open_new_project_wizard(pilot) -> None:
-    """From Home, select "Create New Project" (2nd item in the main menu)."""
+    """From Home, select "Create New Project" from the primary actions."""
     await pilot.pause()
-    await pilot.press("down", "enter")
+    await pilot.app.workers.wait_for_complete()
+    menu = pilot.app.screen.query_one("#main-menu", KeyboardActionList)
+    menu.selected_index = 1
+    menu.focus()
+    await pilot.press("enter")
     await pilot.pause()
 
 
