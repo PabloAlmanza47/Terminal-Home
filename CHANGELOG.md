@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-11
+
+### Added
+
+- Added the tmux-native `th switch` quick switcher with active/recent grouping,
+  project/path/session search, duplicate-name disambiguation, and
+  `switch-client` handoff for running workspaces.
+- Added independent persistence for learned tmux pane geometry, with lifecycle
+  checkpoints and reuse when recreating saved workspaces.
+- Added optional Agent Deck integration: live agent status on project screens,
+  project-scoped attach actions, the `th agent` command, and safe filtering of
+  Agent Deck-owned tmux sessions from Terminal Home navigation.
+- Added read-only Git status and per-file staged/working-tree diff views,
+  including safe previews for untracked text files and graceful handling of
+  missing, binary, oversized, or unavailable data.
+- Added the workspace `prefix + g` Lazygit popup, launched in the focused
+  pane's directory with a graceful missing-tool fallback.
+
+### Changed
+
+- Home and Project Detail navigation now support fast keyboard search,
+  collision-safe project selection, live activity summaries, and clearer Git,
+  workspace, and session state.
+- Workspace launch now rechecks session state after the TUI exits: running
+  sessions are attached or switched to without recreation, stopped saved
+  workspaces are recreated, and existing sessions are never overwritten.
+- Workspace persistence now uses location-aware schema 2 records, while
+  legacy flat and schema 1 stores remain readable and migrate only after a
+  successful save or forget operation.
+- CLI lifecycle commands now share the dashboard's project-selection and
+  workspace-launch rules, including `th switch`, `th status`, `th agent`, and
+  noninteractive project creation paths.
+
+### Fixed
+
+- Fixed layout capture across attach, detach, and in-tmux client-switch flows,
+  including safe behavior when sessions disappear or tmux reports malformed
+  data.
+- Fixed Lazygit popup installation for existing Terminal Home sessions by
+  migrating older managed sessions that lack the popup marker; failed optional
+  binding installation no longer blocks workspace launch.
+- Fixed Git status and diff parsing for staged/unstaged changes, renames,
+  conflicts, deleted files, untracked files, detached HEADs, and command
+  failures without making Git state load-bearing.
+- Fixed project and session navigation so Agent Deck sessions, orphan tmux
+  sessions, duplicate project names, and disappearing sessions are handled
+  without attaching to or recreating the wrong workspace.
+
+### Security
+
+- Kept Git inspection and diff previews read-only, bounded, timeout-limited,
+  and safe for untracked/binary content; Agent Deck and optional tmux popup
+  integrations remain best-effort and do not make external state changes
+  beyond their explicit attach or popup actions.
+
 ## [0.3.1] - 2026-08-05
 
 ### Fixed

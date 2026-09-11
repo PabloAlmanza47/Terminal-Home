@@ -5,7 +5,7 @@
 A keyboard-driven terminal workspace manager for creating, configuring,
 resuming, and rebuilding project-specific tmux environments.
 
-Current release: **v0.3.1**
+Current release: **v0.4.0**
 
 ![Terminal Home dashboard](docs/assets/terminal-home-dashboard.png)
 
@@ -87,7 +87,7 @@ pipx install .
 uv tool install .
 ```
 
-To install directly from GitHub:
+To install the current main branch directly from GitHub:
 
 ```bash
 pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
@@ -95,17 +95,20 @@ pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 uv tool install "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
 ```
 
-For the v0.3.1 release specifically:
-
-```bash
-pipx install "git+https://github.com/PabloAlmanza47/Terminal-Home.git@v0.3.1"
-```
-
 After installation, open a new terminal and run `th` or `th doctor`.
 `terminal-home` is the long command name. `dev` is retained as a compatibility
-alias for older installations. Upgrade with `pipx install --force .` or
-`uv tool install --upgrade .`; uninstall with `pipx uninstall terminal-home`
-or `uv tool uninstall terminal-home`.
+alias for older installations. From a local checkout, upgrade with
+`pipx install --force .` or `uv tool install --upgrade .`. For an installation
+from the current main branch, upgrade with:
+
+```bash
+pipx install --force "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+# or
+uv tool install --upgrade "git+https://github.com/PabloAlmanza47/Terminal-Home.git"
+```
+
+Uninstall with
+`pipx uninstall terminal-home` or `uv tool uninstall terminal-home`.
 
 ## First five minutes
 
@@ -191,16 +194,17 @@ th completion zsh   # print Zsh completion setup
 When Terminal Home is already running inside tmux, a convenient popup binding
 is `bind-key S display-popup -E -T " Quick Switch " -w 50% -h 45% "th switch"`.
 
-Terminal Home workspaces also provide `prefix + g` for Lazygit. It opens Git
-management in a centered popup (about 90% of the terminal) in the focused
-pane's current directory, so it does not take up a permanent workspace pane.
+Terminal Home workspaces also provide `prefix + g` for Lazygit. Here, `prefix`
+means your tmux prefix key (normally `Ctrl+b`), followed by `g`. It opens Git
+management in a centered popup (90% of the terminal) in the focused pane's
+current directory, so it does not take up a permanent workspace pane.
 Lazygit is optional; if it is not installed, the popup prints a short
 installation message and waits for Enter. Closing Lazygit returns to the
 existing workspace without changing its panes or layout.
-The switcher uses the current
-tmux client, so selecting a running workspace transfers that client with
-`switch-client`; stopped saved workspaces go through the same recreation path
-as `th up`.
+The `th switch` command uses the current tmux client when it is already inside
+tmux: selecting a running workspace transfers that client with
+`switch-client`. Outside tmux, it attaches normally. Stopped saved workspaces
+go through the same recreation path as `th up`.
 
 `list`, `plan`, and `doctor` never create, attach to, or modify a tmux
 session, and `plan` never saves a workspace or touches the filesystem — it
@@ -224,7 +228,7 @@ Home refuses to automate migrations, seeds, database pushes, global installs,
 runtime installation, manifest or lockfile edits, Git changes, secret writing,
 environment-file overwrites, destructive cleanup, arbitrary project scripts,
 remote setup, or credential handling. Project intelligence and setup are
-local-only; remote selectors are rejected without SSH activity. The v0.3.1
+local-only; remote selectors are rejected without SSH activity. The current
 detectors cover Node.js (including Next.js and Prisma), Python, .NET,
 environment examples, malformed or oversized indicators, and unknown projects.
 
@@ -464,8 +468,10 @@ a marketplace are not supported.
   previous valid generation as `<filename>.bak`. `WorkspaceSpec` describes
   desired, reusable workspace structure; remembered pane layouts are separate
   per-project runtime/user preferences in
-  `$XDG_DATA_HOME/terminal-home/pane-layouts.json`. This first persistence
-  phase intentionally does not add a pane-layout management UI or command.
+  `$XDG_DATA_HOME/terminal-home/pane-layouts.json`. Layouts are captured as
+  best-effort lifecycle checkpoints and reused when a stopped workspace is
+  recreated; they do not replace the configured workspace structure. There is
+  no pane-layout management UI or command yet.
 - **tmux orchestration** — runs strictly *after* Textual exits
   (`dashboard/services/workspace_launcher.py`); Textual and tmux can't both
   own the terminal at once. Every window and pane is targeted by the stable
@@ -540,9 +546,13 @@ either agent.
 
 ## Roadmap
 
-v0.4.0  Editor support and intelligent workspace recommendations  
-v0.5.0  Team recipes and project health dashboard  
-v0.6.0+ Template and recipe sharing  
+v0.4.0  Daily-driver workspaces: quick switching, remembered pane layouts,
+        Agent Deck, Git/diff workflows, Lazygit popup, and lifecycle/navigation
+        improvements
+v0.5.0  Intelligent workspace recommendations and richer editor/tool
+        configuration
+v0.6.0  Team recipes and project health dashboard
+v0.7.0+ Template and recipe sharing
 v1.0    Stable developer workspace manager
 
 ## License
@@ -769,5 +779,8 @@ tmux geometry for a project and window, not desired workspace structure:
 `WorkspaceSpec` remains the source of reusable windows and panes. Automatic
 capture and save are best-effort lifecycle checkpoints: known running sessions
 are captured before attachment, and normal external detaches are captured
-afterward. When Terminal Home is already inside tmux, `switch-client` only
-provides the pre-switch checkpoint. No global tmux hooks are installed.
+afterward. When Terminal Home is already inside tmux, `th switch` uses
+`switch-client`, so only the pre-switch checkpoint is available. A stopped
+workspace reuses the remembered layout for matching configured windows during
+recreation. No global tmux hooks are installed, and layout persistence never
+blocks attachment or recreation.
