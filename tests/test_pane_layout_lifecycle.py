@@ -20,6 +20,7 @@ from dashboard.models import (
 from dashboard.services import workspace_launcher as launcher
 from dashboard.services.pane_layout_store import PaneLayout, load_pane_layouts_for_location
 from dashboard.services.ssh import SshInteractiveResult
+from dashboard.services.workspace_store import save_workspace
 
 
 class _Runner:
@@ -144,6 +145,131 @@ def test_switch_client_only_checkpoints_before_switch(
 
     assert captured == ["capture"]
     assert switched == [["tmux", "switch-client", "-t", "demo"]]
+
+
+def test_switch_client_checkpoints_current_managed_source_before_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    source = _workspace(tmp_path / "a")
+    destination = WorkspaceSpec(
+        project_name="other",
+        project_location=LocalProjectLocation(tmp_path / "b"),
+        session_name="other",
+        windows=source.windows,
+    )
+    save_workspace(source)
+    runner = _Runner([], exists=[True])
+    resolution = launcher.tmux.TmuxRunnerResolution("resolved", runner)
+    monkeypatch.setattr(launcher.tmux, "resolve_tmux_runner", lambda workspace: resolution)
+    monkeypatch.setattr(launcher.tmux, "current_client_session", lambda **kwargs: "demo")
+    monkeypatch.setattr(launcher.tmux, "attach_or_switch_argv", lambda name: [
+        "tmux", "switch-client", "-t", name
+    ])
+    monkeypatch.setattr(launcher, "_enable_lazygit_popup", lambda *args: None)
+
+    events: list[tuple[str, str]] = []
+    layouts = {
+        "demo": PaneLayout("main", 2, "adjusted-source"),
+        "other": PaneLayout("main", 2, "destination"),
+    }
+
+    def capture(session_name: str, *, runner: object) -> dict[str, PaneLayout]:
+        events.append(("capture", session_name))
+        return {"main": layouts[session_name]}
+
+    monkeypatch.setattr(launcher.tmux, "capture_tmux_window_layouts", capture)
+    monkeypatch.setattr(
+        launcher.tmux,
+        "exec_attach",
+        lambda argv: events.append(("switch", argv[-1])),
+    )
+
+    launcher.execute_launch_request(_request(destination))
+
+    assert events == [
+        ("capture", "demo"),
+        ("capture", "other"),
+        ("switch", "other"),
+    ]
+    assert load_pane_layouts_for_location(source.project_location)["main"].tmux_layout == (
+        "adjusted-source"
+    )
+
+
+def test_switch_client_ignores_unmanaged_current_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _workspace(tmp_path)
+    runner = _Runner([], exists=[True])
+    resolution = launcher.tmux.TmuxRunnerResolution("resolved", runner)
+    monkeypatch.setattr(launcher.tmux, "resolve_tmux_runner", lambda workspace: resolution)
+    monkeypatch.setattr(launcher.tmux, "current_client_session", lambda **kwargs: "orphan")
+    monkeypatch.setattr(launcher.tmux, "attach_or_switch_argv", lambda name: [
+        "tmux", "switch-client", "-t", name
+    ])
+    monkeypatch.setattr(launcher, "_enable_lazygit_popup", lambda *args: None)
+    captured: list[str] = []
+    monkeypatch.setattr(
+        launcher,
+        "remember_live_workspace_layout",
+        lambda ws, runner: captured.append(ws.session_name),
+    )
+    monkeypatch.setattr(launcher.tmux, "exec_attach", lambda argv: None)
+
+    launcher.execute_launch_request(_request(workspace))
+
+    assert captured == ["demo"]
+
+
+def test_second_live_resize_replaces_previous_remembered_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    workspace = _workspace(tmp_path)
+    layouts = iter(["first-resize", "second-resize"])
+    monkeypatch.setattr(
+        launcher.tmux,
+        "capture_tmux_window_layouts",
+        lambda *args, **kwargs: {"main": PaneLayout("main", 2, next(layouts))},
+    )
+
+    launcher.remember_live_workspace_layout(workspace, object())  # type: ignore[arg-type]
+    launcher.remember_live_workspace_layout(workspace, object())  # type: ignore[arg-type]
+
+    assert load_pane_layouts_for_location(workspace.project_location)["main"].tmux_layout == (
+        "second-resize"
+    )
+
+
+def test_recreate_passes_remembered_layout_to_tmux_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    workspace = _workspace(tmp_path)
+    workspace.project_path.mkdir(exist_ok=True)
+    from dashboard.services.pane_layout_store import update_pane_layouts_for_location
+
+    remembered = PaneLayout("main", 2, "adjusted")
+    update_pane_layouts_for_location(workspace.project_location, {"main": remembered})
+    runner = _Runner([], exists=[False])
+    resolution = launcher.tmux.TmuxRunnerResolution("resolved", runner)
+    monkeypatch.setattr(launcher.tmux, "resolve_tmux_runner", lambda workspace: resolution)
+    monkeypatch.setattr(launcher, "build_pane_plans", lambda workspace: {})
+    monkeypatch.setattr(launcher, "_enable_lazygit_popup", lambda *args: None)
+    monkeypatch.setattr(launcher, "_attach_local", lambda *args: None)
+    created: list[dict[str, PaneLayout] | None] = []
+    monkeypatch.setattr(
+        launcher.tmux,
+        "create_workspace_session",
+        lambda workspace, plans, **kwargs: created.append(kwargs.get("saved_window_layouts")),
+    )
+
+    launcher.execute_launch_request(
+        LaunchRequest(workspace=workspace, init_git=False, action=LaunchAction.CREATE)
+    )
+
+    assert created == [{"main": remembered}]
 
 
 def test_capture_or_save_failure_does_not_block_local_attach(

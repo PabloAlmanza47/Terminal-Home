@@ -34,6 +34,7 @@ from dashboard.services.ssh import (
     run_interactive_ssh,
 )
 from dashboard.services.terminal import clear_terminal_display
+from dashboard.services.workspace_store import load_all_workspaces
 
 
 class LaunchError(Exception):
@@ -72,6 +73,36 @@ def _remember_if_session_exists(workspace: WorkspaceSpec, runner: tmux.TmuxComma
             remember_live_workspace_layout(workspace, runner)
     except Exception:
         # A disappearing or unavailable session is equivalent to no checkpoint.
+        return
+
+
+def _remember_current_workspace_before_switch(
+    target_session: str, runner: tmux.TmuxCommandRunner
+) -> None:
+    """Checkpoint the managed workspace currently owning this tmux client.
+
+    ``switch-client`` changes the client before this process can observe a
+    detach. Resolve the source session from the saved workspace store first so
+    only a Terminal Home-managed workspace is captured, never an orphan tmux
+    session.
+    """
+    try:
+        source_session = tmux.current_client_session(runner=runner)
+        if not source_session or source_session == target_session:
+            return
+        source_workspace = next(
+            (
+                workspace
+                for workspace in load_all_workspaces().values()
+                if workspace.session_name == source_session
+            ),
+            None,
+        )
+        if source_workspace is not None:
+            remember_live_workspace_layout(source_workspace, runner)
+    except Exception:
+        # Source lookup and checkpointing are optional and must never block a
+        # switch to the requested workspace.
         return
 
 
@@ -177,6 +208,8 @@ def _build_create_and_attach(
 
 def _attach_local(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
     argv = tmux.attach_or_switch_argv(workspace.session_name)
+    if len(argv) > 1 and argv[1] == "switch-client":
+        _remember_current_workspace_before_switch(workspace.session_name, runner)
     remember_live_workspace_layout(workspace, runner)
     if len(argv) > 1 and argv[1] == "switch-client":
         # switch-client transfers the current client and offers no observable
@@ -268,7 +301,10 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
             # Home screen's workspace=None fast path for a running session.
             _enable_lazygit_popup(session_name, runner)
             if request.workspace is None:
-                tmux.exec_attach(tmux.attach_or_switch_argv(session_name))
+                argv = tmux.attach_or_switch_argv(session_name)
+                if len(argv) > 1 and argv[1] == "switch-client":
+                    _remember_current_workspace_before_switch(session_name, runner)
+                tmux.exec_attach(argv)
             elif isinstance(request.workspace.project_location, LocalProjectLocation):
                 _attach_local(request.workspace, runner)
             else:
@@ -304,8 +340,11 @@ def execute_tmux_session_attach(request: TmuxSessionAttachRequest) -> None:
             f"tmux session '{request.session_name}' disappeared before it could be resumed."
         )
     _enable_lazygit_popup(request.session_name, tmux.run_tmux_command)
+    argv = tmux.attach_or_switch_argv(request.session_name)
+    if len(argv) > 1 and argv[1] == "switch-client":
+        _remember_current_workspace_before_switch(request.session_name, tmux.run_tmux_command)
     try:
-        tmux.exec_attach(tmux.attach_or_switch_argv(request.session_name))
+        tmux.exec_attach(argv)
     except OSError as exc:
         raise LaunchError(
             f"Could not attach to tmux session '{request.session_name}': {exc}"

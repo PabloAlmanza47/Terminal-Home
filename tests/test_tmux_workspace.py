@@ -14,8 +14,11 @@ id-capture-and-target flow.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -404,6 +407,64 @@ def test_remembered_layout_is_applied_when_pane_count_matches(tmp_path: Path) ->
     assert [c for c in fake.executed if c[1] == "select-layout"] == [
         ["tmux", "select-layout", "-t", "@0", remembered["main"].tmux_layout]
     ]
+
+
+def test_real_tmux_remembered_layout_restores_resized_pane(tmp_path: Path) -> None:
+    """Exercise capture and restoration against tmux, including real layout IDs."""
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket = f"terminal-home-layout-{uuid4().hex}"
+    session = f"th-layout-{uuid4().hex[:8]}"
+    workspace = WorkspaceSpec.for_local_project(
+        project_name="demo",
+        project_path=tmp_path,
+        session_name=session,
+        windows=(WindowSpec(window_name="main", panes=(_pane(), _pane())),),
+    )
+
+    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["tmux", "-L", socket, *argv[1:]], capture_output=True, text=True, timeout=5
+        )
+
+    def pane_widths() -> list[int]:
+        result = runner(
+            ["tmux", "list-panes", "-t", f"{session}:main", "-F", "#{pane_width}"]
+        )
+        assert result.returncode == 0, result.stderr
+        return [int(width) for width in result.stdout.splitlines()]
+
+    def first_pane_id() -> str:
+        result = runner(
+            ["tmux", "list-panes", "-t", f"{session}:main", "-F", "#{pane_id}"]
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.splitlines()[0]
+
+    plans = {("main", 0): _plan(), ("main", 1): _plan()}
+    try:
+        try:
+            create_workspace_session(workspace, plans, runner=runner)
+        except TmuxCommandError as exc:
+            if "Operation not permitted" in str(exc):
+                pytest.skip("sandbox does not permit a real tmux test server")
+            raise
+        resized = runner(["tmux", "resize-pane", "-t", first_pane_id(), "-x", "20"])
+        assert resized.returncode == 0, resized.stderr
+        remembered = capture_tmux_window_layouts(session, runner=runner)
+        resized_widths = pane_widths()
+        assert remembered["main"].pane_count == 2
+
+        killed = runner(["tmux", "kill-session", "-t", session])
+        assert killed.returncode == 0, killed.stderr
+        create_workspace_session(
+            workspace, plans, runner=runner, saved_window_layouts=remembered
+        )
+
+        assert pane_widths() == resized_widths
+    finally:
+        runner(["tmux", "kill-server"])
 
 
 def test_remembered_layout_is_ignored_when_pane_count_differs(tmp_path: Path) -> None:
