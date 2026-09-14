@@ -308,3 +308,31 @@ def test_long_agent_rows_are_truncated_on_narrow_terminals(
     label, width = _run(scenario())
     assert "…" in label
     assert all(cell_len(line) <= width for line in label.splitlines()), (label, width)
+
+
+def test_large_agent_snapshot_renders_and_filters_without_projection_loss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    entries = tuple(
+        _entry(
+            f"session-{index}",
+            f"Task {index}",
+            tmp_path / f"worktree-{index}",
+            AgentHubStatus.WORKING,
+        )
+        for index in range(100)
+    )
+
+    async def scenario() -> tuple[int, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.push_screen(AgentsScreen(AgentHubSnapshot(True, entries)))
+            await pilot.wait_for_scheduled_animations()
+            initial_count = app.screen.query_one("#agent-list", OptionList).option_count
+            app.screen.query_one("#agent-filter", Input).value = "Task 99"
+            await pilot.pause()
+            filtered_count = app.screen.query_one("#agent-list", OptionList).option_count
+            return initial_count, filtered_count
+
+    assert _run(scenario()) == (100, 1)

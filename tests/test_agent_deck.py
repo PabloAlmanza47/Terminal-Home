@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from dashboard.services.agent_deck import (
+    AgentDeckCreateRequest,
     AgentStatus,
+    create_session,
+    create_session_argv,
     normalize_project_path,
     parse_sessions,
     snapshot,
@@ -49,6 +52,7 @@ def test_malformed_individual_session_is_skipped_and_paths_normalize(tmp_path: P
     sessions = parse_sessions([
         {"id": "ok", "path": str(path), "tool": "codex", "status": "idle"},
         {"path": str(path), "tool": "codex", "status": "running"},
+        {"id": "blank-path", "path": "   ", "tool": "codex", "status": "running"},
         "bad",
     ])
     assert len(sessions) == 1
@@ -59,3 +63,127 @@ def test_malformed_individual_session_is_skipped_and_paths_normalize(tmp_path: P
 def test_unknown_status_has_internal_fallback() -> None:
     session = parse_sessions([{"id": "x", "path": "/tmp/x", "status": "future-state"}])[0]
     assert session.status is AgentStatus.UNKNOWN
+
+
+def test_optional_fields_and_relative_symlinked_path_are_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "project with spaces"
+    target.mkdir()
+    link = tmp_path / "project-link"
+    link.symlink_to(target, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    sessions = parse_sessions(
+        [
+            {"id": "minimal", "path": "project-link", "status": None},
+            {"id": "named", "path": str(target), "title": None, "tool": None},
+        ]
+    )
+
+    assert sessions[0].path == target.resolve()
+    assert sessions[0].title == "minimal"
+    assert sessions[0].tool == "unknown"
+    assert sessions[0].status is AgentStatus.UNKNOWN
+    assert sessions[1].title == "named"
+    assert sessions[1].tool == "unknown"
+
+
+def test_create_session_builds_exact_argv_and_parses_result(tmp_path: Path) -> None:
+    request = AgentDeckCreateRequest(
+        path=tmp_path / "project with spaces",
+        title="Fix: wizard failures [urgent]",
+        tool="codex",
+        prompt="Inspect this path: /tmp/a b; keep it as one message.",
+    )
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return _result(
+            {
+                "success": True,
+                "id": "created-1",
+                "title": request.title,
+                "path": str(request.path),
+                "tool": request.tool,
+            }
+        )
+
+    result = create_session(request, runner=runner)
+    assert calls == [create_session_argv(request)]
+    assert calls[0][-2:] == ["--message", request.prompt]
+    assert result.success is True
+    assert result.session_id == "created-1"
+    assert result.path == normalize_project_path(request.path)
+
+
+def test_create_session_without_prompt_omits_message() -> None:
+    request = AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "claude")
+    assert create_session_argv(request) == [
+        "agent-deck",
+        "launch",
+        "/tmp/project",
+        "--title",
+        "Agent",
+        "--cmd",
+        "claude",
+        "--json",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (subprocess.TimeoutExpired(["agent-deck"], 2), "timed out"),
+        (subprocess.CompletedProcess([], 1, "", "provider collision"), "provider collision"),
+    ],
+)
+def test_create_session_classifies_command_failures(
+    failure: BaseException, expected: str
+) -> None:
+    request = AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "codex")
+
+    def runner(_: list[str]) -> subprocess.CompletedProcess[str]:
+        if isinstance(failure, BaseException):
+            raise failure
+        return failure
+
+    result = create_session(request, runner=runner)
+    assert result.success is False
+    assert result.error and expected in result.error
+
+
+def test_create_session_handles_missing_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dashboard.services.agent_deck as module
+
+    monkeypatch.setattr(module.shutil, "which", lambda _: None)
+    result = create_session(AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "codex"))
+    assert result.success is False
+    assert result.error == "Agent Deck executable not found"
+
+
+@pytest.mark.parametrize(
+    "stdout, expected",
+    [("{", "malformed JSON"), (json.dumps({"success": True}), "session id")],
+)
+def test_create_session_handles_bad_success_output(stdout: str, expected: str) -> None:
+    result = create_session(
+        AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "codex"),
+        runner=lambda _: subprocess.CompletedProcess([], 0, stdout, ""),
+    )
+    assert result.success is False
+    assert result.error and expected in result.error
+
+
+def test_create_session_surfaces_provider_error_without_prompt() -> None:
+    prompt = "secret prompt that must not appear"
+    result = create_session(
+        AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "codex", prompt),
+        runner=lambda _: subprocess.CompletedProcess(
+            [], 1, "", f"collision while handling {prompt}"
+        ),
+    )
+    assert result.success is False
+    assert result.error and "collision" in result.error
+    assert prompt not in result.error

@@ -43,6 +43,37 @@ class AgentDeckSnapshot:
     warning: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AgentDeckCreateRequest:
+    """Transient inputs for creating one Agent Deck session."""
+
+    path: Path
+    title: str
+    tool: str
+    prompt: str | None = None
+
+    def __post_init__(self) -> None:
+        if not str(self.path).strip():
+            raise ValueError("Agent Deck session path cannot be empty")
+        if not self.title.strip():
+            raise ValueError("Agent Deck session title cannot be empty")
+        if not self.tool.strip():
+            raise ValueError("Agent Deck session tool cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentDeckCreateResult:
+    """Structured result from Agent Deck's create-and-start operation."""
+
+    success: bool
+    session_id: str | None = None
+    title: str | None = None
+    path: Path | None = None
+    tool: str | None = None
+    warning: str | None = None
+    error: str | None = None
+
+
 AgentDeckRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 
@@ -73,7 +104,12 @@ def _parse_session(value: Any) -> AgentDeckSession | None:
         return None
     identifier = value.get("id")
     path = value.get("path")
-    if not isinstance(identifier, str) or not identifier.strip() or not isinstance(path, str):
+    if (
+        not isinstance(identifier, str)
+        or not identifier.strip()
+        or not isinstance(path, str)
+        or not path.strip()
+    ):
         return None
     status, raw_status = normalize_status(value.get("status"))
     return AgentDeckSession(
@@ -100,6 +136,79 @@ def parse_sessions(payload: Any) -> tuple[AgentDeckSession, ...]:
 
 def run_agent_deck_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, timeout=_TIMEOUT)
+
+
+def create_session_argv(request: AgentDeckCreateRequest) -> list[str]:
+    """Build Agent Deck's structured create-and-start command."""
+    argv = [
+        "agent-deck",
+        "launch",
+        str(request.path),
+        "--title",
+        request.title,
+        "--cmd",
+        request.tool,
+        "--json",
+    ]
+    if request.prompt:
+        argv.extend(("--message", request.prompt))
+    return argv
+
+
+def _redacted_provider_detail(result: subprocess.CompletedProcess[str], prompt: str | None) -> str:
+    detail = (result.stderr or result.stdout or "").strip()
+    if prompt:
+        detail = detail.replace(prompt, "[initial prompt redacted]")
+    return detail[:500]
+
+
+def _create_result_from_payload(payload: Any, prompt: str | None) -> AgentDeckCreateResult:
+    if not isinstance(payload, dict):
+        return AgentDeckCreateResult(False, error="Agent Deck returned unexpected JSON")
+    if payload.get("success") is False:
+        detail = payload.get("error")
+        error = str(detail).strip() if detail else "Agent Deck rejected session creation"
+        if prompt:
+            error = error.replace(prompt, "[initial prompt redacted]")
+        return AgentDeckCreateResult(False, error=error[:500])
+    identifier = payload.get("id")
+    if not isinstance(identifier, str) or not identifier.strip():
+        return AgentDeckCreateResult(False, error="Agent Deck did not return a session id")
+    raw_path = payload.get("path")
+    return AgentDeckCreateResult(
+        True,
+        session_id=identifier,
+        title=payload.get("title") if isinstance(payload.get("title"), str) else None,
+        path=normalize_project_path(raw_path) if isinstance(raw_path, str) and raw_path else None,
+        tool=payload.get("tool") if isinstance(payload.get("tool"), str) else None,
+    )
+
+
+def create_session(
+    request: AgentDeckCreateRequest,
+    *,
+    runner: AgentDeckRunner = run_agent_deck_command,
+) -> AgentDeckCreateResult:
+    """Create exactly one session through Agent Deck's supported CLI API."""
+    if runner is run_agent_deck_command and shutil.which("agent-deck") is None:
+        return AgentDeckCreateResult(False, error="Agent Deck executable not found")
+    try:
+        result = runner(create_session_argv(request))
+    except subprocess.TimeoutExpired:
+        return AgentDeckCreateResult(False, error="Agent Deck session creation timed out")
+    except OSError as exc:
+        return AgentDeckCreateResult(False, error=f"Agent Deck unavailable: {exc}")
+    if result.returncode != 0:
+        detail = _redacted_provider_detail(result, request.prompt)
+        error = "Agent Deck session creation failed"
+        if detail:
+            error = f"{error}: {detail}"
+        return AgentDeckCreateResult(False, error=error)
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return AgentDeckCreateResult(False, error="Agent Deck returned malformed JSON")
+    return _create_result_from_payload(payload, request.prompt)
 
 
 def snapshot(*, runner: AgentDeckRunner = run_agent_deck_command) -> AgentDeckSnapshot:
