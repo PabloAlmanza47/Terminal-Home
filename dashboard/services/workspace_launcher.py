@@ -51,6 +51,18 @@ def _enable_lazygit_popup(session_name: str, runner: tmux.TmuxCommandRunner) -> 
         return
 
 
+def _enable_agent_attention_popup(session_name: str, runner: tmux.TmuxCommandRunner) -> None:
+    try:
+        tmux.install_agent_attention_popup(session_name, runner=runner)
+    except Exception:
+        return
+
+
+def _enable_workspace_popups(session_name: str, runner: tmux.TmuxCommandRunner) -> None:
+    _enable_lazygit_popup(session_name, runner)
+    _enable_agent_attention_popup(session_name, runner)
+
+
 def remember_live_workspace_layout(
     workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner
 ) -> None:
@@ -198,7 +210,7 @@ def _build_create_and_attach(
     for warning in warnings:
         print(f"Note: {warning}", file=stream)
 
-    _enable_lazygit_popup(workspace.session_name, runner)
+    _enable_workspace_popups(workspace.session_name, runner)
 
     if isinstance(workspace.project_location, LocalProjectLocation):
         _attach_local(workspace, runner)
@@ -299,7 +311,7 @@ def execute_launch_request(request: LaunchRequest, *, out: TextIO | None = None)
         if _session_exists(session_name, runner):
             # All managed existing-session flows converge here, including the
             # Home screen's workspace=None fast path for a running session.
-            _enable_lazygit_popup(session_name, runner)
+            _enable_workspace_popups(session_name, runner)
             if request.workspace is None:
                 argv = tmux.attach_or_switch_argv(session_name)
                 if len(argv) > 1 and argv[1] == "switch-client":
@@ -339,7 +351,7 @@ def execute_tmux_session_attach(request: TmuxSessionAttachRequest) -> None:
         raise LaunchError(
             f"tmux session '{request.session_name}' disappeared before it could be resumed."
         )
-    _enable_lazygit_popup(request.session_name, tmux.run_tmux_command)
+    _enable_workspace_popups(request.session_name, tmux.run_tmux_command)
     argv = tmux.attach_or_switch_argv(request.session_name)
     if len(argv) > 1 and argv[1] == "switch-client":
         _remember_current_workspace_before_switch(request.session_name, tmux.run_tmux_command)

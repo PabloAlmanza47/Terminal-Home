@@ -41,6 +41,7 @@ _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 _TERMINAL_HOME_OPTION = "@terminal_home_workspace"
 _LAZYGIT_POPUP_OPTION = "@terminal_home_lazygit_popup"
+_AGENT_ATTENTION_POPUP_OPTION = "@terminal_home_agent_attention_popup"
 _LAZYGIT_POPUP_COMMAND = (
     "if command -v lazygit >/dev/null 2>&1; then "
     "config=$(mktemp \"${TMPDIR:-/tmp}/terminal-home-lazygit.XXXXXX\") "
@@ -248,6 +249,50 @@ def install_lazygit_popup(
     _run_step(
         command_runner,
         ["tmux", "set-option", "-t", session_name, _LAZYGIT_POPUP_OPTION, "1"],
+    )
+
+
+def agent_attention_popup_argv(session_name: str) -> list[str]:
+    """Return the prefix-a binding for the Agent Attention popup."""
+    popup_command = [
+        "display-popup", "-E", "-w", "70%", "-h", "65%",
+        "-d", "#{pane_current_path}", "-T", " Agents ",
+        "if command -v th >/dev/null 2>&1; then th attention; else "
+        "printf '%s\\n' 'Terminal Home: the th command is not installed.' "
+        "'Install Terminal Home and press prefix + a again.'; read -r _; fi",
+    ]
+    return [
+        "tmux", "bind-key", "-T", "prefix", "a", "if-shell", "-F",
+        f"#{{==:#{{{_TERMINAL_HOME_OPTION}}},1}}", shlex.join(popup_command),
+    ]
+
+
+def install_agent_attention_popup(
+    session_name: str, *, runner: TmuxCommandRunner | None = None
+) -> None:
+    """Install prefix-a for a managed session, with its own migration marker."""
+    command_runner = runner or run_tmux_command
+
+    def option_value(option: str) -> str:
+        try:
+            result = command_runner(["tmux", "show-options", "-t", session_name, "-qv", option])
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return (getattr(result, "stdout", "") or "").strip()
+
+    if option_value(_TERMINAL_HOME_OPTION) != "1":
+        _run_step(
+            command_runner,
+            ["tmux", "set-option", "-t", session_name, _TERMINAL_HOME_OPTION, "1"],
+        )
+    if option_value(_AGENT_ATTENTION_POPUP_OPTION) == "1":
+        return
+    _run_step(command_runner, agent_attention_popup_argv(session_name))
+    _run_step(
+        command_runner,
+        ["tmux", "set-option", "-t", session_name, _AGENT_ATTENTION_POPUP_OPTION, "1"],
     )
 
 

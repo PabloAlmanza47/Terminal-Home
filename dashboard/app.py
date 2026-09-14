@@ -19,8 +19,10 @@ from textual.widgets import Button, Checkbox, Input, TextArea
 
 from dashboard.models import AgentDeckAttachRequest, LaunchRequest, TmuxSessionAttachRequest
 from dashboard.models.settings import AppSettings
+from dashboard.screens.agents import AgentsScreen
 from dashboard.screens.home import HomeScreen
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
+from dashboard.services.agent_hub import AgentHubSnapshot
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import (
@@ -47,8 +49,9 @@ class TerminalHomeApp(App[AppResult]):
         ("s", "open_settings", "Settings"),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, *, agent_attention: bool = False) -> None:
         super().__init__()
+        self._agent_attention = agent_attention
         settings_result = load_settings_result()
         self.settings: AppSettings = settings_result.value
         self._settings_recovery_warning = settings_result.warning
@@ -61,7 +64,10 @@ class TerminalHomeApp(App[AppResult]):
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
         if self.settings.theme is not None and self.settings.theme in self.available_themes:
             self.theme = self.settings.theme
-        self.push_screen(HomeScreen())
+        if self._agent_attention:
+            self.push_screen(AgentsScreen(AgentHubSnapshot(True), attention_mode=True))
+        else:
+            self.push_screen(HomeScreen())
 
     def _on_theme_changed(self, theme: Theme) -> None:
         """Persist theme changes made through any supported path -- the

@@ -26,7 +26,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from dashboard import __version__
-from dashboard.models import RemoteProjectRegistration, SshHost, SshModelValidationError
+from dashboard.models import (
+    AgentDeckAttachRequest,
+    RemoteProjectRegistration,
+    SshHost,
+    SshModelValidationError,
+)
 from dashboard.services.activity import (
     agent_display_name,
     agent_status,
@@ -175,6 +180,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "switch", help="Open the popup-sized Terminal Home workspace switcher."
     )
     switch_parser.set_defaults(handler=_run_switch)
+
+    attention_parser = subparsers.add_parser(
+        "attention", help="Open the Agent Attention popup for the current tmux workspace."
+    )
+    attention_parser.set_defaults(handler=_run_attention)
 
     new_parser = subparsers.add_parser(
         "new",
@@ -686,6 +696,23 @@ def _run_agent(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _run_attention(args: argparse.Namespace) -> int:
+    """Run the Agent Attention UI inside tmux's popup."""
+    from dashboard.app import AgentDeckLaunchError, TerminalHomeApp, execute_agent_deck_attach
+
+    while True:
+        result = TerminalHomeApp(agent_attention=True).run()
+        if result is None:
+            return 0
+        if not isinstance(result, AgentDeckAttachRequest):
+            return 0
+        try:
+            execute_agent_deck_attach(result.session_id)
+        except AgentDeckLaunchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
 
 def _run_plan(args: argparse.Namespace) -> int:

@@ -19,7 +19,7 @@ from dashboard.services.agent_hub import (
     AgentHubStatus,
     load_agent_hub_snapshot,
 )
-from dashboard.services.projects import ProjectStatus
+from dashboard.services.projects import ProjectStatus, scan_all_projects
 from dashboard.widgets import KeyboardOptionList as OptionList
 
 
@@ -35,7 +35,7 @@ def _fit(value: str, width: int) -> str:
     return f"{value[:left_width]}…{value[-right_width:]}"
 
 
-def _agent_label(entry: AgentHubEntry, width: int) -> str:
+def _agent_label(entry: AgentHubEntry, width: int, *, compact: bool = False) -> str:
     """Render a complete but compact row for the dedicated agent screen."""
     # KeyboardOptionList reserves two cells for its selection marker; the
     # detail lines also carry a two-cell indent.
@@ -47,6 +47,8 @@ def _agent_label(entry: AgentHubEntry, width: int) -> str:
         context = "Missing path"
     else:
         context = "Unregistered"
+    if compact:
+        return _fit(f"{_status_glyph(entry)} {entry.title}  {entry.status.value}", max(1, width))
     return "\n".join(
         (
             f"{_status_glyph(entry)} {title}",
@@ -85,6 +87,7 @@ class AgentsScreen(Screen[None]):
 
     BINDINGS = [
         ("escape", "go_back", "Back"),
+        ("r", "refresh", "Refresh"),
         ("f5", "refresh", "Refresh"),
     ]
 
@@ -92,6 +95,7 @@ class AgentsScreen(Screen[None]):
         self,
         snapshot: AgentHubSnapshot,
         project_statuses: tuple[ProjectStatus, ...] = (),
+        attention_mode: bool = False,
     ) -> None:
         super().__init__()
         self._snapshot = snapshot
@@ -100,9 +104,10 @@ class AgentsScreen(Screen[None]):
         self._entry_lookup: dict[str, AgentHubEntry] = {}
         self._preferred_session_id: str | None = None
         self._scanning = False
+        self._attention_mode = attention_mode
 
     def compose(self) -> ComposeResult:
-        with Container(classes="screen-root"):
+        with Container(classes="screen-root agents-screen-root"):
             with Vertical(classes="panel agents-panel"):
                 yield Static("Agents", id="screen-title")
                 yield Static("", id="agents-warning", classes="wizard-hint")
@@ -113,6 +118,8 @@ class AgentsScreen(Screen[None]):
     def on_mount(self) -> None:
         self._populate(self._snapshot)
         self.query_one("#agent-filter", Input).focus()
+        if self._attention_mode:
+            self.action_refresh()
 
     def on_resize(self, event: events.Resize) -> None:
         if self._snapshot.available and self._entries and not self._scanning:
@@ -131,7 +138,17 @@ class AgentsScreen(Screen[None]):
         self.run_worker(self._refresh, thread=True, exclusive=True)
 
     def _refresh(self) -> None:
-        snapshot = load_agent_hub_snapshot(self._project_statuses)
+        try:
+            if self._attention_mode:
+                scan = scan_all_projects()
+                snapshot = load_agent_hub_snapshot(
+                    scan.statuses,
+                    agent_snapshot=scan.agent_snapshot,
+                )
+            else:
+                snapshot = load_agent_hub_snapshot(self._project_statuses)
+        except Exception as exc:
+            snapshot = AgentHubSnapshot(False, warning=f"Refresh failed: {exc}")
         self.app.call_from_thread(self._on_refresh_complete, snapshot)
 
     def _on_refresh_complete(self, snapshot: AgentHubSnapshot) -> None:
@@ -187,7 +204,12 @@ class AgentsScreen(Screen[None]):
         )
         for entry in entries:
             option_list.add_option(
-                Option(_agent_label(entry, max(1, content_width)), id=entry.session_id)
+                Option(
+                    _agent_label(
+                        entry, max(1, content_width), compact=self._attention_mode
+                    ),
+                    id=entry.session_id,
+                )
             )
         preferred_id = selected_id if selected_id in self._entry_lookup else entries[0].session_id
         self._preferred_session_id = preferred_id

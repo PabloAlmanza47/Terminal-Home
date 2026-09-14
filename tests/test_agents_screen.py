@@ -201,6 +201,31 @@ def test_agents_render_context_statuses_and_search_fields(
     assert len(empty_labels) == 1 and "No agents match" in empty_labels[0]
 
 
+def test_agents_results_fill_popup_height_for_multiple_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    entries = tuple(
+        _entry(str(index), f"Agent {index}", tmp_path, AgentHubStatus.WORKING)
+        for index in range(2)
+    )
+
+    async def scenario() -> tuple[int, int, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=(80, 30)) as pilot:
+            app.push_screen(AgentsScreen(AgentHubSnapshot(True, entries)))
+            await pilot.wait_for_scheduled_animations()
+            root = app.screen.query_one(".agents-screen-root")
+            panel = app.screen.query_one(".agents-panel")
+            results = app.screen.query_one("#agent-list", OptionList)
+            return root.region.height, panel.region.height, results.region.height
+
+    root_height, panel_height, results_height = _run(scenario())
+    assert root_height > 10
+    assert panel_height == root_height - 2
+    assert results_height >= 2
+
+
 @pytest.mark.parametrize(
     "snapshot, message",
     [

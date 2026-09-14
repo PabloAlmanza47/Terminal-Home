@@ -60,8 +60,8 @@ class AgentHubSnapshot:
 
 _STATUS_ORDER = {
     AgentHubStatus.WAITING: 0,
-    AgentHubStatus.WORKING: 1,
-    AgentHubStatus.COMPLETED: 2,
+    AgentHubStatus.COMPLETED: 1,
+    AgentHubStatus.WORKING: 2,
     AgentHubStatus.UNKNOWN: 3,
 }
 
@@ -154,10 +154,15 @@ def build_agent_hub_snapshot(
 
 def load_agent_hub_snapshot(
     project_statuses: Iterable[ProjectStatus],
+    *,
+    agent_snapshot: AgentDeckSnapshot | None = None,
 ) -> AgentHubSnapshot:
     """Read Agent Deck through the existing optional integration and project.
 
     This function performs no writes and inherits the existing adapter's
     timeout, defensive parsing, and unavailable-provider behavior.
     """
-    return build_agent_hub_snapshot(agent_deck_snapshot(), project_statuses)
+    return build_agent_hub_snapshot(
+        agent_snapshot if agent_snapshot is not None else agent_deck_snapshot(),
+        project_statuses,
+    )
