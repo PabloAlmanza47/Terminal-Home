@@ -134,16 +134,20 @@ OptionList {
 
 #home-dashboard.layout-wide {
     layout: grid;
-    grid-size: 2 2;
+    grid-size: 2 3;
     grid-columns: 2fr 1fr;
     grid-gutter: 1 2;
-    grid-rows: auto auto;
+    grid-rows: auto auto auto;
     align: left top;
     height: auto;
 }
 
 #panel-sessions {
     column-span: 1;
+}
+
+#panel-agents {
+    column-span: 2;
 }
 
 #panel-recent {
@@ -156,7 +160,8 @@ OptionList {
 }
 
 #panel-actions,
-#panel-sessions {
+#panel-sessions,
+#panel-agents {
     opacity: 0.9;
 }
 
@@ -200,7 +205,8 @@ OptionList {
 
 #main-menu,
 #recent-projects-list,
-#active-sessions-list {
+#active-sessions-list,
+#active-agents-list {
     height: auto;
     margin: 0;
     border: none;

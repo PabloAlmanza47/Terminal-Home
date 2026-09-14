@@ -39,6 +39,14 @@ from dashboard.services.activity import (
     server_status,
     workspace_status,
 )
+from dashboard.services.agent_deck import AgentDeckSnapshot
+from dashboard.services.agent_hub import (
+    AgentAssociation,
+    AgentHubEntry,
+    AgentHubSnapshot,
+    AgentHubStatus,
+    build_agent_hub_snapshot,
+)
 from dashboard.services.formatting import greeting_for
 from dashboard.services.project_rows import (
     ActivityProjectRow,
@@ -68,6 +76,7 @@ _WIDE_BREAKPOINT = 100
 # Keep the Home lists bounded so ordinary content remains content-sized.
 _MAX_RECENT_PROJECTS = 5
 _MAX_ACTIVE_SESSIONS = 4
+_MAX_ACTIVE_AGENTS = 4
 
 # Primary-menu option/action ids.
 CONTINUE_PROJECT = "continue_project"
@@ -166,6 +175,33 @@ def _terminal_home_sessions(
     return [session for session in sessions if session.name not in agent_tmux_names]
 
 
+_AGENT_HUB_GLYPHS = {
+    AgentHubStatus.WORKING: "●",
+    AgentHubStatus.WAITING: "◐",
+    AgentHubStatus.COMPLETED: "✓",
+    AgentHubStatus.UNKNOWN: "?",
+}
+
+
+def _agent_hub_label(entry: AgentHubEntry, width: int = 100) -> str:
+    """Render one compact, selectable Agent Hub row."""
+    glyph = _AGENT_HUB_GLYPHS[entry.status]
+    line_width = max(1, width - 2)
+    title = _fit_activity_name(entry.title, line_width)
+    context = (
+        entry.project_name
+        if entry.association is AgentAssociation.KNOWN_PROJECT
+        else f"unregistered · {entry.path}"
+    )
+    detail = _fit_activity_name(
+        f"{agent_display_name(entry.tool)} · {entry.status.value} · {context}",
+        line_width,
+    )
+    return (
+        f"{glyph} {title}\n  {detail}"
+    )
+
+
 def format_system_status(info: SystemInfo) -> str:
     """Render a SystemInfo as the compact multi-line body of the System
     Status panel. Pure and Textual-independent so it's directly testable.
@@ -251,8 +287,10 @@ class HomeScreen(Screen[None]):
         self._project_lookup: dict[str, Project] = {}
         self._session_lookup: dict[str, ProjectStatus] = {}
         self._agent_lookup: dict[str, ProjectStatus] = {}
+        self._agent_hub_lookup: dict[str, AgentHubEntry] = {}
         self._last_statuses: list[ProjectStatus] = []
         self._last_sessions: list[TmuxSession] = []
+        self._last_agent_hub = AgentHubSnapshot(False)
         self._last_scan_warning: str = ""
         self._wsl_distro: str | None = None
         self._active_section = "actions"
@@ -303,6 +341,15 @@ class HomeScreen(Screen[None]):
                             classes="-textual-compact home-list",
                             reset_on_blur=True,
                         )
+                    with Vertical(id="panel-agents", classes="home-panel"):
+                        yield Static(
+                            "  Active Agents", id="heading-agents", classes="panel-heading"
+                        )
+                        yield OptionList(
+                            id="active-agents-list",
+                            classes="-textual-compact home-list",
+                            reset_on_blur=True,
+                        )
         yield Static(
             "↑↓ Navigate   Enter Select   ←→ Sections   F5 Refresh   ? Help   q Quit",
             id="keyboard-footer",
@@ -342,6 +389,7 @@ class HomeScreen(Screen[None]):
 
         self._populate_recent_projects(self._last_statuses)
         self._populate_active_sessions(self._last_statuses, self._last_sessions)
+        self._populate_active_agents(self._last_agent_hub)
 
     def _apply_layout(self, width: int, height: int) -> None:
         dashboard = self.query_one("#home-dashboard")
@@ -357,6 +405,11 @@ class HomeScreen(Screen[None]):
         self.query_one("#panel-recent").display = True
         for panel_id in ("#panel-actions", "#panel-sessions"):
             self.query_one(panel_id).display = not compact_screen
+        self.query_one("#panel-agents").display = (
+            not compact_screen
+            and self._last_agent_hub.available
+            and bool(self._last_agent_hub.entries)
+        )
 
         logo = self.query_one("#home-logo", Static)
         artwork = artwork_for_size(width, height, self.settings.artwork_enabled)
@@ -379,6 +432,7 @@ class HomeScreen(Screen[None]):
             "actions": ("heading-actions", "panel-actions", "Primary Actions"),
             "recent": ("heading-recent", "panel-recent", "Recent Projects"),
             "sessions": ("heading-sessions", "panel-sessions", "Active Sessions"),
+            "agents": ("heading-agents", "panel-agents", "Active Agents"),
         }
         self._active_section = section
         for name, (heading_id, panel_id, label) in labels.items():
@@ -401,6 +455,7 @@ class HomeScreen(Screen[None]):
                 "F5 Refresh   ? Help   q Quit"
             ),
             "sessions": "↑↓ Navigate   Enter Resume   ←→ Sections   F5 Refresh   ? Help   q Quit",
+            "agents": "↑↓ Navigate   Enter Attach   ←→ Sections   F5 Refresh   ? Help   q Quit",
         }
         self.query_one("#keyboard-footer", Static).update(hints[section])
 
@@ -409,6 +464,7 @@ class HomeScreen(Screen[None]):
             "main-menu": "actions",
             "recent-projects-list": "recent",
             "active-sessions-list": "sessions",
+            "active-agents-list": "agents",
         }
         section = section_by_id.get(event.widget.id or "")
         if section is not None:
@@ -492,6 +548,8 @@ class HomeScreen(Screen[None]):
         if event.key not in {"left", "right"}:
             return
         order = ["actions", "recent", "sessions"]
+        if self.query_one("#panel-agents").display:
+            order.append("agents")
         index = order.index(getattr(self, "_active_section", "actions"))
         next_index = (index + (1 if event.key == "right" else -1)) % len(order)
         section = order[next_index]
@@ -500,6 +558,7 @@ class HomeScreen(Screen[None]):
                 "actions": "#main-menu",
                 "recent": "#recent-projects-list",
                 "sessions": "#active-sessions-list",
+                "agents": "#active-agents-list",
             }[section],
             KeyboardActionList if section == "actions" else OptionList,
         )
@@ -546,10 +605,14 @@ class HomeScreen(Screen[None]):
         self._scanning = False
         self._last_statuses = list(scan_result.statuses)
         self._last_sessions = sessions
+        self._last_agent_hub = build_agent_hub_snapshot(
+            scan_result.agent_snapshot or AgentDeckSnapshot(False), self._last_statuses
+        )
         self._last_scan_warning = format_scan_warnings(scan_result)
         self._wsl_distro = system_info.wsl_distro
         self._populate_recent_projects(self._last_statuses)
         self._populate_active_sessions(self._last_statuses, sessions)
+        self._populate_active_agents(self._last_agent_hub)
         if self._initial_focus_pending:
             self._initial_focus_pending = False
             self._focus_initial_section()
@@ -687,6 +750,30 @@ class HomeScreen(Screen[None]):
         if len(sessions) > _MAX_ACTIVE_SESSIONS:
             option_list.add_option(Option("View All Sessions", id=_VIEW_ALL_SESSIONS))
 
+    def _populate_active_agents(self, snapshot: AgentHubSnapshot) -> None:
+        panel = self.query_one("#panel-agents")
+        option_list = self.query_one("#active-agents-list", OptionList)
+        option_list.clear_options()
+        self._agent_hub_lookup = {}
+
+        if self.size.height <= 24 or not snapshot.available or not snapshot.entries:
+            panel.display = False
+            return
+
+        panel.display = True
+        width_candidates = (
+            option_list.content_region.width,
+            option_list.size.width,
+            panel.region.width - 10,
+            self.size.width - 10,
+        )
+        content_width = next((width for width in width_candidates if width > 0), 100)
+        for entry in snapshot.entries[:_MAX_ACTIVE_AGENTS]:
+            self._agent_hub_lookup[entry.session_id] = entry
+            option_list.add_option(
+                Option(_agent_hub_label(entry, content_width), id=entry.session_id)
+            )
+
     # --- Selection handling ----------------------------------------------------
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -698,6 +785,8 @@ class HomeScreen(Screen[None]):
             self._handle_recent_project_selection(option_id)
         elif list_id == "active-sessions-list":
             self._handle_session_selection(option_id)
+        elif list_id == "active-agents-list":
+            self._handle_agent_selection(option_id)
 
     def on_keyboard_action_list_action_selected(
         self, event: KeyboardActionList.ActionSelected
@@ -756,6 +845,13 @@ class HomeScreen(Screen[None]):
                     session_name=option_id,
                 )
             )
+
+    def _handle_agent_selection(self, option_id: str | None) -> None:
+        if option_id is None:
+            return
+        entry = self._agent_hub_lookup.get(option_id)
+        if entry is not None:
+            self.app.exit(AgentDeckAttachRequest(entry.session_id))
 
     def action_open_agent(self) -> None:
         option_list = self.query_one("#recent-projects-list", OptionList)

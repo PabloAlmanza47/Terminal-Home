@@ -16,6 +16,7 @@ from datetime import datetime as RealDateTime
 from pathlib import Path
 
 import pytest
+from rich.cells import cell_len
 from textual.widgets import Input, OptionList
 
 import dashboard.screens.home as home_module
@@ -484,6 +485,280 @@ def test_malformed_workspace_metadata_shows_warning_badge(
 
 
 # --- Active sessions -----------------------------------------------------------
+
+
+def test_active_agents_show_status_and_registered_project_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "terminal-home"
+    project_path.mkdir()
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "working-id", "Wizard Failures", project_path, "codex", AgentStatus.RUNNING
+                ),
+                AgentDeckSession(
+                    "waiting-id", "Packaging Validation", project_path, "codex", AgentStatus.WAITING
+                ),
+                AgentDeckSession(
+                    "completed-id", "Release Docs", project_path, "codex", AgentStatus.IDLE
+                ),
+                AgentDeckSession(
+                    "unknown-id", "Unknown Work", project_path, "codex", AgentStatus.ERROR
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> tuple[bool, list[str]]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_WIDE) as pilot:
+            await _wait_for_scan(pilot)
+            panel = app.screen.query_one("#panel-agents")
+            labels = _option_labels(app.screen.query_one("#active-agents-list", OptionList))
+            return panel.display, labels
+
+    displayed, labels = _run(scenario())
+    assert displayed is True
+    assert any("Wizard Failures" in label and "working" in label for label in labels)
+    assert any("Packaging Validation" in label and "waiting" in label for label in labels)
+    assert any("Release Docs" in label and "completed" in label for label in labels)
+    assert any("Unknown Work" in label and "unknown" in label for label in labels)
+    assert all("terminal-home" in label for label in labels)
+
+
+def test_active_agents_show_separate_registered_worktree_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    main_path = projects_root / "repo"
+    worktree_path = projects_root / "repo-feature"
+    main_path.mkdir()
+    worktree_path.mkdir()
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession("main-id", "Main Agent", main_path, "codex", AgentStatus.RUNNING),
+                AgentDeckSession(
+                    "worktree-id", "Feature Agent", worktree_path, "codex", AgentStatus.WAITING
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            return _option_labels(app.screen.query_one("#active-agents-list", OptionList))
+
+    labels = _run(scenario())
+    assert any("Main Agent" in label and "repo" in label for label in labels)
+    assert any("Feature Agent" in label and "repo-feature" in label for label in labels)
+
+
+def test_active_agent_enter_uses_exact_agent_deck_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "terminal-home"
+    project_path.mkdir()
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "stable-agent-id", "Mypy Fix", project_path, "codex", AgentStatus.RUNNING
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> object:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            agents = app.screen.query_one("#active-agents-list", OptionList)
+            agents.focus()
+            agents.highlighted = 0
+            await pilot.press("enter")
+            await pilot.pause()
+        return app.return_value
+
+    result = _run(scenario())
+    assert result == home_module.AgentDeckAttachRequest("stable-agent-id")
+
+
+def test_unmatched_active_agent_is_explicitly_unregistered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "known-project").mkdir()
+    outside_path = tmp_path / "unregistered" / "known-project"
+    outside_path.mkdir(parents=True)
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "unmatched-id", "Side Quest", outside_path, "codex", AgentStatus.WAITING
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> str:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            return _option_labels(app.screen.query_one("#active-agents-list", OptionList))[0]
+
+    label = _run(scenario())
+    assert "Side Quest" in label
+    assert "unregistered" in label
+    assert "known-project" not in label.split("unregistered", 1)[0]
+
+
+def test_active_agent_rows_truncate_to_the_available_width(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    outside_path = tmp_path / "a" / "very-long-unregistered-agent-working-directory"
+    outside_path.mkdir(parents=True)
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "long-agent-id",
+                    "A very long agent task title that should be shortened",
+                    outside_path,
+                    "codex",
+                    AgentStatus.WAITING,
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> tuple[str, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=(80, 30)) as pilot:
+            await _wait_for_scan(pilot)
+            agents = app.screen.query_one("#active-agents-list", OptionList)
+            return str(agents.get_option_at_index(0).prompt), agents.content_region.width
+
+    label, content_width = _run(scenario())
+    assert "…" in label
+    assert all(cell_len(line) <= content_width for line in label.splitlines()), (
+        label,
+        content_width,
+        [cell_len(line) for line in label.splitlines()],
+    )
+
+
+@pytest.mark.parametrize("snapshot", [AgentDeckSnapshot(False), AgentDeckSnapshot(True)])
+def test_active_agents_stay_hidden_when_unavailable_or_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, snapshot: AgentDeckSnapshot
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(projects_module, "agent_deck_snapshot", lambda: snapshot)
+
+    async def scenario() -> tuple[bool, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            return (
+                app.screen.query_one("#panel-agents").display,
+                type(app.screen).__name__,
+            )
+
+    displayed, screen_name = _run(scenario())
+    assert displayed is False
+    assert screen_name == "HomeScreen"
+
+
+def test_agent_hub_warning_does_not_make_home_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "demo").mkdir()
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(True, warning="Agent Deck status timed out"),
+    )
+
+    async def scenario() -> tuple[list[str], bool]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            projects = app.screen.query_one("#recent-projects-list", OptionList)
+            return _option_labels(projects), app.screen.is_attached
+
+    project_labels, home_attached = _run(scenario())
+    assert any("demo" in label for label in project_labels)
+    assert home_attached is True
+
+
+def test_active_agents_participate_in_section_navigation_and_reset_on_blur(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    project_path = projects_root / "terminal-home"
+    project_path.mkdir()
+    monkeypatch.setattr(
+        projects_module,
+        "agent_deck_snapshot",
+        lambda: AgentDeckSnapshot(
+            True,
+            (
+                AgentDeckSession(
+                    "agent-id", "Agent Task", project_path, "codex", AgentStatus.RUNNING
+                ),
+            ),
+        ),
+    )
+
+    async def scenario() -> tuple[list[str | None], str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            agents = app.screen.query_one("#active-agents-list", OptionList)
+            focused_ids: list[str | None] = [app.focused.id if app.focused else None]
+            for key in ("right", "right"):
+                await pilot.press(key)
+                await pilot.pause()
+                focused_ids.append(app.focused.id if app.focused else None)
+            agents_prompt_focused = str(agents.get_option_at_index(0).prompt)
+            await pilot.press("left")
+            await pilot.pause()
+            focused_ids.append(app.focused.id if app.focused else None)
+            agents_prompt_blurred = str(agents.get_option_at_index(0).prompt)
+            return focused_ids, agents_prompt_focused, agents_prompt_blurred
+
+    focused_ids, focused, blurred = _run(scenario())
+    assert focused_ids == [
+        "recent-projects-list",
+        "active-sessions-list",
+        "active-agents-list",
+        "active-sessions-list",
+    ]
+    assert focused.startswith("› ")
+    assert not blurred.startswith("› ")
 
 
 def test_missing_tmux_shows_friendly_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
