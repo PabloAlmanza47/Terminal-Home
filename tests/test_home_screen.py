@@ -529,7 +529,8 @@ def test_active_agents_show_status_and_registered_project_context(
     assert any("Packaging Validation" in label and "waiting" in label for label in labels)
     assert any("Release Docs" in label and "completed" in label for label in labels)
     assert any("Unknown Work" in label and "unknown" in label for label in labels)
-    assert all("terminal-home" in label for label in labels)
+    assert all("terminal-home" in label for label in labels[:-1])
+    assert labels[-1].strip() == "View All Agents"
 
 
 def test_active_agents_show_separate_registered_worktree_context(

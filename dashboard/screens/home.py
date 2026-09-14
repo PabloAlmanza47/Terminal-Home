@@ -25,6 +25,7 @@ from textual.widgets.option_list import Option
 from dashboard.art import artwork_for_size
 from dashboard.models import AgentDeckAttachRequest, LaunchAction, LaunchRequest
 from dashboard.models.settings import AppSettings, LayoutMode
+from dashboard.screens.agents import AgentsScreen
 from dashboard.screens.new_project import NewProjectScreen
 from dashboard.screens.project_detail import ProjectDetailScreen
 from dashboard.screens.projects import ProjectsScreen
@@ -89,6 +90,7 @@ EXIT = "exit"
 
 _VIEW_ALL_PROJECTS = "__view_all_projects__"
 _VIEW_ALL_SESSIONS = "__view_all_sessions__"
+_VIEW_ALL_AGENTS = "__view_all_agents__"
 _CREATE_PROJECT_FROM_EMPTY = "__create_project_from_empty__"
 
 # (digit shown, label, option/action id) -- shared by the menu's OptionList
@@ -773,6 +775,7 @@ class HomeScreen(Screen[None]):
             option_list.add_option(
                 Option(_agent_hub_label(entry, content_width), id=entry.session_id)
             )
+        option_list.add_option(Option("View All Agents", id=_VIEW_ALL_AGENTS))
 
     # --- Selection handling ----------------------------------------------------
 
@@ -848,6 +851,9 @@ class HomeScreen(Screen[None]):
 
     def _handle_agent_selection(self, option_id: str | None) -> None:
         if option_id is None:
+            return
+        if option_id == _VIEW_ALL_AGENTS:
+            self.app.push_screen(AgentsScreen(self._last_agent_hub, tuple(self._last_statuses)))
             return
         entry = self._agent_hub_lookup.get(option_id)
         if entry is not None:
