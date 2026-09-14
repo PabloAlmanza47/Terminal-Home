@@ -87,9 +87,12 @@ async def _open_projects_screen(pilot) -> None:
         await pilot.press("left")
         await pilot.pause()
     await pilot.press("enter")
-    await pilot.pause()
+    await pilot.wait_for_scheduled_animations()
     await pilot.app.workers.wait_for_complete()
-    await pilot.pause()
+    # Worker completion only guarantees that Home's background scan returned;
+    # the scan callback is posted back to the UI event loop separately. Wait
+    # for Textual's pending UI work rather than relying on a timing pause.
+    await pilot.wait_for_scheduled_animations()
 
 
 def _option_ids(pilot) -> list[str]:
@@ -430,9 +433,9 @@ def test_refresh_rescans_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             (projects_root / "beta").mkdir()
 
             await pilot.press("f5")
-            await pilot.pause()
+            await pilot.wait_for_scheduled_animations()
             await pilot.app.workers.wait_for_complete()
-            await pilot.pause()
+            await pilot.wait_for_scheduled_animations()
 
             return _option_ids(pilot)
 
