@@ -103,6 +103,13 @@ def test_lazygit_popup_binding_passes_tmux_parser_smoke(tmp_path) -> None:
         text=True,
         check=False,
     )
+    startup_error = start.stderr.strip()
+    sandbox_socket_error = (
+        "error connecting to " in startup_error
+        and ("Operation not permitted" in startup_error or "Permission denied" in startup_error)
+    )
+    if start.returncode != 0 and sandbox_socket_error:
+        pytest.skip(f"tmux server unavailable: {start.stderr.strip()}")
     assert start.returncode == 0, start.stderr
     try:
         command = [tmux_prefix[0], *tmux_prefix[1:], *tmux.lazygit_popup_argv("demo")[1:]]
