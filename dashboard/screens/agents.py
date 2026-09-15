@@ -5,12 +5,14 @@ from __future__ import annotations
 from rich.cells import cell_len
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.models import AgentDeckAttachRequest
+from dashboard.screens.new_agent import AgentProjectScreen, AgentWizardState
 from dashboard.services.activity import agent_display_name
 from dashboard.services.agent_hub import (
     AgentAssociation,
@@ -87,6 +89,7 @@ class AgentsScreen(Screen[None]):
 
     BINDINGS = [
         ("escape", "go_back", "Back"),
+        Binding("n", "new_agent", "New Agent", priority=True),
         ("r", "refresh", "Refresh"),
         ("f5", "refresh", "Refresh"),
     ]
@@ -117,7 +120,9 @@ class AgentsScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self._populate(self._snapshot)
-        self.query_one("#agent-filter", Input).focus()
+        # Keep the list as the primary keyboard target so ``n`` reliably
+        # opens New Agent; the app-level ``/`` binding focuses search.
+        self.query_one("#agent-list", OptionList).focus()
         if self._attention_mode:
             self.action_refresh()
 
@@ -128,6 +133,14 @@ class AgentsScreen(Screen[None]):
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
+
+    def action_new_agent(self) -> None:
+        self.app.push_screen(
+            AgentProjectScreen(
+                AgentWizardState(),
+                tuple(self._project_statuses),
+            )
+        )
 
     def action_refresh(self) -> None:
         if self._scanning:

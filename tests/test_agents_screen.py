@@ -12,12 +12,14 @@ from textual.widgets import Input, OptionList
 
 import dashboard.screens.agents as agents_module
 import dashboard.screens.home as home_module
+import dashboard.screens.new_agent as new_agent_module
 import dashboard.services.projects as projects_module
 from dashboard.app import TerminalHomeApp
 from dashboard.models import AgentDeckAttachRequest
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.screens.agents import AgentsScreen
 from dashboard.services import tmux as tmux_module
+from dashboard.services.agent_creation import AgentCreationResult
 from dashboard.services.agent_deck import AgentDeckSession, AgentDeckSnapshot, AgentStatus
 from dashboard.services.agent_hub import (
     AgentAssociation,
@@ -25,6 +27,7 @@ from dashboard.services.agent_hub import (
     AgentHubSnapshot,
     AgentHubStatus,
 )
+from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.system_info import SystemInfo
 
@@ -224,6 +227,87 @@ def test_agents_results_fill_popup_height_for_multiple_entries(
     assert root_height > 10
     assert panel_height == root_height - 2
     assert results_height >= 2
+
+
+def test_agents_screen_opens_and_cancels_new_agent_wizard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+
+    async def scenario() -> tuple[str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.push_screen(AgentsScreen(AgentHubSnapshot(True)))
+            await pilot.wait_for_scheduled_animations()
+            await pilot.press("n")
+            await pilot.wait_for_scheduled_animations()
+            opened = type(app.screen).__name__
+            await pilot.press("escape")
+            await pilot.wait_for_scheduled_animations()
+            return opened, type(app.screen).__name__
+
+    assert _run(scenario()) == ("AgentProjectScreen", "AgentsScreen")
+
+
+def test_new_agent_task_precedes_workspace_and_preserves_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    project_path = tmp_path / "projects" / "Demo Project"
+    project_path.mkdir(parents=True)
+    status = ProjectStatus(
+        project=Project("Demo Project", project_path),
+        canonical_path=project_path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="demo-project",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+    monkeypatch.setattr(
+        new_agent_module,
+        "validate_agent_creation_request",
+        lambda request: AgentCreationResult(True, resolved_path=request.project_path),
+    )
+
+    async def scenario() -> tuple[str, str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.push_screen(new_agent_module.AgentProjectScreen(statuses=(status,)))
+            await pilot.wait_for_scheduled_animations()
+            project_list = app.screen.query_one("#new-agent-project-list", OptionList)
+            project_list.focus()
+            await pilot.press("enter")
+            await pilot.wait_for_scheduled_animations()
+            app.screen.query_one("#task-input", Input).value = "test-agent-flow"
+            app.screen.query_one("#prompt-input", Input).value = "Prompt: keep [exact]"
+            app.screen._next()
+            await pilot.wait_for_scheduled_animations()
+            branch = app.screen.query_one("#branch-input", Input).value
+            worktree = app.screen.query_one("#worktree-input", Input).value
+            app.screen.query_one("#branch-input", Input).value = "agent/custom-branch"
+            app.screen.query_one("#worktree-input", Input).value = str(tmp_path / "custom path")
+            app.screen._next()
+            await pilot.wait_for_scheduled_animations()
+            review = app.screen
+            app.switch_screen(new_agent_module.AgentWorkspaceScreen(review.state))
+            await pilot.wait_for_scheduled_animations()
+            return (
+                branch,
+                worktree,
+                app.screen.query_one("#branch-input", Input).value,
+                app.screen.query_one("#worktree-input", Input).value,
+            )
+
+    branch, worktree, preserved_branch, preserved_worktree = _run(scenario())
+    assert branch == "agent/test-agent-flow"
+    assert "demo-project" in worktree and "test-agent-flow" in worktree
+    assert preserved_branch == "agent/custom-branch"
+    assert preserved_worktree.endswith("custom path")
 
 
 @pytest.mark.parametrize(
