@@ -110,9 +110,16 @@ class AgentsScreen(Screen[None]):
         self._attention_mode = attention_mode
 
     def compose(self) -> ComposeResult:
-        with Container(classes="screen-root agents-screen-root"):
-            with Vertical(classes="panel agents-panel"):
-                yield Static("Agents", id="screen-title")
+        root_classes = "screen-root agents-screen-root"
+        panel_classes = "panel agents-panel"
+        if self._attention_mode:
+            root_classes += " agents-attention-root"
+            panel_classes = "agents-panel agents-attention-panel"
+        with Container(classes=root_classes):
+            with Vertical(classes=panel_classes):
+                yield Static(
+                    "Active Agents" if self._attention_mode else "Agents", id="screen-title"
+                )
                 yield Static("", id="agents-warning", classes="wizard-hint")
                 yield Input(placeholder="Search agents...", id="agent-filter")
                 yield OptionList(id="agent-list")

@@ -596,6 +596,29 @@ Screen {
     max-height: 100%;
 }
 
+/* The tmux display-popup already supplies the outer frame. Attention mode
+   therefore uses a full-size, borderless content surface while the ordinary
+   full-screen Agents view keeps its panel above. */
+.agents-attention-root {
+    width: 100%;
+    height: 1fr;
+    padding: 0;
+    align: left top;
+}
+
+.agents-attention-panel {
+    width: 1fr;
+    max-width: 100%;
+    height: 1fr;
+    max-height: 100%;
+    padding: 0 1;
+    border: none;
+}
+
+.agents-attention-panel #agent-list {
+    border: none;
+}
+
 #screen-title, .panel-heading {
     color: #72d7ff;
 }

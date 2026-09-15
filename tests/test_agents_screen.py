@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from rich.cells import cell_len
-from textual.widgets import Input, OptionList
+from textual.widgets import Input, OptionList, Static, TextArea
 
 import dashboard.screens.agents as agents_module
 import dashboard.screens.home as home_module
@@ -229,6 +229,41 @@ def test_agents_results_fill_popup_height_for_multiple_entries(
     assert results_height >= 2
 
 
+def test_attention_mode_uses_popup_as_outer_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    entries = tuple(
+        _entry(str(index), f"Agent {index}", tmp_path, AgentHubStatus.WORKING)
+        for index in range(2)
+    )
+    monkeypatch.setattr(AgentsScreen, "action_refresh", lambda self: None)
+
+    async def scenario() -> tuple[str, bool, bool, int, int]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=(70, 25)) as pilot:
+            app.push_screen(AgentsScreen(AgentHubSnapshot(True, entries), attention_mode=True))
+            await pilot.wait_for_scheduled_animations()
+            root = app.screen.query_one(".agents-screen-root")
+            panel = app.screen.query_one(".agents-panel")
+            results = app.screen.query_one("#agent-list", OptionList)
+            title = str(app.screen.query_one("#screen-title", Static).render())
+            return (
+                title,
+                "agents-attention-panel" in panel.classes,
+                "panel" in panel.classes,
+                root.region.height,
+                results.region.height,
+            )
+
+    title, popup_panel, has_fullscreen_panel, root_height, results_height = _run(scenario())
+    assert title == "Active Agents"
+    assert popup_panel is True
+    assert has_fullscreen_panel is False
+    assert root_height > 10
+    assert results_height >= 2
+
+
 def test_agents_screen_opens_and_cancels_new_agent_wizard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -274,7 +309,7 @@ def test_new_agent_task_precedes_workspace_and_preserves_edits(
         lambda request: AgentCreationResult(True, resolved_path=request.project_path),
     )
 
-    async def scenario() -> tuple[str, str, str, str]:
+    async def scenario() -> tuple[str, str, str, str, str | None]:
         app = TerminalHomeApp()
         async with app.run_test(size=_SIZE) as pilot:
             app.push_screen(new_agent_module.AgentProjectScreen(statuses=(status,)))
@@ -284,7 +319,9 @@ def test_new_agent_task_precedes_workspace_and_preserves_edits(
             await pilot.press("enter")
             await pilot.wait_for_scheduled_animations()
             app.screen.query_one("#task-input", Input).value = "test-agent-flow"
-            app.screen.query_one("#prompt-input", Input).value = "Prompt: keep [exact]"
+            app.screen.query_one("#prompt-input", TextArea).text = (
+                "Prompt: keep [exact]\nquotes=\"'\\\\; $HOME"
+            )
             app.screen._next()
             await pilot.wait_for_scheduled_animations()
             branch = app.screen.query_one("#branch-input", Input).value
@@ -301,13 +338,181 @@ def test_new_agent_task_precedes_workspace_and_preserves_edits(
                 worktree,
                 app.screen.query_one("#branch-input", Input).value,
                 app.screen.query_one("#worktree-input", Input).value,
+                app.screen.state.prompt,
             )
 
-    branch, worktree, preserved_branch, preserved_worktree = _run(scenario())
+    branch, worktree, preserved_branch, preserved_worktree, prompt = _run(scenario())
     assert branch == "agent/test-agent-flow"
     assert "demo-project" in worktree and "test-agent-flow" in worktree
     assert preserved_branch == "agent/custom-branch"
     assert preserved_worktree.endswith("custom path")
+    assert prompt == "Prompt: keep [exact]\nquotes=\"'\\\\; $HOME"
+
+
+@pytest.mark.parametrize("collisions", [{"task"}, {"task", "task-2"}])
+def test_generated_defaults_get_deterministic_collision_suffixes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collisions: set[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    project_path = tmp_path / "projects" / "Demo Project"
+    project_path.mkdir(parents=True)
+    status = ProjectStatus(
+        project=Project("Demo Project", project_path),
+        canonical_path=project_path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="demo-project",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+
+    def validate(request):
+        suffix = request.worktree_path.name if request.worktree_path else ""
+        if suffix in collisions:
+            return AgentCreationResult(
+                False, resolved_path=request.project_path,
+                error=f"Worktree path already exists or is registered: {suffix}",
+            )
+        return AgentCreationResult(True, resolved_path=request.project_path)
+
+    monkeypatch.setattr(new_agent_module, "validate_agent_creation_request", validate)
+
+    async def scenario() -> tuple[str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.push_screen(new_agent_module.AgentProjectScreen(statuses=(status,)))
+            await pilot.wait_for_scheduled_animations()
+            await pilot.press("enter")
+            await pilot.wait_for_scheduled_animations()
+            app.screen.query_one("#task-input", Input).value = "task"
+            app.screen._next()
+            await pilot.wait_for_scheduled_animations()
+            app.screen._next()
+            await pilot.wait_for_scheduled_animations()
+            return (
+                app.screen.state.branch_name,
+                app.screen.state.worktree_path.name,
+            )
+
+    branch, path_name = _run(scenario())
+    expected = "task-2" if len(collisions) == 1 else "task-3"
+    assert branch == f"agent/{expected}"
+    assert path_name == expected
+
+
+def test_generated_paths_bound_long_task_names_and_keep_title_unchanged(
+    tmp_path: Path,
+) -> None:
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    status = ProjectStatus(
+        project=Project("project", project_path),
+        canonical_path=project_path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="project",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+    title = "A" * 300
+    state = new_agent_module.AgentWizardState(project=status, task_name=title)
+    state.suggest_paths()
+    assert state.task_name == title
+    assert state.branch_name.startswith("agent/")
+    assert len(state.branch_name.removeprefix("agent/")) <= 48
+    assert state.worktree_path is not None
+    assert len(state.worktree_path.name) <= 48
+
+
+def test_invalid_generated_branch_is_rejected_before_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    status = ProjectStatus(
+        project=Project("project", project_path),
+        canonical_path=project_path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="project",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+    monkeypatch.setattr(new_agent_module, "slugify", lambda _: "bad/name")
+    monkeypatch.setattr(
+        new_agent_module,
+        "validate_agent_creation_request",
+        lambda request: AgentCreationResult(False, error="Invalid branch name: agent/bad/name"),
+    )
+
+    async def scenario() -> str:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            state = new_agent_module.AgentWizardState(project=status, task_name="bad")
+            app.push_screen(new_agent_module.AgentWorkspaceScreen(state))
+            await pilot.wait_for_scheduled_animations()
+            app.screen._next()
+            return str(app.screen.query_one("#wizard-error", Static).render())
+
+    assert "Invalid branch name" in _run(scenario())
+
+
+def test_escape_cancels_from_every_new_agent_screen(tmp_path: Path) -> None:
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    status = ProjectStatus(
+        project=Project("project", project_path),
+        canonical_path=project_path.resolve(),
+        project_dir_exists=True,
+        is_git_repo=True,
+        git_branch="main",
+        saved_workspace=None,
+        workspace_metadata_error=None,
+        expected_session_name="project",
+        tmux_available=True,
+        session_running=False,
+        last_modified=None,
+    )
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.push_screen(AgentsScreen(AgentHubSnapshot(True)))
+            await pilot.wait_for_scheduled_animations()
+            state = new_agent_module.AgentWizardState(
+                project=status,
+                task_name="task",
+                branch_name="agent/task",
+                worktree_path=tmp_path / "task",
+            )
+            screens = (
+                new_agent_module.AgentProjectScreen(statuses=(status,)),
+                new_agent_module.AgentTaskScreen(state),
+                new_agent_module.AgentWorkspaceScreen(state),
+                new_agent_module.AgentReviewScreen(state),
+            )
+            names: list[str] = []
+            for screen in screens:
+                app.push_screen(screen)
+                await pilot.wait_for_scheduled_animations()
+                await pilot.press("escape")
+                await pilot.wait_for_scheduled_animations()
+                names.append(type(app.screen).__name__)
+            return names
+
+    assert _run(scenario()) == ["AgentsScreen"] * 4
 
 
 @pytest.mark.parametrize(
