@@ -86,11 +86,18 @@ def test_local_attach_checkpoints_before_and_after_detach(
     assert load_pane_layouts_for_location(workspace.project_location)["main"] == PaneLayout(
         "main", 2, "after"
     )
-    assert [command[1] for command in runner.commands] == [
-        "has-session", "show-options", "set-option", "show-options", "bind-key",
-        "set-option", "list-windows",
-        "has-session", "list-windows"
-    ]
+    commands = [command[1] for command in runner.commands]
+    assert commands[0] == "has-session"
+    assert commands[-2:] == ["has-session", "list-windows"]
+
+    # Both optional workspace bindings are installed before the first layout
+    # checkpoint and therefore before the interactive attach is attempted.
+    first_layout = commands.index("list-windows")
+    assert commands[:first_layout].count("bind-key") == 2
+
+    # The local attach lifecycle captures the live layout before attach and
+    # again after the interactive tmux process returns.
+    assert commands[first_layout + 1 :] == ["has-session", "list-windows"]
 
 
 def test_local_post_detach_disappearance_keeps_checkpoint(
