@@ -15,7 +15,6 @@ import dashboard.screens.home as home_module
 import dashboard.screens.new_agent as new_agent_module
 import dashboard.services.projects as projects_module
 from dashboard.app import TerminalHomeApp
-from dashboard.models import AgentDeckAttachRequest
 from dashboard.models.projects_config import ProjectsConfig
 from dashboard.screens.agents import AgentsScreen
 from dashboard.services import tmux as tmux_module
@@ -27,6 +26,7 @@ from dashboard.services.agent_hub import (
     AgentHubSnapshot,
     AgentHubStatus,
 )
+from dashboard.services.agent_view import AgentViewRouteRequest
 from dashboard.services.projects import Project, ProjectStatus
 from dashboard.services.projects_config_store import save_projects_config
 from dashboard.services.system_info import SystemInfo
@@ -558,7 +558,7 @@ def test_agent_attach_preserves_exact_session_id_and_escape_returns_home(
             await pilot.pause()
         return app.return_value
 
-    assert _run(attach()) == AgentDeckAttachRequest("exact-session-id")
+    assert _run(attach()) == AgentViewRouteRequest("exact-session-id", None)
 
     async def back() -> str:
         app = TerminalHomeApp()

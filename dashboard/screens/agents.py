@@ -11,7 +11,6 @@ from textual.screen import Screen
 from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
-from dashboard.models import AgentDeckAttachRequest
 from dashboard.screens.new_agent import AgentProjectScreen, AgentWizardState
 from dashboard.services.activity import agent_display_name
 from dashboard.services.agent_hub import (
@@ -21,6 +20,7 @@ from dashboard.services.agent_hub import (
     AgentHubStatus,
     load_agent_hub_snapshot,
 )
+from dashboard.services.agent_view import AgentViewRouteRequest
 from dashboard.services.projects import ProjectStatus, scan_all_projects
 from dashboard.widgets import KeyboardOptionList as OptionList
 
@@ -186,7 +186,9 @@ class AgentsScreen(Screen[None]):
             return
         entry = self._entry_lookup.get(str(option_id))
         if entry is not None:
-            self.app.exit(AgentDeckAttachRequest(entry.session_id))
+            self.app.exit(
+                AgentViewRouteRequest(entry.session_id, entry.workspace_session_name)
+            )
 
     def _selected_id(self) -> str | None:
         option_list = self.query_one("#agent-list", OptionList)

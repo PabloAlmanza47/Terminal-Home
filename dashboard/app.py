@@ -28,6 +28,7 @@ from dashboard.services.agent_creation_launcher import (
 )
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.agent_hub import AgentHubSnapshot
+from dashboard.services.agent_view import AgentViewRouteRequest, route_agent_view
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import (
@@ -38,7 +39,12 @@ from dashboard.services.workspace_launcher import (
 from dashboard.widgets import KeyboardActionList
 
 AppResult = (
-    LaunchRequest | TmuxSessionAttachRequest | AgentDeckAttachRequest | AgentCreationRequest | None
+    LaunchRequest
+    | TmuxSessionAttachRequest
+    | AgentDeckAttachRequest
+    | AgentCreationRequest
+    | AgentViewRouteRequest
+    | None
 )
 
 
@@ -222,6 +228,11 @@ def main() -> None:
         try:
             if isinstance(launch_request, AgentDeckAttachRequest):
                 execute_agent_deck_attach(launch_request.session_id)
+                continue
+            if isinstance(launch_request, AgentViewRouteRequest):
+                routed = route_agent_view(launch_request)
+                if not routed.routed:
+                    execute_agent_deck_attach(launch_request.session_id)
                 continue
             if isinstance(launch_request, AgentCreationRequest):
                 creation = execute_agent_creation(launch_request)
