@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from dashboard.services.agent_deck import (
+    TERMINAL_HOME_AGENT_DECK_SOCKET,
     AgentDeckCreateRequest,
     AgentStatus,
     create_session,
     create_session_argv,
+    is_valid_tmux_socket_name,
     normalize_project_path,
     parse_sessions,
     snapshot,
@@ -130,6 +132,50 @@ def test_create_session_without_prompt_omits_message() -> None:
         "claude",
         "--json",
     ]
+
+
+def test_create_session_argv_adds_requested_tmux_socket() -> None:
+    request = AgentDeckCreateRequest(
+        Path("/tmp/project"), "Agent", "codex", tmux_socket=TERMINAL_HOME_AGENT_DECK_SOCKET
+    )
+    assert create_session_argv(request) == [
+        "agent-deck",
+        "launch",
+        "/tmp/project",
+        "--title",
+        "Agent",
+        "--cmd",
+        "codex",
+        "--json",
+        "--tmux-socket",
+        TERMINAL_HOME_AGENT_DECK_SOCKET,
+    ]
+
+
+@pytest.mark.parametrize(
+    "socket_name",
+    ["", " ", "socket name", "socket/name", r"socket\\name", ".", "..", "-socket", "a" * 65],
+)
+def test_invalid_tmux_socket_names_are_rejected(socket_name: str) -> None:
+    assert is_valid_tmux_socket_name(socket_name) is False
+    with pytest.raises(ValueError, match="Invalid Agent Deck tmux socket name"):
+        AgentDeckCreateRequest(Path("/tmp/project"), "Agent", "codex", tmux_socket=socket_name)
+
+
+def test_terminal_home_tmux_socket_name_is_valid() -> None:
+    assert is_valid_tmux_socket_name(TERMINAL_HOME_AGENT_DECK_SOCKET) is True
+
+
+def test_socket_provider_rejection_is_returned_normally() -> None:
+    request = AgentDeckCreateRequest(
+        Path("/tmp/project"), "Agent", "codex", tmux_socket=TERMINAL_HOME_AGENT_DECK_SOCKET
+    )
+    result = create_session(
+        request,
+        runner=lambda _: subprocess.CompletedProcess([], 1, "", "socket unavailable"),
+    )
+    assert result.success is False
+    assert result.error and "socket unavailable" in result.error
 
 
 @pytest.mark.parametrize(

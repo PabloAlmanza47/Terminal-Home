@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 
 from dashboard.services.agent_deck import (
+    TERMINAL_HOME_AGENT_DECK_SOCKET,
     AgentDeckCreateRequest,
     AgentDeckCreateResult,
     AgentDeckRunner,
@@ -280,7 +281,13 @@ def create_agent(
     if request.mode is AgentCreationMode.CURRENT_CHECKOUT:
         return _deck_result(
             create_session(
-                AgentDeckCreateRequest(source, request.task_name, request.tool, request.prompt),
+                AgentDeckCreateRequest(
+                    source,
+                    request.task_name,
+                    request.tool,
+                    request.prompt,
+                    tmux_socket=TERMINAL_HOME_AGENT_DECK_SOCKET,
+                ),
                 runner=agent_runner,
             ),
             resolved_path=source,
@@ -329,7 +336,13 @@ def create_agent(
         )
 
     deck = create_session(
-        AgentDeckCreateRequest(created_path, request.task_name, request.tool, request.prompt),
+        AgentDeckCreateRequest(
+            created_path,
+            request.task_name,
+            request.tool,
+            request.prompt,
+            tmux_socket=TERMINAL_HOME_AGENT_DECK_SOCKET,
+        ),
         runner=agent_runner,
     )
     result = _deck_result(

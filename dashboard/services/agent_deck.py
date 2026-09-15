@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 _TIMEOUT = 2.0
+TERMINAL_HOME_AGENT_DECK_SOCKET = "terminal-home-agent-deck"
+_TMUX_SOCKET_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
 
 class AgentStatus(str, Enum):
@@ -51,6 +54,7 @@ class AgentDeckCreateRequest:
     title: str
     tool: str
     prompt: str | None = None
+    tmux_socket: str | None = None
 
     def __post_init__(self) -> None:
         if not str(self.path).strip():
@@ -59,6 +63,8 @@ class AgentDeckCreateRequest:
             raise ValueError("Agent Deck session title cannot be empty")
         if not self.tool.strip():
             raise ValueError("Agent Deck session tool cannot be empty")
+        if self.tmux_socket is not None and not is_valid_tmux_socket_name(self.tmux_socket):
+            raise ValueError(f"Invalid Agent Deck tmux socket name: {self.tmux_socket!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +81,11 @@ class AgentDeckCreateResult:
 
 
 AgentDeckRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+
+def is_valid_tmux_socket_name(value: str) -> bool:
+    """Return whether *value* is a portable tmux ``-L`` socket basename."""
+    return isinstance(value, str) and _TMUX_SOCKET_PATTERN.fullmatch(value) is not None
 
 
 def normalize_project_path(value: str | Path) -> Path:
@@ -152,6 +163,8 @@ def create_session_argv(request: AgentDeckCreateRequest) -> list[str]:
     ]
     if request.prompt:
         argv.extend(("--message", request.prompt))
+    if request.tmux_socket is not None:
+        argv.extend(("--tmux-socket", request.tmux_socket))
     return argv
 
 

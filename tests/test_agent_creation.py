@@ -11,6 +11,7 @@ from dashboard.services.agent_creation import (
     create_agent,
     validate_agent_creation_request,
 )
+from dashboard.services.agent_deck import TERMINAL_HOME_AGENT_DECK_SOCKET
 
 
 def _status_result(dirty: bool = False) -> subprocess.CompletedProcess[str]:
@@ -78,6 +79,7 @@ def test_current_checkout_creates_one_agent_without_git_mutation(tmp_path: Path)
         "worktree" in call for call in calls if call and call[0] == "git" and "add" in call
     )
     assert calls[-1][0:4] == ["agent-deck", "launch", str(tmp_path.resolve()), "--title"]
+    assert calls[-1][-2:] == ["--tmux-socket", TERMINAL_HOME_AGENT_DECK_SOCKET]
 
 
 def test_detached_head_is_supported_in_current_checkout_mode(tmp_path: Path) -> None:
