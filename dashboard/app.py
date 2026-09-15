@@ -21,6 +21,11 @@ from dashboard.models import AgentDeckAttachRequest, LaunchRequest, TmuxSessionA
 from dashboard.models.settings import AppSettings
 from dashboard.screens.agents import AgentsScreen
 from dashboard.screens.home import HomeScreen
+from dashboard.services.agent_creation import AgentCreationRequest
+from dashboard.services.agent_creation_launcher import (
+    AgentCreationAttachError,
+    execute_agent_creation,
+)
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.agent_hub import AgentHubSnapshot
 from dashboard.services.settings_store import load_settings_result, save_settings
@@ -32,7 +37,9 @@ from dashboard.services.workspace_launcher import (
 )
 from dashboard.widgets import KeyboardActionList
 
-AppResult = LaunchRequest | TmuxSessionAttachRequest | AgentDeckAttachRequest | None
+AppResult = (
+    LaunchRequest | TmuxSessionAttachRequest | AgentDeckAttachRequest | AgentCreationRequest | None
+)
 
 
 class TerminalHomeApp(App[AppResult]):
@@ -97,6 +104,10 @@ class TerminalHomeApp(App[AppResult]):
         Tab is intentionally inert; command screens use terminal action rows
         and forms use arrows, preserving normal Input cursor movement.
         """
+        if event.key == "n" and isinstance(self.screen, AgentsScreen):
+            self.screen.action_new_agent()
+            event.stop()
+            return
         if event.key in {"tab", "shift+tab"}:
             event.stop()
             return
@@ -168,6 +179,9 @@ class TerminalHomeApp(App[AppResult]):
             return
 
     def action_new_project(self) -> None:
+        if isinstance(self.screen, AgentsScreen) and not isinstance(self.screen, ModalScreen):
+            self.screen.action_new_agent()
+            return
         if self._editing() or isinstance(self.screen, ModalScreen):
             return
         from dashboard.screens.new_project import NewProjectScreen
@@ -209,11 +223,25 @@ def main() -> None:
             if isinstance(launch_request, AgentDeckAttachRequest):
                 execute_agent_deck_attach(launch_request.session_id)
                 continue
+            if isinstance(launch_request, AgentCreationRequest):
+                creation = execute_agent_creation(launch_request)
+                if not creation.success:
+                    detail = creation.error or "Agent creation failed"
+                    if creation.cleanup_error:
+                        detail = f"{detail} ({creation.cleanup_error})"
+                    print(f"error: {detail}", file=sys.stderr)
+                    sys.exit(1)
+                continue
             if isinstance(launch_request, TmuxSessionAttachRequest):
                 execute_tmux_session_attach(launch_request)
             else:
                 execute_launch_request(launch_request)
-        except (LaunchError, TmuxCommandError, AgentDeckLaunchError) as exc:
+        except (
+            LaunchError,
+            TmuxCommandError,
+            AgentDeckLaunchError,
+            AgentCreationAttachError,
+        ) as exc:
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
 
