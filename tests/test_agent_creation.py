@@ -80,6 +80,79 @@ def test_current_checkout_creates_one_agent_without_git_mutation(tmp_path: Path)
     assert calls[-1][0:4] == ["agent-deck", "launch", str(tmp_path.resolve()), "--title"]
 
 
+def test_detached_head_is_supported_in_current_checkout_mode(tmp_path: Path) -> None:
+    def inspection(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            argv, 0, f"worktree {tmp_path}\nHEAD detached\n", ""
+        )
+    result = create_agent(
+        _request(tmp_path, AgentCreationMode.CURRENT_CHECKOUT),
+        status_runner=lambda _: subprocess.CompletedProcess(
+            [], 0, "# branch.head (detached)\0", ""
+        ),
+        inspection_runner=inspection,
+        agent_runner=lambda argv: subprocess.CompletedProcess(
+            argv, 0, json.dumps({"success": True, "id": "detached-current"}), ""
+        ),
+    )
+    assert result.success is True
+    assert result.session_id == "detached-current"
+
+
+def test_detached_head_is_supported_in_new_worktree_mode(tmp_path: Path) -> None:
+    target = tmp_path / "detached-worktree"
+    state = {"created": False}
+
+    def inspect(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        output = f"worktree {tmp_path}\nHEAD detached\n"
+        if state["created"]:
+            output += f"\nworktree {target}\nHEAD new\nbranch refs/heads/feature\n"
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    def mutate(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        if "show-ref" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        if "add" in argv:
+            state["created"] = True
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    result = create_agent(
+        _request(
+            tmp_path, AgentCreationMode.NEW_WORKTREE,
+            branch_name="feature", worktree_path=target,
+        ),
+        status_runner=lambda _: _status_result(),
+        inspection_runner=inspect,
+        mutation_runner=mutate,
+        agent_runner=lambda argv: subprocess.CompletedProcess(
+            argv, 0, json.dumps({"success": True, "id": "detached-new"}), ""
+        ),
+    )
+    assert result.success is True
+    assert result.session_id == "detached-new"
+
+
+def test_branch_checked_out_in_another_worktree_is_rejected(tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    output = (
+        f"worktree {tmp_path}\nHEAD source\nbranch refs/heads/main\n\n"
+        f"worktree {other}\nHEAD other\nbranch refs/heads/feature\n"
+    )
+    result = validate_agent_creation_request(
+        _request(
+            tmp_path, AgentCreationMode.NEW_WORKTREE,
+            branch_name="feature", worktree_path=tmp_path / "new",
+        ),
+        status_runner=lambda _: _status_result(),
+        inspection_runner=lambda argv: subprocess.CompletedProcess(argv, 0, output, ""),
+        mutation_runner=lambda argv: subprocess.CompletedProcess(
+            argv, 1 if "show-ref" in argv else 0, "", ""
+        ),
+    )
+    assert result.success is False
+    assert result.error == "Branch is already checked out: feature"
+
+
 def test_dirty_checkout_is_rejected_before_agent_deck(tmp_path: Path) -> None:
     agent_called = False
 
@@ -253,6 +326,9 @@ def test_agent_deck_failure_attempts_only_safe_cleanup(tmp_path: Path) -> None:
     assert result.cleanup_succeeded is True
     assert any("remove" in call for call in mutations)
     assert not any("branch" in call and "delete" in call for call in mutations)
+    assert "Worktree was removed successfully" in (result.error or "")
+    assert "Branch 'feature' was intentionally preserved" in (result.error or "")
+    assert "choosing another branch" in (result.error or "")
 
 
 def test_missing_managed_parents_are_created_but_target_is_left_to_git(

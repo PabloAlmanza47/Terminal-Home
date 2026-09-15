@@ -32,7 +32,9 @@ def test_successful_creation_attaches_exact_session_id_after_creator() -> None:
     def attach(session_id: str) -> None:
         events.append(f"attach:{session_id}")
 
-    result = execute_agent_creation(_request(), creator=creator, attacher=attach)
+    result = execute_agent_creation(
+        _request(), creator=creator, attacher=attach, visibility_checker=lambda _: True
+    )
 
     assert result.success is True
     assert events == ["create", "attach:exact-session"]
@@ -66,7 +68,70 @@ def test_attach_failure_preserves_successful_creation_and_session_id() -> None:
             _request(),
             creator=lambda _: created,
             attacher=lambda _: (_ for _ in ()).throw(AgentDeckLaunchError("status 3")),
+            visibility_checker=lambda _: True,
         )
 
-    assert caught.value.result == created
+    assert caught.value.result.success is True
+    assert caught.value.result.session_id == created.session_id
+    assert caught.value.result.title == "Fix"
+    assert caught.value.result.visible_in_agent_hub is True
     assert "retry-me" in str(caught.value)
+
+
+def test_visible_creation_retains_safe_result_context() -> None:
+    request = _request()
+    result = execute_agent_creation(
+        request,
+        creator=lambda _: AgentCreationResult(
+            True, session_id="visible", resolved_path=Path("/canonical/worktree")
+        ),
+        attacher=lambda _: None,
+        visibility_checker=lambda session_id: session_id == "visible",
+    )
+
+    assert result.success is True
+    assert result.title == request.task_name
+    assert result.session_id == "visible"
+    assert result.resolved_path == Path("/canonical/worktree")
+    assert result.visible_in_agent_hub is True
+    assert result.visibility_warning is None
+
+
+def test_delayed_visibility_is_success_and_does_not_expose_prompt() -> None:
+    request = AgentCreationRequest(
+        Path("/repo"), AgentCreationMode.CURRENT_CHECKOUT, "Fix parser", "codex", "SECRET PROMPT"
+    )
+    attached: list[str] = []
+    result = execute_agent_creation(
+        request,
+        creator=lambda _: AgentCreationResult(
+            True, session_id="delayed", resolved_path=Path("/repo")
+        ),
+        attacher=attached.append,
+        visibility_checker=lambda _: False,
+    )
+
+    assert result.success is True
+    assert result.visible_in_agent_hub is False
+    assert result.visibility_warning is not None
+    assert "Press F5" in result.visibility_warning
+    assert "SECRET PROMPT" not in str(result)
+    assert attached == ["delayed"]
+
+
+def test_visibility_list_failure_is_nonfatal_and_attach_retry_is_clear() -> None:
+    request = _request()
+    with pytest.raises(AgentCreationAttachError) as caught:
+        execute_agent_creation(
+            request,
+            creator=lambda _: AgentCreationResult(
+                True, session_id="list-failed", resolved_path=Path("/repo")
+            ),
+            attacher=lambda _: (_ for _ in ()).throw(AgentDeckLaunchError("attach unavailable")),
+            visibility_checker=lambda _: None,
+        )
+
+    message = str(caught.value)
+    assert "list-failed" in message
+    assert "Press F5" in message
+    assert "attach unavailable" in message

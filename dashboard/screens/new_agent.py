@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, Input, Static
+from textual.widgets import Footer, Input, Static, TextArea
 from textual.widgets.option_list import Option
 
 from dashboard.services.agent_creation import (
@@ -23,6 +24,26 @@ from dashboard.services.slug import slugify
 from dashboard.widgets import ActionItem, KeyboardActionList
 from dashboard.widgets import KeyboardOptionList as OptionList
 
+_GENERATED_SLUG_LIMIT = 48
+_GENERATED_SUFFIX_LENGTH = 7
+
+
+def _bounded_slug(value: str) -> str:
+    """Keep generated path/branch components portable and deterministic."""
+    if len(value) <= _GENERATED_SLUG_LIMIT:
+        return value
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:_GENERATED_SUFFIX_LENGTH]
+    prefix_length = _GENERATED_SLUG_LIMIT - _GENERATED_SUFFIX_LENGTH - 1
+    return f"{value[:prefix_length].rstrip('-')}-{digest}"
+
+
+def _is_generated_collision(error: str | None) -> bool:
+    return bool(
+        error
+        and (error.startswith("Branch already exists:")
+             or error.startswith("Worktree path already exists or is registered:"))
+    )
+
 
 @dataclass(slots=True)
 class AgentWizardState:
@@ -34,19 +55,23 @@ class AgentWizardState:
     branch_name: str = ""
     worktree_path: Path | None = None
     preflight_warning: str | None = None
+    generated_branch_name: str | None = None
+    generated_worktree_path: Path | None = None
 
     def suggest_paths(self) -> None:
         if self.branch_name:
             return
-        slug = slugify(self.task_name) or "task"
+        slug = _bounded_slug(slugify(self.task_name) or "task")
         branch = f"agent/{slug}"
         self.branch_name = branch
+        self.generated_branch_name = branch
         if self.project is not None:
             self.worktree_path = (
                 default_agent_worktree_root()
-                / (slugify(self.project.project.name) or "project")
+                / _bounded_slug(slugify(self.project.project.name) or "project")
                 / slug
             )
+            self.generated_worktree_path = self.worktree_path
 
     def request(self) -> AgentCreationRequest:
         assert self.project is not None
@@ -233,6 +258,14 @@ class AgentWorkspaceScreen(AgentWizardScreen):
             self.query_one("#wizard-error", Static).update("Branch and worktree path are required.")
             return
         validation = validate_agent_creation_request(self.state.request())
+        if (
+            not validation.success
+            and self.state.branch_name == self.state.generated_branch_name
+            and self.state.worktree_path == self.state.generated_worktree_path
+            and _is_generated_collision(validation.error)
+        ):
+            self._suggest_available_generated_paths()
+            validation = validate_agent_creation_request(self.state.request())
         if not validation.success:
             self.query_one("#wizard-error", Static).update(validation.error or "Preflight failed.")
             return
@@ -240,6 +273,32 @@ class AgentWorkspaceScreen(AgentWizardScreen):
         if validation.warning:
             self.query_one("#checkout-warning", Static).update(validation.warning)
         self.app.switch_screen(AgentReviewScreen(self.state))
+
+    def _suggest_available_generated_paths(self) -> None:
+        """Suffix untouched generated defaults until both values are available."""
+        assert self.state.generated_branch_name is not None
+        assert self.state.generated_worktree_path is not None
+        base_branch = self.state.generated_branch_name
+        base_path = self.state.generated_worktree_path
+        for number in range(2, 1000):
+            branch = f"{base_branch}-{number}"
+            path = base_path.with_name(f"{base_path.name}-{number}")
+            candidate = AgentWizardState(
+                project=self.state.project,
+                mode=self.state.mode,
+                task_name=self.state.task_name,
+                tool=self.state.tool,
+                prompt=self.state.prompt,
+                branch_name=branch,
+                worktree_path=path,
+            )
+            validation = validate_agent_creation_request(candidate.request())
+            if validation.success:
+                self.state.branch_name = branch
+                self.state.worktree_path = path
+                return
+            if not _is_generated_collision(validation.error):
+                return
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in {"branch-input", "worktree-input"}:
@@ -266,7 +325,11 @@ class AgentTaskScreen(AgentWizardScreen):
                 yield Static("Agent provider", classes="field-label")
                 yield Static("Codex", id="agent-provider")
                 yield Static("Optional initial prompt", classes="field-label")
-                yield Input(value=self.state.prompt or "", id="prompt-input")
+                yield TextArea(self.state.prompt or "", id="prompt-input")
+                yield Static(
+                    "Use the Review action to continue; Enter inserts a newline.",
+                    classes="wizard-hint",
+                )
                 yield Static("", id="wizard-error")
                 yield KeyboardActionList(
                     ActionItem("next", "Review"), ActionItem("back", "Back"),
@@ -279,7 +342,7 @@ class AgentTaskScreen(AgentWizardScreen):
 
     def _next(self) -> None:
         self.state.task_name = self.query_one("#task-input", Input).value
-        self.state.prompt = self.query_one("#prompt-input", Input).value or None
+        self.state.prompt = self.query_one("#prompt-input", TextArea).text or None
         if not self.state.task_name.strip():
             self.query_one("#wizard-error", Static).update("Task name is required.")
             return
@@ -288,6 +351,10 @@ class AgentTaskScreen(AgentWizardScreen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "task-input":
             self.state.task_name = event.value
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == "prompt-input":
+            self.state.prompt = event.text_area.text or None
 
     def on_keyboard_action_list_action_selected(
         self, event: KeyboardActionList.ActionSelected
@@ -300,7 +367,7 @@ class AgentTaskScreen(AgentWizardScreen):
             self.action_cancel()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id in {"task-input", "prompt-input"}:
+        if event.input.id == "task-input":
             self._next()
 
 

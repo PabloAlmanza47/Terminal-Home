@@ -64,6 +64,9 @@ class AgentCreationResult:
     cleanup_attempted: bool = False
     cleanup_succeeded: bool | None = None
     cleanup_error: str | None = None
+    title: str | None = None
+    visible_in_agent_hub: bool | None = None
+    visibility_warning: str | None = None
 
 
 _SUPPORTED_TOOLS = frozenset({"codex", "claude", "claude-code", "claude_code"})
@@ -352,11 +355,24 @@ def create_agent(
         cleanup_error = "; ".join(
             detail for detail in (cleanup_error, parent_cleanup_error) if detail
         )
+    branch = request.branch_name.strip()
+    if cleaned:
+        cleanup_message = (
+            f"Worktree was removed successfully. Branch '{branch}' was intentionally "
+            "preserved. Retrying with the same generated branch may require choosing "
+            "another branch."
+        )
+    else:
+        cleanup_message = (
+            f"Worktree cleanup did not complete. Branch '{branch}' was intentionally "
+            "preserved. Retrying with the same generated branch may require choosing "
+            "another branch."
+        )
     return AgentCreationResult(
         False,
         resolved_path=result.resolved_path,
         worktree_path=result.worktree_path,
-        error=result.error,
+        error=f"{result.error}. {cleanup_message}",
         cleanup_attempted=True,
         cleanup_succeeded=cleaned,
         cleanup_error=(f"{cleanup_error}; path: {result.worktree_path}" if cleanup_error else None),
