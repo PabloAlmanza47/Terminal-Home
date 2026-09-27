@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 from textual.widgets import OptionList
 
 from dashboard.app import TerminalHomeApp
+from dashboard.models import LocalProjectLocation
 from dashboard.screens import project_detail as detail_module
 from dashboard.screens.diff_view import DiffScreen
 from dashboard.screens.home import HomeScreen
@@ -27,6 +29,7 @@ from dashboard.services.project_commands import (
 )
 from dashboard.services.project_tools import ProjectTools
 from dashboard.services.projects import Project, ProjectStatus
+from dashboard.services.workspace_defaults import build_default_workspace
 
 
 def _status(project: Project) -> ProjectStatus:
@@ -269,6 +272,45 @@ def test_project_detail_paints_detected_commands_and_tools(
     assert "npm run build" in rendered_commands
     assert "npm run lint" in rendered_commands
     assert "Lazygit" in rendered_tools
+
+
+def test_enter_on_executable_project_command_returns_run_request(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = Project("demo", tmp_path)
+    workspace = build_default_workspace("demo", LocalProjectLocation(project.path), "demo")
+    status = replace(_status(project), saved_workspace=workspace, tmux_available=True)
+    command = DetectedProjectCommands(
+        development=None,
+        test=DetectedCommand("pytest", CommandSource.PYTEST),
+    )
+    monkeypatch.setattr(detail_module, "gather_single_project_status", lambda _: status)
+    monkeypatch.setattr(detail_module, "load_status", lambda _: GitStatus(True, "main", True))
+    monkeypatch.setattr(detail_module, "detect_project_commands", lambda _: command)
+    monkeypatch.setattr(
+        detail_module,
+        "detect_project_tools",
+        lambda *args, **kwargs: ProjectTools(False, True, True),
+    )
+
+    async def scenario():
+        app = TerminalHomeApp()
+        async with app.run_test(size=(100, 40)) as pilot:
+            screen = ProjectDetailScreen(project)
+            app.push_screen(screen)
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            commands = screen.query_one("#detail-commands", detail_module.ProjectCommandList)
+            commands.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+        return app.return_value
+
+    result = asyncio.run(scenario())
+    assert result is not None
+    assert result.command_id == "test"
+    assert result.category == "test"
+    assert result.argv == ("pytest",)
 
 
 def test_project_detail_selects_changed_file_and_opens_read_only_diff(

@@ -1,8 +1,8 @@
-"""Project Detail screen: shown after picking a project from Open Project,
-before anything is ever launched.
+"""Project Detail screen: shown after picking a project from Open Project.
 
 Renders the project's current status (git, saved workspace, running tmux
-session) and offers exactly the actions that are safe given that status
+session) and offers exactly the actions that are safe given that status,
+including explicit requests for supported project commands.
 (dashboard.services.projects.primary_actions / secondary_actions), then
 hands off to the existing structured launch mechanism -- this screen never
 calls tmux directly. Resume/Recreate/Open Default all end by exiting the
@@ -28,6 +28,7 @@ from dashboard.models import (
     LaunchAction,
     LaunchRequest,
     LocalProjectLocation,
+    RunProjectCommandRequest,
     TemplateValidationError,
     template_from_workspace,
 )
@@ -50,7 +51,10 @@ from dashboard.services.pane_layout_store import (
     load_pane_layouts_for_location,
     save_pane_layouts_for_location,
 )
-from dashboard.services.project_commands import DetectedProjectCommands, detect_project_commands
+from dashboard.services.project_commands import (
+    DetectedProjectCommands,
+    detect_project_commands,
+)
 from dashboard.services.project_intelligence import ProjectIntelligence, inspect_project
 from dashboard.services.project_launch import prepare_project_launch_for_selector
 from dashboard.services.project_selection import RegisteredRemoteProject
@@ -127,6 +131,17 @@ class GitFileList(OptionList):
         return await super().handle_key(event)
 
 
+class ProjectCommandList(KeyboardActionList):
+    """Keyboard-selectable detected commands with stable command ids."""
+
+    def on_key(self, event) -> None:
+        if event.key == "down" and self.selected_index == len(self.actions) - 1:
+            self.screen.query_one("#project-actions", KeyboardActionList).focus()
+            event.stop()
+            return
+        super().on_key(event)
+
+
 class ProjectActionList(KeyboardActionList):
     """Project actions that can move back to the changed-file list."""
 
@@ -137,6 +152,11 @@ class ProjectActionList(KeyboardActionList):
                 files = screen.query_one("#detail-git-files-list", OptionList)
                 if files.display and files.option_count:
                     files.focus()
+                    event.stop()
+                    return
+                commands = screen.query_one("#detail-commands", ProjectCommandList)
+                if commands.selected_index is not None:
+                    commands.focus()
                     event.stop()
                     return
         super().on_key(event)
@@ -269,6 +289,37 @@ def format_project_commands(commands: DetectedProjectCommands | None) -> str:
     return "\n".join(rows) if rows else "  No supported project commands detected"
 
 
+def project_command_items(
+    commands: DetectedProjectCommands | None,
+    *,
+    can_execute: bool,
+) -> list[ActionItem]:
+    if commands is None:
+        return [ActionItem("commands-loading", "Detecting supported commands...", disabled=True)]
+    detected = [commands.development, commands.test, commands.build, commands.lint]
+    items: list[ActionItem] = []
+    labels = {"dev": "Dev server", "test": "Tests", "build": "Build", "lint": "Lint"}
+    for command in detected:
+        if command is None:
+            continue
+        executable = command.executable and can_execute
+        description = command.command
+        if not command.executable:
+            description += "  (informational only)"
+        elif not can_execute:
+            description += "  (configure a workspace to run)"
+        items.append(
+            ActionItem(
+                f"command:{command.id}",
+                f"{labels[command.category.value]:<14} {description}",
+                disabled=not executable,
+            )
+        )
+    return items or [
+        ActionItem("commands-empty", "No supported project commands detected", disabled=True)
+    ]
+
+
 def format_project_tools(tools: ProjectTools) -> str:
     rows = []
     if tools.lazygit:
@@ -377,8 +428,12 @@ class ProjectDetailScreen(Screen[None]):
                 with Horizontal(id="detail-command-tool-grid"):
                     with Vertical(classes="detail-section"):
                         yield Static("Commands", classes="panel-heading")
-                        yield Static(
-                            format_project_commands(self._project_commands), id="detail-commands"
+                        yield ProjectCommandList(
+                            *project_command_items(
+                                self._project_commands,
+                                can_execute=status.saved_workspace is not None,
+                            ),
+                            id="detail-commands",
                         )
                     with Vertical(classes="detail-section"):
                         yield Static("Tools", classes="panel-heading")
@@ -529,7 +584,13 @@ class ProjectDetailScreen(Screen[None]):
             self._project_commands = result
             widget = self.query("#detail-commands")
             if widget:
-                widget.first(Static).update(format_project_commands(result))
+                widget.first(ProjectCommandList).set_actions(
+                    project_command_items(
+                        result,
+                        can_execute=self.status is not None
+                        and self.status.saved_workspace is not None,
+                    )
+                )
         elif isinstance(result, ProjectIntelligence):
             self._project_intelligence = result
             widget = self.query("#detail-overview")
@@ -819,6 +880,10 @@ class ProjectDetailScreen(Screen[None]):
     ) -> None:
         event.stop()
         button_id = event.action_id
+        if event.action_list.id == "detail-commands":
+            command_id = button_id.removeprefix("command:")
+            self._run_detected_command(command_id)
+            return
         if button_id == "back-to-list":
             self.action_go_back()
         elif button_id in (_action_id(ProjectAction.RESUME), _action_id(ProjectAction.RECREATE)):
@@ -839,6 +904,43 @@ class ProjectDetailScreen(Screen[None]):
             self._last_action_worker = self.run_worker(self._reset_to_default)
         elif button_id == _action_id(ProjectAction.FORGET):
             self._last_action_worker = self.run_worker(self._forget_workspace)
+
+    def _run_detected_command(self, command_id: str) -> None:
+        if self.remote_project is not None or self.status is None:
+            self._show_error("Remote project commands are informational only.")
+            return
+        if self.status.saved_workspace is None:
+            self._show_error("Configure a workspace before running project commands.")
+            return
+        commands = self._project_commands
+        if commands is None:
+            self._show_error("Project commands are still being detected.")
+            return
+        command = next(
+            (
+                candidate
+                for candidate in (
+                    commands.development,
+                    commands.test,
+                    commands.build,
+                    commands.lint,
+                )
+                if candidate is not None and candidate.id == command_id
+            ),
+            None,
+        )
+        if command is None or not command.executable or command.argv is None:
+            self._show_error("That detected command is informational only.")
+            return
+        self.app.exit(
+            RunProjectCommandRequest(
+                workspace=self.status.saved_workspace,
+                command_id=command.id or command_id,
+                label=command.command,
+                category=command.category.value,
+                argv=command.argv,
+            )
+        )
 
     def _resume_or_recreate(self) -> None:
         """Both Resume Session and Recreate Workspace produce the exact

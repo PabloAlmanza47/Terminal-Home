@@ -34,7 +34,7 @@ _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t
 _WINDOW_LAYOUT_FORMAT = "#{window_name}\t#{window_panes}\t#{window_layout}"
 _PANE_STATUS_FORMAT = (
     "#{session_name}\t#{window_name}\t#{pane_title}\t"
-    "#{pane_current_command}\t#{pane_dead}"
+    "#{pane_current_command}\t#{pane_dead}\t#{window_id}\t#{pane_id}\t#{pane_index}"
 )
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
@@ -76,6 +76,9 @@ class TmuxPaneRuntime:
     title: str
     current_command: str
     dead: bool
+    window_id: str | None = None
+    pane_id: str | None = None
+    pane_index: int | None = None
 
 
 def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
@@ -227,7 +230,11 @@ def _layout_for_panes(layout: PaneLayout, pane_ids: list[str]) -> str:
         result = parse_cell()
     except ValueError:
         return layout.tmux_layout
-    return result if position == len(template) and pane_index == len(pane_ids) else layout.tmux_layout
+    return (
+        result
+        if position == len(template) and pane_index == len(pane_ids)
+        else layout.tmux_layout
+    )
 
 
 def capture_tmux_window_layouts(
@@ -547,10 +554,16 @@ def list_tmux_panes(*, runner: TmuxCommandRunner = run_tmux_command) -> list[Tmu
     panes: list[TmuxPaneRuntime] = []
     for line in result.stdout.splitlines():
         fields = line.split("\t")
-        if len(fields) != 5:
+        if len(fields) not in {5, 7, 8}:
             continue
-        session, window, title, command, dead = fields
-        panes.append(TmuxPaneRuntime(session, window, title, command, dead == "1"))
+        session, window, title, command, dead = fields[:5]
+        window_id, pane_id = (fields[5], fields[6]) if len(fields) >= 7 else (None, None)
+        pane_index = int(fields[7]) if len(fields) == 8 and fields[7].isdigit() else None
+        panes.append(
+            TmuxPaneRuntime(
+                session, window, title, command, dead == "1", window_id, pane_id, pane_index
+            )
+        )
     return panes
 
 
@@ -711,6 +724,63 @@ def _select_pane_title_argv(pane_id: str, title: str) -> list[str]:
 
 def _send_keys_argv(pane_id: str, command: str) -> list[str]:
     return ["tmux", "send-keys", "-t", pane_id, command, "Enter"]
+
+
+def send_argv_to_pane(
+    pane_id: str,
+    argv: tuple[str, ...],
+    *,
+    runner: TmuxCommandRunner = run_tmux_command,
+) -> None:
+    """Type a safely shell-quoted argv command into a tmux pane."""
+    if not argv or any(not argument for argument in argv):
+        raise ValueError("A tmux command must contain non-empty argv tokens.")
+    _run_step(runner, _send_keys_argv(pane_id, shlex.join(argv)))
+
+
+def set_pane_title(
+    pane_id: str,
+    title: str,
+    *,
+    runner: TmuxCommandRunner = run_tmux_command,
+) -> None:
+    """Assign a stable semantic title to a managed pane."""
+    _run_step(runner, _select_pane_title_argv(pane_id, title))
+
+
+def create_task_window(
+    session_name: str,
+    window_name: str,
+    project_dir: str,
+    *,
+    runner: TmuxCommandRunner = run_tmux_command,
+) -> tuple[str, str]:
+    """Create a managed task window and return its stable window/pane ids."""
+    argv = [
+        "tmux",
+        "new-window",
+        "-t",
+        session_name,
+        "-n",
+        window_name,
+        "-c",
+        project_dir,
+        "-P",
+        "-F",
+        _CREATE_CAPTURE_FORMAT,
+    ]
+    return _parse_create_capture(_run_step(runner, argv), argv)
+
+
+def select_window_and_pane(
+    window_id: str,
+    pane_id: str,
+    *,
+    runner: TmuxCommandRunner = run_tmux_command,
+) -> None:
+    """Make a tmux target visible without exposing raw tmux calls to screens."""
+    _run_step(runner, _select_window_argv(window_id))
+    _run_step(runner, _select_pane_argv(pane_id))
 
 
 def _select_window_argv(window_id: str) -> list[str]:

@@ -383,6 +383,15 @@ project metadata refresh through the existing service layer. Commands are
 shown only when Terminal Home can identify them safely, and unavailable tools
 are omitted or described as unavailable.
 
+Detected local commands are also executable from Project Detail. Selecting a
+development command reuses the configured Development Server pane when one is
+present; tests, builds, and lint commands use a dedicated `th-*` task window or
+reuse its completed task pane. Terminal Home creates a stopped saved workspace
+before running a command when necessary, keeps task output visible, and does
+not start a second copy of an already-running target. Commands that require
+unsupported shell syntax, projects without a saved workspace, and remote
+projects remain informational.
+
 ## Workspace layouts
 
 | Panes | Layout                                                             | tmux layout name  |
@@ -589,6 +598,7 @@ dashboard/
         projects.py                Scans ~/projects; ProjectStatus + primary/secondary action matrix
         git_info.py                  Cheap, tolerant git branch/repo lookups
         tmux.py                     Session listing + workspace command construction/execution
+        project_command_launcher.py Post-TUI project command targeting and execution
         system_info.py               Hostname, OS, Python version, shell, disk usage
         slug.py                      Filesystem-safe slug generation
         project_creation.py          Validation, directory creation, git init (New Project only)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import configparser
 import re
+import shlex
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -23,10 +24,74 @@ class CommandSource(str, Enum):
     STATIC_HTML = "root index.html"
 
 
+class CommandCategory(str, Enum):
+    DEV = "dev"
+    TEST = "test"
+    BUILD = "build"
+    LINT = "lint"
+
+
+class CommandExecution(str, Enum):
+    EXECUTABLE = "executable"
+    INFORMATIONAL = "informational"
+
+
+_SOURCE_IDS: dict[CommandSource, tuple[str, CommandCategory]] = {
+    CommandSource.NODE_DEV: ("dev", CommandCategory.DEV),
+    CommandSource.NODE_START: ("dev", CommandCategory.DEV),
+    CommandSource.NODE_TEST: ("test", CommandCategory.TEST),
+    CommandSource.PYTEST: ("test", CommandCategory.TEST),
+    CommandSource.NODE_BUILD: ("build", CommandCategory.BUILD),
+    CommandSource.NODE_LINT: ("lint", CommandCategory.LINT),
+    CommandSource.DJANGO: ("dev", CommandCategory.DEV),
+    CommandSource.STATIC_HTML: ("dev", CommandCategory.DEV),
+}
+
+
+_UNSAFE_SHELL_SYNTAX = re.compile(r"[;&|<>$`\n\r]")
+
+
+def safe_command_argv(command: str) -> tuple[str, ...] | None:
+    """Normalize a simple detected command without interpreting shell syntax.
+
+    Project metadata can contain arbitrary shell expressions. Only commands
+    that can be represented as ordinary argv tokens are eligible for explicit
+    execution; the rest remain visible as informational detections.
+    """
+    if not command.strip() or _UNSAFE_SHELL_SYNTAX.search(command):
+        return None
+    try:
+        tokens = tuple(shlex.split(command, posix=True))
+    except ValueError:
+        return None
+    return tokens or None
+
+
 @dataclass(frozen=True, slots=True)
 class DetectedCommand:
     command: str
     source: CommandSource
+    argv: tuple[str, ...] | None = None
+    execution: CommandExecution = CommandExecution.EXECUTABLE
+    id: str | None = None
+
+    def __post_init__(self) -> None:
+        command_id, _ = _SOURCE_IDS[self.source]
+        if self.id is None:
+            object.__setattr__(self, "id", command_id)
+        if self.argv is None:
+            normalized = safe_command_argv(self.command)
+            object.__setattr__(self, "argv", normalized)
+            if normalized is None:
+                object.__setattr__(self, "execution", CommandExecution.INFORMATIONAL)
+
+    @property
+    def category(self) -> CommandCategory:
+        return _SOURCE_IDS[self.source][1]
+
+    @property
+    def executable(self) -> bool:
+        return self.execution is CommandExecution.EXECUTABLE and bool(self.argv)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +163,24 @@ def _node_command(manager: str, script: str) -> str:
     return f"{manager} run {script}"
 
 
+def _detected(command: str, source: CommandSource, argv: tuple[str, ...]) -> DetectedCommand:
+    return DetectedCommand(command, source, argv=argv)
+
+
+def _node_detected(manager: str, script: str, source: CommandSource) -> DetectedCommand:
+    command = _node_command(manager, script)
+    argv: tuple[str, ...]
+    if manager == "bun":
+        argv = ("bun", "run", script)
+    elif manager == "yarn":
+        argv = ("yarn", script)
+    elif script in {"start", "test"}:
+        argv = (manager, script)
+    else:
+        argv = (manager, "run", script)
+    return _detected(command, source, argv)
+
+
 def _detect_node_commands(project_path: Path) -> _NodeCommands | None:
     package = _load_package_json(project_path)
     if package is None:
@@ -108,9 +191,9 @@ def _detect_node_commands(project_path: Path) -> _NodeCommands | None:
 
     development: DetectedCommand | None = None
     if _script_exists(scripts, "dev"):
-        development = DetectedCommand(_node_command(manager, "dev"), CommandSource.NODE_DEV)
+        development = _node_detected(manager, "dev", CommandSource.NODE_DEV)
     elif _script_exists(scripts, "start"):
-        development = DetectedCommand(_node_command(manager, "start"), CommandSource.NODE_START)
+        development = _node_detected(manager, "start", CommandSource.NODE_START)
 
     test: DetectedCommand | None = None
     test_script = scripts.get("test")
@@ -119,14 +202,14 @@ def _detect_node_commands(project_path: Path) -> _NodeCommands | None:
         and test_script.strip()
         and not _is_placeholder_test(test_script)
     ):
-        test = DetectedCommand(_node_command(manager, "test"), CommandSource.NODE_TEST)
+        test = _node_detected(manager, "test", CommandSource.NODE_TEST)
     build = (
-        DetectedCommand(_node_command(manager, "build"), CommandSource.NODE_BUILD)
+        _node_detected(manager, "build", CommandSource.NODE_BUILD)
         if _script_exists(scripts, "build")
         else None
     )
     lint = (
-        DetectedCommand(_node_command(manager, "lint"), CommandSource.NODE_LINT)
+        _node_detected(manager, "lint", CommandSource.NODE_LINT)
         if _script_exists(scripts, "lint")
         else None
     )
@@ -232,17 +315,21 @@ def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
     lint = node.lint if node is not None else None
 
     if development is None and _is_file(project_path / "manage.py"):
-        development = DetectedCommand("python manage.py runserver", CommandSource.DJANGO)
+        development = _detected(
+            "python manage.py runserver", CommandSource.DJANGO,
+            ("python", "manage.py", "runserver"),
+        )
     if (
         development is None
         and _is_file(project_path / "index.html")
         and not _has_higher_level_indicator(project_path)
     ):
-        development = DetectedCommand(
-            "python3 -m http.server 8000", CommandSource.STATIC_HTML
+        development = _detected(
+            "python3 -m http.server 8000", CommandSource.STATIC_HTML,
+            ("python3", "-m", "http.server", "8000"),
         )
     if test is None and _has_pytest_indicator(project_path):
-        test = DetectedCommand("pytest", CommandSource.PYTEST)
+        test = _detected("pytest", CommandSource.PYTEST, ("pytest",))
     return DetectedProjectCommands(
         development=development, test=test, build=build, lint=lint
     )

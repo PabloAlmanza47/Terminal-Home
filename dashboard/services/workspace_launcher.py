@@ -176,6 +176,21 @@ def _build_create_and_attach(
     terminal. Shared by LaunchAction.CREATE and by LaunchAction.ATTACH's
     fallback when the session it hoped to attach to has disappeared.
     """
+    create_workspace_session_without_attach(workspace, runner=runner, stream=stream)
+
+    if isinstance(workspace.project_location, LocalProjectLocation):
+        _attach_local(workspace, runner)
+    else:
+        _attach_remote(workspace, runner)
+
+
+def create_workspace_session_without_attach(
+    workspace: WorkspaceSpec,
+    *,
+    runner: tmux.TmuxCommandRunner,
+    stream: TextIO | None = None,
+) -> None:
+    """Create a managed workspace while leaving terminal handoff to the caller."""
     if (
         isinstance(workspace.project_location, LocalProjectLocation)
         and not workspace.project_path.is_dir()
@@ -207,15 +222,11 @@ def _build_create_and_attach(
         else:
             tmux.create_workspace_session(workspace, pane_plans, runner=runner)
 
-    for warning in warnings:
-        print(f"Note: {warning}", file=stream)
+    if stream is not None:
+        for warning in warnings:
+            print(f"Note: {warning}", file=stream)
 
     _enable_workspace_popups(workspace.session_name, runner)
-
-    if isinstance(workspace.project_location, LocalProjectLocation):
-        _attach_local(workspace, runner)
-    else:
-        _attach_remote(workspace, runner)
 
 
 def _attach_local(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
@@ -242,6 +253,14 @@ def _attach_local(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> N
             f"Could not attach to tmux session '{workspace.session_name}': "
             f"tmux exited with status {result.returncode}."
         )
+
+
+def attach_workspace_session(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
+    """Hand the terminal to an already-created managed workspace."""
+    if isinstance(workspace.project_location, LocalProjectLocation):
+        _attach_local(workspace, runner)
+    else:
+        _attach_remote(workspace, runner)
 
 
 def _attach_remote(workspace: WorkspaceSpec, runner: tmux.TmuxCommandRunner) -> None:
