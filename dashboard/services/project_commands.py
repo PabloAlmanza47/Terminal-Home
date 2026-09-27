@@ -16,6 +16,8 @@ class CommandSource(str, Enum):
     NODE_DEV = "package.json dev script"
     NODE_START = "package.json start script"
     NODE_TEST = "package.json test script"
+    NODE_BUILD = "package.json build script"
+    NODE_LINT = "package.json lint script"
     PYTEST = "pytest project indicator"
     DJANGO = "Django manage.py"
     STATIC_HTML = "root index.html"
@@ -31,12 +33,16 @@ class DetectedCommand:
 class DetectedProjectCommands:
     development: DetectedCommand | None
     test: DetectedCommand | None
+    build: DetectedCommand | None = None
+    lint: DetectedCommand | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _NodeCommands:
     development: DetectedCommand | None
     test: DetectedCommand | None
+    build: DetectedCommand | None
+    lint: DetectedCommand | None
 
 
 _PYTEST_COMMAND_PATTERN = re.compile(r"(?:^|\s)pytest(?:\s|$)")
@@ -114,7 +120,17 @@ def _detect_node_commands(project_path: Path) -> _NodeCommands | None:
         and not _is_placeholder_test(test_script)
     ):
         test = DetectedCommand(_node_command(manager, "test"), CommandSource.NODE_TEST)
-    return _NodeCommands(development=development, test=test)
+    build = (
+        DetectedCommand(_node_command(manager, "build"), CommandSource.NODE_BUILD)
+        if _script_exists(scripts, "build")
+        else None
+    )
+    lint = (
+        DetectedCommand(_node_command(manager, "lint"), CommandSource.NODE_LINT)
+        if _script_exists(scripts, "lint")
+        else None
+    )
+    return _NodeCommands(development=development, test=test, build=build, lint=lint)
 
 
 def _pyproject_configures_pytest(project_path: Path) -> bool:
@@ -212,6 +228,8 @@ def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
     node = _detect_node_commands(project_path)
     development = node.development if node is not None else None
     test = node.test if node is not None else None
+    build = node.build if node is not None else None
+    lint = node.lint if node is not None else None
 
     if development is None and _is_file(project_path / "manage.py"):
         development = DetectedCommand("python manage.py runserver", CommandSource.DJANGO)
@@ -225,4 +243,6 @@ def detect_project_commands(project_path: Path) -> DetectedProjectCommands:
         )
     if test is None and _has_pytest_indicator(project_path):
         test = DetectedCommand("pytest", CommandSource.PYTEST)
-    return DetectedProjectCommands(development=development, test=test)
+    return DetectedProjectCommands(
+        development=development, test=test, build=build, lint=lint
+    )

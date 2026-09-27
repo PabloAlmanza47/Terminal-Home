@@ -292,6 +292,84 @@ Input:focus {
     color: $text-muted;
 }
 
+/* --- Project Detail --- */
+
+.project-detail-root > .panel {
+    padding: 1 2;
+}
+
+#detail-status-grid,
+#detail-command-tool-grid {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    padding: 0 0 1 0;
+}
+
+.detail-section {
+    width: 1fr;
+    height: auto;
+    padding: 0 1;
+}
+
+#detail-overview {
+    color: $text-accent;
+    padding: 0 0 1 0;
+}
+
+#detail-workspace-summary,
+#detail-activity {
+    color: $text-muted;
+    padding: 0 0 1 0;
+}
+
+#detail-workspace-summary {
+    color: #d4e2f2;
+    text-style: bold;
+}
+
+.detail-layout-row {
+    color: $text-muted;
+    padding: 0 0 0 1;
+}
+
+#detail-commands,
+#detail-tools {
+    color: $text-muted;
+    padding: 0 0 1 0;
+}
+
+#detail-commands,
+#detail-tools {
+    min-height: 3;
+}
+
+.detail-git-files-hidden {
+    display: none;
+}
+
+#detail-commands-heading,
+#detail-tools-heading {
+    padding: 1 0 0 0;
+}
+
+#detail-git,
+#detail-workspace,
+#detail-session {
+    padding: 0 0 1 0;
+}
+
+.project-detail-root.detail-narrow #detail-status-grid,
+.project-detail-root.detail-narrow #detail-command-tool-grid {
+    layout: vertical;
+}
+
+.project-detail-root.detail-narrow .detail-section {
+    width: 100%;
+    padding: 0 0 1 0;
+}
+
+
 /* --- System info screen --- */
 
 #info-rows {

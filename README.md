@@ -375,6 +375,14 @@ Both `th up` and `th plan` use the same dynamic project suggestions. The
 - **Recreate Workspace** — rebuilds a saved layout (windows, panes, startup
   commands) from scratch when no session is currently running.
 
+Project Detail is the operational command center for a project. It combines
+project identity, live workspace state, Git summary and changed files, a small
+set of detected development/test commands, and contextual tools such as
+Lazygit. Git refreshes asynchronously while the screen is open; workspace and
+project metadata refresh through the existing service layer. Commands are
+shown only when Terminal Home can identify them safely, and unavailable tools
+are omitted or described as unavailable.
+
 ## Workspace layouts
 
 | Panes | Layout                                                             | tmux layout name  |

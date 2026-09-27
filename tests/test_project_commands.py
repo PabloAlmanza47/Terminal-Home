@@ -72,6 +72,19 @@ def test_node_dev_wins_over_start(tmp_path: Path) -> None:
     assert detected.development.source is CommandSource.NODE_DEV
 
 
+def test_node_build_and_lint_scripts_are_exposed_for_project_detail(
+    tmp_path: Path,
+) -> None:
+    _write_package(tmp_path, {"dev": "next dev", "build": "next build", "lint": "next lint"})
+
+    detected = detect_project_commands(tmp_path)
+
+    assert detected.build is not None
+    assert detected.build.command == "npm run build"
+    assert detected.lint is not None
+    assert detected.lint.command == "npm run lint"
+
+
 def test_multiple_lockfiles_follow_documented_precedence(tmp_path: Path) -> None:
     _write_package(tmp_path, {"dev": "ignored"})
     for name in ("package-lock.json", "bun.lock", "yarn.lock", "pnpm-lock.yaml"):

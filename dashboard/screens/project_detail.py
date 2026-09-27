@@ -13,8 +13,10 @@ and Forget are metadata-only and never exit the app.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from textual.app import ComposeResult
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static
@@ -40,7 +42,6 @@ from dashboard.services.activity import (
     agent_status,
     effective_agent_session,
     server_status,
-    workspace_status,
 )
 from dashboard.services.git import GitDiffResult, GitFileChange, GitStatus, load_diff, load_status
 from dashboard.services.pane_layout_store import (
@@ -49,8 +50,11 @@ from dashboard.services.pane_layout_store import (
     load_pane_layouts_for_location,
     save_pane_layouts_for_location,
 )
+from dashboard.services.project_commands import DetectedProjectCommands, detect_project_commands
+from dashboard.services.project_intelligence import ProjectIntelligence, inspect_project
 from dashboard.services.project_launch import prepare_project_launch_for_selector
 from dashboard.services.project_selection import RegisteredRemoteProject
+from dashboard.services.project_tools import ProjectTools, detect_project_tools
 from dashboard.services.projects import (
     Project,
     ProjectAction,
@@ -88,6 +92,20 @@ _ACTION_LABELS: dict[ProjectAction, str] = {
     ProjectAction.FORGET: "Forget Saved Workspace",
     ProjectAction.RESET_PANE_SIZES: "Reset Remembered Pane Sizes",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectDetailAction:
+    """Small screen-level action descriptor, ready for future project tools."""
+
+    id: str
+    label: str
+    enabled: bool = True
+    description: str = ""
+
+    def to_item(self) -> ActionItem:
+        label = f"{self.label}  —  {self.description}" if self.description else self.label
+        return ActionItem(self.id, label, disabled=not self.enabled)
 
 
 class GitFileList(OptionList):
@@ -163,16 +181,13 @@ def _agent_line(status: ProjectStatus) -> str | None:
 
 
 def format_activity_block(status: ProjectStatus) -> str:
-    workspace = workspace_status(status)
     server = server_status(status)
     agent, count, selected = agent_status(status)
-    agent_label = f"({count}) {agent.label}" if count > 1 else agent.label
-    agent_name = agent_display_name(selected.tool) if selected is not None else "No Agent"
-    return "\n".join(
-        [f"Workspace  {workspace.glyph} {workspace.label}",
-         f"Server     {server.glyph} {server.label}",
-         f"Agent     {agent_name} {agent.glyph} {agent_label}"]
-    )
+    lines = [f"Server  {server.glyph} {server.label}"]
+    if selected is not None:
+        agent_label = f"({count}) {agent.label}" if count > 1 else agent.label
+        lines.append(f"Agent   {agent_display_name(selected.tool)} {agent.glyph} {agent_label}")
+    return "\n".join(lines)
 
 
 def format_git_summary(status: GitStatus | None) -> str:
@@ -203,6 +218,66 @@ def format_git_files(status: GitStatus | None) -> str:
             path = f"{change.old_path} → {change.path}"
         lines.append(f"  {change.indicator:<2} {path}")
     return "\n".join(lines)
+
+
+def format_workspace_summary(status: ProjectStatus) -> str:
+    if not status.tmux_available:
+        return "Unavailable · tmux is not installed"
+    if not status.session_running:
+        if status.saved_workspace is not None:
+            return "○ Stopped · ready to open"
+        return "— Not configured"
+    details: list[str] = ["● Running"]
+    if status.running_window_count is not None:
+        details.append(f"{status.running_window_count} window")
+        if status.running_window_count != 1:
+            details[-1] += "s"
+    if status.running_pane_count is not None:
+        details.append(f"{status.running_pane_count} pane")
+        if status.running_pane_count != 1:
+            details[-1] += "s"
+    if status.session_attached is not None:
+        details.append("attached" if status.session_attached else "detached")
+    return " · ".join(details)
+
+
+def format_project_overview(
+    status: ProjectStatus, intelligence: ProjectIntelligence | None
+) -> str:
+    lines = [f"{status.project.name}", str(status.canonical_path)]
+    if intelligence is not None:
+        kind = ", ".join(framework for framework in intelligence.frameworks)
+        if not kind:
+            kind = ", ".join(ecosystem.value for ecosystem in intelligence.ecosystems)
+        if kind:
+            lines.append(kind)
+    return "\n".join(lines)
+
+
+def format_project_commands(commands: DetectedProjectCommands | None) -> str:
+    if commands is None:
+        return "Detecting supported commands..."
+    rows: list[str] = []
+    if commands.development is not None:
+        rows.append(f"  Dev server    {commands.development.command}")
+    if commands.test is not None:
+        rows.append(f"  Tests         {commands.test.command}")
+    if commands.build is not None:
+        rows.append(f"  Build         {commands.build.command}")
+    if commands.lint is not None:
+        rows.append(f"  Lint          {commands.lint.command}")
+    return "\n".join(rows) if rows else "  No supported project commands detected"
+
+
+def format_project_tools(tools: ProjectTools) -> str:
+    rows = []
+    if tools.lazygit:
+        rows.append("  Lazygit       available in a running workspace (prefix + g)")
+    if tools.editor_in_workspace:
+        rows.append("  Editor        configured in workspace")
+    if tools.terminal_in_workspace:
+        rows.append("  Terminal      configured in workspace")
+    return "\n".join(rows) if rows else "  No additional project tools available"
 
 
 class ProjectDetailScreen(Screen[None]):
@@ -236,6 +311,8 @@ class ProjectDetailScreen(Screen[None]):
         self._feedback = ""
         self._git_status: GitStatus | None = None
         self._git_refreshing = False
+        self._git_refresh_generation = 0
+        self._git_refresh_active = False
         self._modal_action_active = False
         self._last_action_worker: Worker[None] | None = None
         self._git_timer: Timer | None = None
@@ -244,6 +321,10 @@ class ProjectDetailScreen(Screen[None]):
         self._selected_diff_change: GitFileChange | None = None
         self._restore_file_focus = False
         self._restore_file_path: str | None = None
+        self._back_requested = False
+        self._project_intelligence: ProjectIntelligence | None = None
+        self._project_commands: DetectedProjectCommands | None = None
+        self._project_tools = ProjectTools(False, False, False)
 
     def compose(self) -> ComposeResult:
         status = self.status
@@ -261,38 +342,63 @@ class ProjectDetailScreen(Screen[None]):
         with Container(classes="screen-root project-detail-root"):
             with VerticalScroll(classes="panel"):
                 yield Static(status.project.name, id="screen-title")
-                yield Static(format_activity_block(status), id="detail-activity")
-                yield Static("Git", id="detail-git-heading", classes="panel-heading")
-                yield Static(format_git_summary(self._git_status), id="detail-git")
                 yield Static(
-                    "Changed Files", id="detail-git-files", classes="panel-heading"
+                    format_project_overview(status, self._project_intelligence),
+                    id="detail-overview",
                 )
-                yield GitFileList(
-                    Option("Loading...", disabled=True),
-                    id="detail-git-files-list",
-                    reset_on_blur=False,
-                )
-                yield Static(
-                    "Workspace", id="detail-workspace-heading", classes="panel-heading"
-                )
-                yield Static(_workspace_line(status), id="detail-workspace")
-                yield Static(_session_line(status), id="detail-session")
-                yield Static(
-                    f"Path: {status.canonical_path}",
-                    id="detail-path",
-                    classes="detail-secondary",
-                )
+                with Horizontal(id="detail-status-grid"):
+                    with Vertical(classes="detail-section"):
+                        yield Static("Workspace", classes="panel-heading")
+                        yield Static(
+                            format_workspace_summary(status), id="detail-workspace-summary"
+                        )
+                        yield Static(format_activity_block(status), id="detail-activity")
+                        if status.workspace_metadata_error:
+                            yield Static(
+                                f"Metadata warning: {status.workspace_metadata_error}",
+                                id="detail-metadata-error",
+                                classes="wizard-hint",
+                            )
+                    with Vertical(classes="detail-section"):
+                        yield Static("Git", classes="panel-heading")
+                        yield Static(format_git_summary(self._git_status), id="detail-git")
+                        yield Static(
+                            "Changed Files",
+                            id="detail-git-files",
+                            classes="panel-heading detail-git-files-hidden",
+                        )
+                        yield GitFileList(
+                            Option("No changes", disabled=True),
+                            id="detail-git-files-list",
+                            classes="detail-git-files-hidden",
+                            reset_on_blur=False,
+                        )
+
+                with Horizontal(id="detail-command-tool-grid"):
+                    with Vertical(classes="detail-section"):
+                        yield Static("Commands", classes="panel-heading")
+                        yield Static(
+                            format_project_commands(self._project_commands), id="detail-commands"
+                        )
+                    with Vertical(classes="detail-section"):
+                        yield Static("Tools", classes="panel-heading")
+                        yield Static(
+                            format_project_tools(self._project_tools), id="detail-tools"
+                        )
+
+                if status.saved_workspace is not None:
+                    yield Static("Workspace Layout", classes="panel-heading")
+                    for window in status.saved_workspace.windows:
+                        pane_summary = " · ".join(pane.display_name for pane in window.panes)
+                        yield Static(
+                            f"{window.window_name:<8} {pane_summary}",
+                            classes="detail-layout-row",
+                        )
 
                 if not status.project_dir_exists:
                     yield Static(
                         "This project's directory no longer exists on disk.",
                         id="detail-missing-dir",
-                        classes="wizard-hint",
-                    )
-                if status.workspace_metadata_error:
-                    yield Static(
-                        f"Warning: {status.workspace_metadata_error}",
-                        id="detail-metadata-error",
                         classes="wizard-hint",
                     )
                 if status.workspace_metadata_warning:
@@ -302,43 +408,35 @@ class ProjectDetailScreen(Screen[None]):
                         classes="wizard-hint",
                     )
 
-                if status.saved_workspace is not None:
-                    yield Static("Saved windows:", classes="field-label")
-                    for window in status.saved_workspace.windows:
-                        pane_summary = ", ".join(pane.display_name for pane in window.panes)
-                        yield Static(f"  {window.window_name}: {pane_summary}")
-
                 yield Static(self._feedback, id="detail-error")
 
                 primary = primary_actions(status)
                 secondary = secondary_actions(status)
-
-                if primary:
-                    actions = [
-                        ActionItem(_action_id(action), _ACTION_LABELS[action])
-                        for action in (*primary, *secondary)
-                    ]
-                    if status.agent_sessions:
-                        actions.append(ActionItem("open-agent", "Open Agent Deck Session"))
-                    actions.append(ActionItem("back-to-list", "Back to Project List"))
-                    yield Static("Actions", classes="panel-heading")
-                    yield ProjectActionList(*actions, id="project-actions")
-                else:
-                    yield Static(
-                        "No actions are available for this project right now.",
-                        id="detail-no-actions",
-                        classes="wizard-hint",
+                primary_items = self._action_items(tuple(primary))
+                if status.agent_sessions:
+                    primary_items.append(
+                        ProjectDetailAction("open-agent", "Open Agent Deck Session").to_item()
                     )
-
-                if not primary:
-                    yield ProjectActionList(
-                        *(
-                            [ActionItem("open-agent", "Open Agent Deck Session")]
-                            if status.agent_sessions
-                            else []
-                        ),
-                        ActionItem("back-to-list", "Back to Project List"), id="project-actions"
+                if not primary_items:
+                    primary_items.append(
+                        ProjectDetailAction(
+                            "no-primary-action", "No workspace action available", enabled=False
+                        ).to_item()
                     )
+                if secondary:
+                    primary_items.append(ActionItem("more-heading", "More", disabled=True))
+                    primary_items.extend(
+                        ProjectDetailAction(
+                            item.id,
+                            f"More · {item.label}",
+                            enabled=item.enabled,
+                            description=item.description,
+                        ).to_item()
+                        for item in self._action_descriptors(tuple(secondary))
+                    )
+                primary_items.append(ActionItem("back-to-list", "Back to Project List"))
+                yield Static("Next", classes="panel-heading")
+                yield ProjectActionList(*primary_items, id="project-actions")
         yield Static(
             "↑↓ Navigate   Enter Select   d Diff   a Agent   Esc Back   "
             "F5 Refresh   ? Help   q Quit",
@@ -346,22 +444,20 @@ class ProjectDetailScreen(Screen[None]):
         )
 
     def on_mount(self) -> None:
+        self._update_detail_width(self.size.width)
+        self._git_refresh_active = True
         if self.remote_project is not None:
             remote_actions = self.query(KeyboardActionList).filter("#project-actions")
             if remote_actions:
                 remote_actions.first().focus()
             return
-        # Keep the empty placeholders out of the initial layout. Once the
-        # first live Git result arrives, _update_git_files explicitly makes
-        # both widgets visible when there are changes.
+        # Keep the changed-file region out of the initial layout. Clean
+        # repositories settle on the Git summary without showing a loading
+        # placeholder or an empty diagnostic section.
         heading = self.query_one("#detail-git-files", Static)
         files = self.query_one("#detail-git-files-list", OptionList)
-        if self._git_status is None:
-            heading.display = True
-            files.display = True
-        else:
-            heading.display = False
-            files.display = False
+        heading.display = False
+        files.display = False
         # A worker result may arrive between Screen construction and the
         # dynamic widgets finishing their mount. In that case the status
         # snapshot is already current, but the first callback could not paint
@@ -373,8 +469,72 @@ class ProjectDetailScreen(Screen[None]):
             actions.first().focus()
         self.call_after_refresh(self._reset_scroll_position)
         if self.status is not None:
+            self._start_project_inspection()
+            self._project_tools = self._detect_tools()
+            self.query_one("#detail-tools", Static).update(
+                format_project_tools(self._project_tools)
+            )
+            self._start_command_detection()
             self._git_timer = self.set_interval(1.75, self._start_git_refresh)
             self._start_git_refresh()
+
+    def on_resize(self, event) -> None:
+        self._update_detail_width(event.size.width)
+
+    def _update_detail_width(self, width: int) -> None:
+        roots = self.query(".project-detail-root")
+        if roots:
+            roots.first(Container).set_class(width < 90, "detail-narrow")
+
+    def _action_items(self, actions: tuple[ProjectAction, ...]) -> list[ActionItem]:
+        return [descriptor.to_item() for descriptor in self._action_descriptors(actions)]
+
+    def _action_descriptors(self, actions: tuple[ProjectAction, ...]) -> list[ProjectDetailAction]:
+        return [
+            ProjectDetailAction(_action_id(action), _ACTION_LABELS[action])
+            for action in actions
+        ]
+
+    def _detect_tools(self) -> ProjectTools:
+        assert self.status is not None
+        panes = tuple(
+            pane.kind.value
+            for window in (
+                self.status.saved_workspace.windows if self.status.saved_workspace else ()
+            )
+            for pane in window.panes
+        )
+        return detect_project_tools(
+            self.status.canonical_path,
+            has_editor_pane="code_editor" in panes,
+            has_terminal_pane=bool(panes),
+        )
+
+    def _start_command_detection(self) -> None:
+        if self.status is None or not self.status.project_dir_exists:
+            return
+        self.run_worker(
+            lambda: detect_project_commands(self.status.canonical_path), thread=True
+        )
+
+    def _start_project_inspection(self) -> None:
+        if self.status is None or not self.status.project_dir_exists:
+            return
+        self.run_worker(lambda: inspect_project(self.status.canonical_path), thread=True)
+
+    def on_worker_state_changed(self, event) -> None:
+        """Paint one-shot project inspection results without rebuilding focus."""
+        result = getattr(event.worker, "result", None)
+        if isinstance(result, DetectedProjectCommands):
+            self._project_commands = result
+            widget = self.query("#detail-commands")
+            if widget:
+                widget.first(Static).update(format_project_commands(result))
+        elif isinstance(result, ProjectIntelligence):
+            self._project_intelligence = result
+            widget = self.query("#detail-overview")
+            if widget and self.status is not None:
+                widget.first(Static).update(format_project_overview(self.status, result))
 
     def on_descendant_focus(self, event) -> None:
         if event.widget.id == "detail-git-files-list":
@@ -446,6 +606,7 @@ class ProjectDetailScreen(Screen[None]):
                 )
 
     async def on_screen_resume(self) -> None:
+        self._git_refresh_active = True
         restore_files = self._restore_file_focus
         restore_path = self._restore_file_path
         self._restore_file_focus = False
@@ -462,6 +623,12 @@ class ProjectDetailScreen(Screen[None]):
             self._restore_changed_file_focus(restore_path)
 
     def on_screen_suspend(self) -> None:
+        self._git_refresh_active = False
+        self._git_refresh_generation += 1
+        # Pausing the timer does not stop a worker which has already started.
+        # Let the next resume start a fresh refresh even if that worker's
+        # callback is still queued for delivery.
+        self._git_refreshing = False
         if self._git_timer is not None:
             self._git_timer.pause()
 
@@ -476,36 +643,43 @@ class ProjectDetailScreen(Screen[None]):
         # The screen also uses workers for actions such as saving templates;
         # this refresh is independently guarded by _git_refreshing and must
         # not cancel those action workers.
-        self.run_worker(self._load_git_status, thread=True)
+        generation = self._git_refresh_generation
+        self.run_worker(lambda: self._load_git_status(generation), thread=True)
 
-    def _load_git_status(self) -> None:
+    def _load_git_status(self, generation: int) -> None:
         assert self.status is not None
         result = load_status(self.status.canonical_path)
-        self.app.call_from_thread(self._on_git_status, result)
+        self.app.call_from_thread(self._on_git_status, result, generation)
 
-    def _on_git_status(self, result: GitStatus) -> None:
+    def _on_git_status(self, result: GitStatus, generation: int | None = None) -> None:
+        if generation is not None and generation != self._git_refresh_generation:
+            return
         self._git_refreshing = False
+        if not self._git_refresh_active or not self.is_attached:
+            return
         if result.error and self._git_status is not None:
             return
+
         previous_path = self._selected_git_file_path()
         summary = format_git_summary(result)
         files = format_git_files(result)
         if self._git_rendered == (summary, files):
             self._git_status = result
             mounted_files = self.query("#detail-git-files-list")
-            if mounted_files and result.changes:
-                file_list = mounted_files.first(OptionList)
-                loading_placeholder = (
-                    file_list.option_count == 1
-                    and file_list.get_option_at_index(0).disabled
-                )
-                if loading_placeholder or file_list.option_count != len(result.changes):
-                    self._update_git_files(result, previous_path)
+            if mounted_files:
+                self._update_git_files(result, previous_path)
             return
         self._git_status = result
         self._git_rendered = (summary, files)
-        self.query_one("#detail-git", Static).update(summary)
+        git_widgets = self.query("#detail-git")
+        if not git_widgets:
+            return
+        git_widgets.first(Static).update(summary)
         self._update_git_files(result, previous_path)
+
+    def on_unmount(self) -> None:
+        self._git_refresh_active = False
+        self._git_refresh_generation += 1
 
     def _selected_git_file_path(self) -> str | None:
         file_widgets = self.query("#detail-git-files-list")
@@ -521,12 +695,19 @@ class ProjectDetailScreen(Screen[None]):
         return self._git_status.changes[files.highlighted].path
 
     def _update_git_files(self, status: GitStatus, previous_path: str | None = None) -> None:
-        files = self.query_one("#detail-git-files-list", OptionList)
-        heading = self.query_one("#detail-git-files", Static)
+        file_widgets = self.query("#detail-git-files-list")
+        heading_widgets = self.query("#detail-git-files")
+        if not file_widgets or not heading_widgets:
+            return
+        files = file_widgets.first(OptionList)
+        heading = heading_widgets.first(Static)
         if previous_path is None:
             previous_path = self._selected_git_file_path()
         was_focused = self.app.focused is files
         files.clear_options()
+        hidden = not status.changes
+        heading.set_class(hidden, "detail-git-files-hidden")
+        files.set_class(hidden, "detail-git-files-hidden")
         if not status.changes:
             heading.display = False
             files.display = False
@@ -603,6 +784,9 @@ class ProjectDetailScreen(Screen[None]):
         files.focus()
 
     def action_go_back(self) -> None:
+        if self._back_requested:
+            return
+        self._back_requested = True
         self.app.pop_screen()
 
     async def _refresh_status(self) -> None:
@@ -620,6 +804,8 @@ class ProjectDetailScreen(Screen[None]):
             assert isinstance(self.project, Project)
             self.status = gather_single_project_status(self.project)
             await self.recompose()
+        if not self._git_refresh_active or not self.is_attached:
+            return
         actions = self.query_one("#project-actions", KeyboardActionList)
         actions.set_actions(actions.actions, preferred_id)
         actions.focus()
@@ -631,9 +817,10 @@ class ProjectDetailScreen(Screen[None]):
     def on_keyboard_action_list_action_selected(
         self, event: KeyboardActionList.ActionSelected
     ) -> None:
+        event.stop()
         button_id = event.action_id
         if button_id == "back-to-list":
-            self.app.pop_screen()
+            self.action_go_back()
         elif button_id in (_action_id(ProjectAction.RESUME), _action_id(ProjectAction.RECREATE)):
             self._resume_or_recreate()
         elif button_id == "open-agent":

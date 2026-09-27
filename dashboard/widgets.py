@@ -107,15 +107,18 @@ class KeyboardActionList(Static):
         self.refresh()
 
     def on_key(self, event: events.Key) -> None:
+        if event.key not in {"up", "down", "enter", "space"}:
+            return
+        # Stop the key before posting ActionSelected. Navigation handlers may
+        # change the active screen while the selection message is processed;
+        # the originating key must not continue through that new screen.
+        event.stop()
         if event.key == "up":
             self._move(-1)
         elif event.key == "down":
             self._move(1)
         elif event.key in {"enter", "space"}:
             self._activate()
-        else:
-            return
-        event.stop()
 
     def on_click(self, event: events.Click) -> None:
         index = event.offset.y

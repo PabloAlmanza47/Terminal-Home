@@ -4,6 +4,9 @@
 
 - Hardened remembered tmux layouts by normalizing volatile pane IDs and
   rebinding saved geometry to newly created panes during workspace recreation.
+- Expanded Project Detail into an operational project command center with live
+  workspace summaries, Git state, detected project commands, and contextual
+  tool availability.
 
 ## [0.4.0] - 2026-09-11
 

@@ -43,6 +43,7 @@ from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
 from dashboard.widgets import CircularSelectionList, KeyboardActionList
+from dashboard.screens.home import HomeScreen
 
 _NARROW = (80, 24)
 _MEDIUM = (100, 30)
@@ -184,6 +185,56 @@ def test_default_focus_selects_first_recent_project_and_enter_opens_it(
     focused_id, screen_name = _run(scenario())
     assert focused_id == _project_id(projects_root / "alpha")
     assert screen_name == "ProjectDetailScreen"
+
+
+@pytest.mark.parametrize("leave_with_escape", [False, True])
+def test_recent_project_detail_returns_to_home_without_exiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, leave_with_escape: bool
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "alpha").mkdir()
+    exit_calls: list[object] = []
+    original_exit = TerminalHomeApp.exit
+
+    def record_exit(self, *args, **kwargs):
+        exit_calls.append((args, kwargs))
+        return original_exit(self, *args, **kwargs)
+
+    monkeypatch.setattr(TerminalHomeApp, "exit", record_exit)
+
+    async def scenario() -> tuple[list[str], list[str], list[str], bool, bool]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_MEDIUM) as pilot:
+            await _wait_for_scan(pilot)
+            before = [type(screen).__name__ for screen in app.screen_stack]
+            recent = app.screen.query_one("#recent-projects-list", OptionList)
+            recent.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "ProjectDetailScreen"
+            during = [type(screen).__name__ for screen in app.screen_stack]
+
+            if leave_with_escape:
+                await pilot.press("escape")
+            else:
+                actions = app.screen.query_one("#project-actions", KeyboardActionList)
+                actions.selected_index = next(
+                    i for i, action in enumerate(actions.actions) if action.id == "back-to-list"
+                )
+                await pilot.press("enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause(0.2)
+            after = [type(screen).__name__ for screen in app.screen_stack]
+            return before, during, after, app.is_running, app.screen.is_mounted
+
+    before, during, after, is_running, home_mounted = _run(scenario())
+    assert before == ["Screen", "HomeScreen"]
+    assert during == ["Screen", "HomeScreen", "ProjectDetailScreen"]
+    assert after == ["Screen", "HomeScreen"]
+    assert not exit_calls
+    assert is_running
+    assert home_mounted
 
 
 def test_project_search_filters_case_insensitively_and_escape_restores_focus(
