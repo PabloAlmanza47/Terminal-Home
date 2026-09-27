@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Hardened remembered tmux layouts by normalizing volatile pane IDs and
+  rebinding saved geometry to newly created panes during workspace recreation.
+
 ## [0.4.0] - 2026-09-11
 
 ### Added

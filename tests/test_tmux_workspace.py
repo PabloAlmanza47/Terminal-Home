@@ -379,6 +379,9 @@ def test_capture_tmux_window_layouts_parses_rows_and_skips_malformed_output() ->
     layouts = capture_tmux_window_layouts("demo", runner=runner)
 
     assert layouts["main"] == PaneLayout("main", 2, "148x40,0,0[74x40,0,0,1,74x40,75,0,2]")
+    assert layouts["main"].tmux_layout_template == (
+        "148x40,0,0[74x40,0,0,0,74x40,75,0,1]"
+    )
     assert calls == [
         ["tmux", "list-windows", "-t", "demo", "-F", tmux_module._WINDOW_LAYOUT_FORMAT]
     ]
@@ -407,6 +410,35 @@ def test_remembered_layout_is_applied_when_pane_count_matches(tmp_path: Path) ->
     assert [c for c in fake.executed if c[1] == "select-layout"] == [
         ["tmux", "select-layout", "-t", "@0", remembered["main"].tmux_layout]
     ]
+
+
+def test_captured_layout_rebinds_geometry_to_new_pane_ids(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, WindowSpec(window_name="main", panes=(_pane(), _pane())))
+    fake = _FakeTmux(window_start=40, pane_start=90)
+    old_layout = "148x40,0,0[74x40,0,0,1,74x40,75,0,2]"
+    remembered = {
+        "main": PaneLayout(
+            "main", 2, old_layout,
+            "148x40,0,0[74x40,0,0,0,74x40,75,0,1]",
+        )
+    }
+
+    create_workspace_session(
+        workspace,
+        {("main", 0): _plan(), ("main", 1): _plan()},
+        runner=fake,
+        saved_window_layouts=remembered,
+    )
+
+    assert [c for c in fake.executed if c[1] == "select-layout"] == [
+        ["tmux", "select-layout", "-t", "@40", "148x40,0,0[74x40,0,0,90,74x40,75,0,91]"]
+    ]
+
+
+def test_captured_three_pane_layout_template_preserves_mixed_splits() -> None:
+    layout = "148x40,0,0[74x40,0,0,4,74x20,75,0,5,74x20,75,21,6]"
+    parsed = tmux_module._layout_template(layout)
+    assert parsed == "148x40,0,0[74x40,0,0,0,74x20,75,0,1,74x20,75,21,2]"
 
 
 def test_real_tmux_remembered_layout_restores_resized_pane(tmp_path: Path) -> None:

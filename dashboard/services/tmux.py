@@ -89,7 +89,12 @@ def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
         name, pane_count, layout = fields
         try:
             parsed_count = int(pane_count)
-            parsed = PaneLayout(name, parsed_count, layout)
+            parsed = PaneLayout(
+                name,
+                parsed_count,
+                layout,
+                tmux_layout_template=_layout_template(layout),
+            )
         except (TypeError, ValueError):
             continue
         if name in layouts or name in ambiguous:
@@ -99,6 +104,130 @@ def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
             continue
         layouts[name] = parsed
     return layouts
+
+
+def _layout_template(layout: str) -> str | None:
+    """Normalize a tmux layout while retaining its split geometry.
+
+    A tmux layout is a recursive set of cells.  Leaf cells have the form
+    ``WxH,X,Y,ID``; the ID is the volatile part.  Parsing cells means width
+    and coordinate numbers are never mistaken for pane IDs.
+    """
+    position = 0
+    leaf = 0
+
+    def parse_cell() -> str:
+        nonlocal position, leaf
+        start = position
+        while position < len(layout) and layout[position].isdigit():
+            position += 1
+        if position >= len(layout) or layout[position] != "x":
+            raise ValueError
+        position += 1
+        height_start = position
+        while position < len(layout) and layout[position].isdigit():
+            position += 1
+        if height_start == position:
+            raise ValueError
+        for _ in range(2):
+            if position >= len(layout) or layout[position] != ",":
+                raise ValueError
+            position += 1
+            coord_start = position
+            while position < len(layout) and layout[position].isdigit():
+                position += 1
+            if coord_start == position:
+                raise ValueError
+        prefix = layout[start:position]
+        if position < len(layout) and layout[position] in "[{":
+            opening = layout[position]
+            closing = "]" if opening == "[" else "}"
+            position += 1
+            children = [parse_cell()]
+            while position < len(layout) and layout[position] == ",":
+                position += 1
+                children.append(parse_cell())
+            if position >= len(layout) or layout[position] != closing:
+                raise ValueError
+            position += 1
+            return prefix + opening + ",".join(children) + closing
+        if position >= len(layout) or layout[position] != ",":
+            raise ValueError
+        position += 1
+        id_start = position
+        while position < len(layout) and layout[position].isdigit():
+            position += 1
+        if id_start == position:
+            raise ValueError
+        stable_id = str(leaf)
+        leaf += 1
+        return prefix + "," + stable_id
+
+    try:
+        template = parse_cell()
+    except ValueError:
+        return None
+    return template if position == len(layout) and leaf else None
+
+
+def _layout_for_panes(layout: PaneLayout, pane_ids: list[str]) -> str:
+    """Bind a normalized layout to the newly-created pane IDs."""
+    template = layout.tmux_layout_template
+    if template is None:
+        return layout.tmux_layout
+
+    position = 0
+    pane_index = 0
+
+    def parse_cell() -> str:
+        nonlocal position, pane_index
+        start = position
+        while position < len(template) and template[position].isdigit():
+            position += 1
+        if position >= len(template) or template[position] != "x":
+            raise ValueError
+        position += 1
+        height_start = position
+        while position < len(template) and template[position].isdigit():
+            position += 1
+        if height_start == position:
+            raise ValueError
+        for _ in range(2):
+            if position >= len(template) or template[position] != ",":
+                raise ValueError
+            position += 1
+            while position < len(template) and template[position].isdigit():
+                position += 1
+        prefix = template[start:position]
+        if position < len(template) and template[position] in "[{":
+            opening = template[position]
+            closing = "]" if opening == "[" else "}"
+            position += 1
+            children = [parse_cell()]
+            while position < len(template) and template[position] == ",":
+                position += 1
+                children.append(parse_cell())
+            if position >= len(template) or template[position] != closing:
+                raise ValueError
+            position += 1
+            return prefix + opening + ",".join(children) + closing
+        if position >= len(template) or template[position] != ",":
+            raise ValueError
+        position += 1
+        id_start = position
+        while position < len(template) and template[position].isdigit():
+            position += 1
+        if id_start == position or pane_index >= len(pane_ids):
+            raise ValueError
+        pane_id = pane_ids[pane_index].lstrip("%").split(".")[-1]
+        pane_index += 1
+        return prefix + "," + pane_id
+
+    try:
+        result = parse_cell()
+    except ValueError:
+        return layout.tmux_layout
+    return result if position == len(template) and pane_index == len(pane_ids) else layout.tmux_layout
 
 
 def capture_tmux_window_layouts(
@@ -648,6 +777,8 @@ def _create_window_panes(
         else default_layout
     )
     if layout is not None:
+        if remembered is not None and remembered.pane_count == len(window.panes):
+            layout = _layout_for_panes(remembered, pane_ids)
         try:
             _run_step(runner, _select_layout_argv(window_id, layout))
         except TmuxCommandError:

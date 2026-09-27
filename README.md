@@ -784,3 +784,11 @@ afterward. When Terminal Home is already inside tmux, `th switch` uses
 workspace reuses the remembered layout for matching configured windows during
 recreation. No global tmux hooks are installed, and layout persistence never
 blocks attachment or recreation.
+
+Terminal Home captures layouts at managed attach/detach checkpoints and before
+an in-tmux client switch. It stores split geometry per project/window and
+remaps volatile tmux pane IDs to the recreated workspace's pane order, so pane
+roles do not change when tmux assigns new IDs. Missing, malformed, stale, or
+incompatible layouts fall back to the configured default. External destruction
+that Terminal Home cannot observe is not captured; there is no background
+polling or global tmux hook.
