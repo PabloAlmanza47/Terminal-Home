@@ -171,6 +171,8 @@ The CLI also provides inspection commands, project creation, and workspace launc
 ```bash
 th              # open the dashboard
 th list         # list discovered projects and their status
+th list shpe    # filter by name, path, session, or status
+th list running # show running workspaces
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
 th switch          # open the fast workspace switcher
