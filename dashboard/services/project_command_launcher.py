@@ -36,32 +36,44 @@ def _is_running(pane: tmux.TmuxPaneRuntime) -> bool:
     return not pane.dead and bool(command) and command not in _SHELL_COMMANDS
 
 
-def _pane_matches_category(
-    pane: tmux.TmuxPaneRuntime, category: str, workspace
-) -> bool:
-    if pane.pane_id is None or pane.window_id is None:
-        return False
-    for window in workspace.windows:
-        if window.window_name != pane.window_name:
-            continue
-        for index, spec in enumerate(window.panes):
-            if pane.pane_index is not None and pane.pane_index not in {index, index + 1}:
-                continue
-            title = pane.title.casefold().strip()
-            display = spec.display_name.casefold().strip()
-            if category == "dev" and spec.kind.value == "dev_server":
-                return pane.pane_index in {index, index + 1} or title in {
-                    "server", "dev", "development server", display
-                }
-            if category == "test" and spec.kind.value == "test_terminal":
-                return pane.pane_index in {index, index + 1} or title in {
-                    "tests", "test", "test terminal", display
-                }
-    return False
+# Project command categories that may run in a workspace's own pane, and the
+# pane role (tmux.PANE_ROLE_OPTION) that pane must carry.
+_CATEGORY_ROLES = {"dev": "dev_server", "test": "test_terminal"}
 
 
 def _task_title(category: str) -> str:
     return f"terminal-home:{category}"
+
+
+def _task_role(category: str) -> str:
+    return f"task:{category}"
+
+
+def _only_pane_with_role(
+    workspace, role: str, panes: list[tmux.TmuxPaneRuntime]
+) -> CommandTarget | None:
+    """The single pane of *workspace*'s session tagged *role*, else None.
+
+    Identity is the role option Terminal Home set on the pane by its id when
+    creating it -- never a pane index (whose base is user-configurable) or a
+    title (which the program in the pane can change). Zero matches (an
+    older or hand-built session) or several (ambiguous) both return None, so
+    the caller falls back to a dedicated task window rather than risk typing
+    into the wrong pane.
+    """
+    matches = [
+        pane
+        for pane in panes
+        if pane.session_name == workspace.session_name
+        and pane.role == role
+        and pane.window_id is not None
+        and pane.pane_id is not None
+    ]
+    if len(matches) != 1:
+        return None
+    pane = matches[0]
+    assert pane.window_id is not None and pane.pane_id is not None
+    return CommandTarget(pane.window_id, pane.pane_id, _is_running(pane))
 
 
 def _find_target(
@@ -69,37 +81,12 @@ def _find_target(
     category: str,
     panes: list[tmux.TmuxPaneRuntime],
 ) -> CommandTarget | None:
-    compatible = [
-        pane
-        for pane in panes
-        if pane.session_name == workspace.session_name
-        and _pane_matches_category(pane, category, workspace)
-    ]
-    if compatible:
-        pane = compatible[0]
-        assert pane.window_id is not None and pane.pane_id is not None
-        return CommandTarget(pane.window_id, pane.pane_id, _is_running(pane))
-
-    task_title = _task_title(category)
-    existing_task = next(
-        (
-            pane
-            for pane in panes
-            if pane.session_name == workspace.session_name
-            and pane.title.casefold() == task_title.casefold()
-            and pane.window_id is not None
-            and pane.pane_id is not None
-        ),
-        None,
-    )
-    if existing_task is None:
-        return None
-    assert existing_task.window_id is not None and existing_task.pane_id is not None
-    return CommandTarget(
-        existing_task.window_id,
-        existing_task.pane_id,
-        _is_running(existing_task),
-    )
+    role = _CATEGORY_ROLES.get(category)
+    if role is not None:
+        target = _only_pane_with_role(workspace, role, panes)
+        if target is not None:
+            return target
+    return _only_pane_with_role(workspace, _task_role(category), panes)
 
 
 def _create_task_target(
@@ -115,6 +102,7 @@ def _create_task_target(
         runner=runner,
     )
     tmux.set_pane_title(pane_id, _task_title(category), runner=runner)
+    tmux.set_pane_role(pane_id, _task_role(category), runner=runner)
     return CommandTarget(window_id, pane_id, False)
 
 
