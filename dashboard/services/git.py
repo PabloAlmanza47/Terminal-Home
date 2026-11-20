@@ -43,6 +43,12 @@ class GitStatus:
     untracked_count: int = 0
     available: bool = True
     error: str | None = None
+    # From porcelain-v2 ``# branch.upstream`` / ``# branch.ab``.  Counts are as
+    # of the last fetch (nothing here fetches); ``ahead``/``behind`` stay None
+    # when there is no upstream or Git reports none for it (upstream gone).
+    upstream: str | None = None
+    ahead: int | None = None
+    behind: int | None = None
 
     @property
     def clean(self) -> bool | None:
@@ -91,6 +97,9 @@ def parse_status(output: str) -> GitStatus:
     records = output.split("\0")
     branch: str | None = None
     detached = False
+    upstream: str | None = None
+    ahead: int | None = None
+    behind: int | None = None
     changes: list[GitFileChange] = []
     index = 0
     while index < len(records):
@@ -102,6 +111,14 @@ def parse_status(output: str) -> GitStatus:
             value = record.removeprefix("# branch.head ")
             detached = value == "(detached)"
             branch = None if detached else value
+            continue
+        if record.startswith("# branch.upstream "):
+            upstream = record.removeprefix("# branch.upstream ") or None
+            continue
+        if record.startswith("# branch.ab "):
+            parts = record.removeprefix("# branch.ab ").split()
+            if len(parts) == 2 and parts[0][1:].isdigit() and parts[1][1:].isdigit():
+                ahead, behind = int(parts[0][1:]), int(parts[1][1:])
             continue
         if record.startswith(("1 ", "u ")):
             change = _parse_change(record)
@@ -129,6 +146,9 @@ def parse_status(output: str) -> GitStatus:
         staged_count=staged,
         modified_count=modified,
         untracked_count=untracked,
+        upstream=upstream,
+        ahead=ahead,
+        behind=behind,
     )
 
 
