@@ -43,7 +43,6 @@ from dashboard.services.tmux import TmuxSession
 from dashboard.services.workspace_defaults import build_default_workspace
 from dashboard.services.workspace_store import save_workspace
 from dashboard.widgets import CircularSelectionList, KeyboardActionList
-from dashboard.screens.home import HomeScreen
 
 _NARROW = (80, 24)
 _MEDIUM = (100, 30)
