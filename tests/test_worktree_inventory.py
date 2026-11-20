@@ -229,6 +229,21 @@ def test_git_command_failures_are_warnings(tmp_path: Path) -> None:
     assert inventory_worktrees([repo], runner=timeout).worktrees == {}
 
 
+def test_status_never_runs_repository_configured_fsmonitor(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "app")
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+    git(repo, "config", "core.fsmonitor", str(hook))
+    (repo / "file.txt").write_text("x")
+
+    item = inventory_worktrees([repo]).worktrees[repo.resolve()]
+
+    assert item.clean is False
+    assert not marker.exists()
+
+
 def test_missing_git_binary_returns_empty_inventory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

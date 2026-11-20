@@ -46,8 +46,11 @@ StatusLoader = Callable[[Path], GitStatus]
 
 def _run_status_without_optional_locks(argv: list[str]) -> subprocess.CompletedProcess[str]:
     # Background status must never take index.lock or rewrite the index while
-    # the user runs Git in the same checkout.
+    # the user runs Git in the same checkout, and must never run a program a
+    # repository's own config names (core.fsmonitor) just because the picker
+    # listed it.
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    argv = [argv[0], "-c", "core.fsmonitor=false", *argv[1:]]
     return subprocess.run(argv, capture_output=True, text=True, timeout=3, env=env)
 
 
