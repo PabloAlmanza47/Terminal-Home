@@ -253,6 +253,13 @@ class ProjectStatus:
     remembered_pane_layouts: bool = False
     agent_sessions: tuple[AgentDeckSession, ...] = ()
     server_status: str = "not_configured"
+    # Lightweight runtime facts for Project Detail. These are deliberately
+    # optional so older callers and tests can continue constructing status
+    # snapshots without querying tmux themselves.
+    running_window_count: int | None = None
+    running_pane_count: int | None = None
+    session_attached: bool | None = None
+    workspace_query_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,6 +468,7 @@ def gather_project_status(
     agent_sessions: tuple[AgentDeckSession, ...] = (),
     pane_runtimes: Iterable[tmux.TmuxPaneRuntime] = (),
     expected_session_name: str | None = None,
+    tmux_session: tmux.TmuxSession | None = None,
 ) -> ProjectStatus:
     """Gather *project*'s full status.
 
@@ -539,6 +547,9 @@ def gather_project_status(
                 if matches:
                     server_status = "stopped" if matches[0].dead else "running"
                     break
+    matching_panes = tuple(
+        pane for pane in pane_runtimes if pane.session_name == resolved_session_name
+    )
     return ProjectStatus(
         project=project,
         canonical_path=canonical_path,
@@ -558,6 +569,9 @@ def gather_project_status(
         ),
         agent_sessions=agent_sessions,
         server_status=server_status,
+        running_window_count=(tmux_session.windows if tmux_session is not None else None),
+        running_pane_count=(len(matching_panes) if session_running else 0),
+        session_attached=(tmux_session.attached if tmux_session is not None else None),
     )
 
 
@@ -588,6 +602,14 @@ def gather_single_project_status(
     base_session_name_counts = _base_session_name_counts(discovery.projects)
     agent_snapshot = agent_deck_snapshot()
     panes = tuple(tmux.list_tmux_panes())
+    sessions = tuple(tmux.list_tmux_sessions())
+    saved = load_workspace_result(project.path, store_path=store_path).workspace
+    expected_name = (
+        saved.session_name
+        if saved is not None
+        else _expected_new_session_name(project, project.path.resolve(), base_session_name_counts)
+    )
+    session_record = next((session for session in sessions if session.name == expected_name), None)
     return gather_project_status(
         project,
         store_path=store_path,
@@ -596,6 +618,7 @@ def gather_single_project_status(
             session for session in agent_snapshot.sessions if session.path == project.path.resolve()
         ),
         pane_runtimes=panes,
+        tmux_session=session_record,
     )
 
 
@@ -608,6 +631,10 @@ def refresh_single_project_status(
     """Refresh one project's live runtime state without rediscovering projects."""
     agent_snapshot = agent_deck_snapshot()
     panes = tuple(tmux.list_tmux_panes())
+    sessions = tuple(tmux.list_tmux_sessions())
+    session_record = next(
+        (session for session in sessions if session.name == previous.expected_session_name), None
+    )
     return gather_project_status(
         project,
         store_path=store_path,
@@ -616,6 +643,7 @@ def refresh_single_project_status(
         ),
         pane_runtimes=panes,
         expected_session_name=previous.expected_session_name,
+        tmux_session=session_record,
     )
 
 

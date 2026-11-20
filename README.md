@@ -171,6 +171,8 @@ The CLI also provides inspection commands, project creation, and workspace launc
 ```bash
 th              # open the dashboard
 th list         # list discovered projects and their status
+th list shpe    # filter by name, path, session, or status
+th list running # show running workspaces
 th plan <project>  # preview the launch action without changing anything
 th up <project>    # create or attach to the project's tmux workspace
 th switch          # open the fast workspace switcher
@@ -374,6 +376,29 @@ Both `th up` and `th plan` use the same dynamic project suggestions. The
   project; never recreates panes that are already there.
 - **Recreate Workspace** — rebuilds a saved layout (windows, panes, startup
   commands) from scratch when no session is currently running.
+
+Project Detail is the operational command center for a project. It combines
+project identity, live workspace state, Git summary and changed files, a small
+set of detected development/test commands, and contextual tools such as
+Lazygit. Git refreshes asynchronously while the screen is open; workspace and
+project metadata refresh through the existing service layer. Commands are
+shown only when Terminal Home can identify them safely, and unavailable tools
+are omitted or described as unavailable.
+
+Detected local commands are also executable from Project Detail. Selecting a
+development or test command reuses the workspace's Development Server or Test
+Terminal pane; builds and lint commands use a dedicated `th-*` task window or
+reuse its completed task pane. A pane is reused only when it carries the role
+Terminal Home tagged it with by pane id when creating it (the tmux pane option
+`@terminal_home_role`), never because of its index or title, so custom
+`pane-base-index` settings, reordered panes, and programs that rename their
+pane can't redirect a command. When no single tagged pane exists (for example
+a session created before this tagging, or by hand), the command runs in a task
+window instead. Terminal Home creates a stopped saved workspace
+before running a command when necessary, keeps task output visible, and does
+not start a second copy of an already-running target. Commands that require
+unsupported shell syntax, projects without a saved workspace, and remote
+projects remain informational.
 
 ## Workspace layouts
 
@@ -581,6 +606,7 @@ dashboard/
         projects.py                Scans ~/projects; ProjectStatus + primary/secondary action matrix
         git_info.py                  Cheap, tolerant git branch/repo lookups
         tmux.py                     Session listing + workspace command construction/execution
+        project_command_launcher.py Post-TUI project command targeting and execution
         system_info.py               Hostname, OS, Python version, shell, disk usage
         slug.py                      Filesystem-safe slug generation
         project_creation.py          Validation, directory creation, git init (New Project only)
@@ -784,3 +810,11 @@ afterward. When Terminal Home is already inside tmux, `th switch` uses
 workspace reuses the remembered layout for matching configured windows during
 recreation. No global tmux hooks are installed, and layout persistence never
 blocks attachment or recreation.
+
+Terminal Home captures layouts at managed attach/detach checkpoints and before
+an in-tmux client switch. It stores split geometry per project/window and
+remaps volatile tmux pane IDs to the recreated workspace's pane order, so pane
+roles do not change when tmux assigns new IDs. Missing, malformed, stale, or
+incompatible layouts fall back to the configured default. External destruction
+that Terminal Home cannot observe is not captured; there is no background
+polling or global tmux hook.

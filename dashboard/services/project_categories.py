@@ -26,6 +26,31 @@ def project_category(entry: ProjectEntry) -> str:
     return "Not Configured"
 
 
+def matches_project_query(entry: ProjectEntry, query: str) -> bool:
+    """Match a project by name, location, session, or its visible state."""
+    words = query.casefold().split()
+    if not words:
+        return True
+    if isinstance(entry, RegisteredRemoteProject):
+        fields = (entry.name, entry.selector, entry.location.remote_path, "remote")
+    else:
+        state = (
+            "running"
+            if entry.session_running
+            else "saved configured"
+            if entry.saved_workspace is not None
+            else "default not configured"
+        )
+        fields = (
+            entry.project.name,
+            str(entry.canonical_path),
+            entry.expected_session_name,
+            state,
+        )
+    haystack = " ".join(fields).casefold()
+    return all(word in haystack for word in words)
+
+
 def group_project_entries(entries: list[ProjectEntry]) -> tuple[ProjectCategory, ...]:
     """Group entries in stable UI order, omitting empty categories."""
     order = ("Configured Projects", "Not Configured", "Remote Projects")

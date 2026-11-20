@@ -1,9 +1,9 @@
 """The Textual App: wires up the theme and starts on the home screen.
 
 main() runs the Textual app to completion, then -- only after Textual has
-fully released the terminal -- hands any resulting LaunchRequest to the
-non-Textual tmux orchestration layer. tmux/attach must never run while a
-Textual screen is still mounted.
+fully released the terminal -- hands any resulting launch or project-command
+request to the non-Textual tmux orchestration layer. tmux/attach must never
+run while a Textual screen is still mounted.
 """
 
 from __future__ import annotations
@@ -17,7 +17,12 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import Button, Checkbox, Input, TextArea
 
-from dashboard.models import AgentDeckAttachRequest, LaunchRequest, TmuxSessionAttachRequest
+from dashboard.models import (
+    AgentDeckAttachRequest,
+    LaunchRequest,
+    RunProjectCommandRequest,
+    TmuxSessionAttachRequest,
+)
 from dashboard.models.settings import AppSettings
 from dashboard.screens.agents import AgentsScreen
 from dashboard.screens.home import HomeScreen
@@ -29,6 +34,10 @@ from dashboard.services.agent_creation_launcher import (
 from dashboard.services.agent_deck_launcher import AgentDeckLaunchError, execute_agent_deck_attach
 from dashboard.services.agent_hub import AgentHubSnapshot
 from dashboard.services.agent_view import AgentViewRouteRequest, route_agent_view
+from dashboard.services.project_command_launcher import (
+    ProjectCommandExecutionError,
+    execute_project_command_request,
+)
 from dashboard.services.settings_store import load_settings_result, save_settings
 from dashboard.services.tmux import TmuxCommandError
 from dashboard.services.workspace_launcher import (
@@ -40,6 +49,7 @@ from dashboard.widgets import KeyboardActionList
 
 AppResult = (
     LaunchRequest
+    | RunProjectCommandRequest
     | TmuxSessionAttachRequest
     | AgentDeckAttachRequest
     | AgentCreationRequest
@@ -245,6 +255,8 @@ def main() -> None:
                 continue
             if isinstance(launch_request, TmuxSessionAttachRequest):
                 execute_tmux_session_attach(launch_request)
+            elif isinstance(launch_request, RunProjectCommandRequest):
+                execute_project_command_request(launch_request)
             else:
                 execute_launch_request(launch_request)
         except (
@@ -252,6 +264,7 @@ def main() -> None:
             TmuxCommandError,
             AgentDeckLaunchError,
             AgentCreationAttachError,
+            ProjectCommandExecutionError,
         ) as exc:
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)

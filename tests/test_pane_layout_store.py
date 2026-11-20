@@ -35,6 +35,25 @@ def test_local_round_trip_and_canonical_key(tmp_path: Path) -> None:
     assert pane_layout_storage_key(LocalProjectLocation(project)).startswith("loc-")
 
 
+def test_normalized_layout_template_round_trips_and_legacy_records_still_load(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "pane-layouts.json"
+    location = LocalProjectLocation(tmp_path / "project")
+    layout = PaneLayout(
+        "main", 2, "148x40,0,0[74x40,0,0,11,74x40,75,0,12]",
+        "148x40,0,0[74x40,0,0,0,74x40,75,0,1]",
+    )
+    save_pane_layouts_for_location(location, {"main": layout}, path)
+    assert load_pane_layouts_for_location(location, path)["main"] == layout
+
+    raw = json.loads(path.read_text())
+    key = next(iter(raw["projects"]))
+    del raw["projects"][key]["layouts"]["main"]["tmux_layout_template"]
+    path.write_text(json.dumps(raw))
+    assert load_pane_layouts_for_location(location, path)["main"].tmux_layout_template is None
+
+
 def test_ssh_round_trip_and_multiple_windows_are_independent(tmp_path: Path) -> None:
     path = tmp_path / "pane-layouts.json"
     first = SshProjectLocation("c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", "/srv/api")

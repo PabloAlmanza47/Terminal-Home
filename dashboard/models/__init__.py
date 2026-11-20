@@ -39,6 +39,7 @@ from dashboard.models.workspace import (
     LaunchRequest,
     PaneKind,
     PaneSpec,
+    RunProjectCommandRequest,
     TmuxSessionAttachRequest,
     WindowSpec,
     WorkspaceSpec,
@@ -48,6 +49,7 @@ from dashboard.models.workspace import (
 __all__ = [
     "LaunchAction",
     "LaunchRequest",
+    "RunProjectCommandRequest",
     "AgentDeckAttachRequest",
     "TmuxSessionAttachRequest",
     "CodingAgent",

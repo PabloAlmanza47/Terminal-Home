@@ -20,7 +20,11 @@ from textual.widgets import Footer, Input, Static
 from textual.widgets.option_list import Option
 
 from dashboard.screens.project_detail import ProjectDetailScreen
-from dashboard.services.project_categories import ProjectEntry, group_project_entries
+from dashboard.services.project_categories import (
+    ProjectEntry,
+    group_project_entries,
+    matches_project_query,
+)
 from dashboard.services.project_rows import (
     format_project_row,
     format_remote_project_row,
@@ -105,7 +109,7 @@ class ProjectsScreen(Screen[None]):
             with Vertical(classes="panel"):
                 yield Static("Open Project", id="screen-title")
                 yield Static("", id="scan-warning", classes="wizard-hint")
-                yield Input(placeholder="Type to filter projects...", id="project-filter")
+                yield Input(placeholder="Search name, path, or status...", id="project-filter")
                 yield OptionList(id="project-list")
                 yield Static("", id="project-path")
         yield Footer()
@@ -164,14 +168,7 @@ class ProjectsScreen(Screen[None]):
         self._populate(self._filtered(query))
 
     def _filtered(self, query: str) -> list[ProjectStatus | RegisteredRemoteProject]:
-        if not query:
-            return list(self._all_entries)
-        return [
-            entry
-            for entry in self._all_entries
-            if query
-            in (entry.project.name if isinstance(entry, ProjectStatus) else entry.name).lower()
-        ]
+        return [entry for entry in self._all_entries if matches_project_query(entry, query)]
 
     def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
         option_list = self.query_one("#project-list", OptionList)

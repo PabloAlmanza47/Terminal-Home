@@ -358,6 +358,26 @@ def test_search_filters_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert _run(scenario()) == [_project_id(projects_root / "alpha")]
 
 
+def test_search_matches_path_and_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "alpha").mkdir()
+    (projects_root / "beta").mkdir()
+
+    async def scenario() -> None:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            filter_box = app.screen.query_one("#project-filter", Input)
+            filter_box.value = "alpha default"
+            await pilot.pause()
+            assert _option_ids(pilot) == [_project_id(projects_root / "alpha")]
+            filter_box.value = str(projects_root / "beta")
+            await pilot.pause()
+            assert _option_ids(pilot) == [_project_id(projects_root / "beta")]
+
+    _run(scenario())
+
+
 def test_repeated_filtering_keeps_project_names_at_one_marker_column(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

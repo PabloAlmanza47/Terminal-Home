@@ -263,6 +263,27 @@ class LaunchRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class RunProjectCommandRequest:
+    """Post-Textual request to run one approved command in a project workspace."""
+
+    workspace: WorkspaceSpec
+    command_id: str
+    label: str
+    category: str
+    argv: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.command_id.strip():
+            raise WorkspaceValidationError("A project command id is required.")
+        if not self.label.strip():
+            raise WorkspaceValidationError("A project command label is required.")
+        if not self.category.strip():
+            raise WorkspaceValidationError("A project command category is required.")
+        if not self.argv or any(not argument for argument in self.argv):
+            raise WorkspaceValidationError("A project command must contain argv tokens.")
+
+
+@dataclass(frozen=True, slots=True)
 class TmuxSessionAttachRequest:
     """A validated post-TUI request to attach to a local tmux session."""
 

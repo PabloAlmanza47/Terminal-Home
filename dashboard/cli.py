@@ -48,6 +48,7 @@ from dashboard.services.completion import (
 )
 from dashboard.services.doctor import exit_code_for, format_diagnostic, run_diagnostics
 from dashboard.services.git import GitStatus, load_status
+from dashboard.services.project_categories import matches_project_query
 from dashboard.services.project_creation import (
     DEFAULT_PROJECTS_ROOT,
     ProjectCreationError,
@@ -130,6 +131,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser(
         "list", help="List discovered projects and their status (read-only)."
+    )
+    list_parser.add_argument(
+        "query", nargs="?", default="", help="Filter by name, path, session, or status."
     )
     list_parser.set_defaults(handler=_run_list)
 
@@ -472,15 +476,21 @@ def _run_list(args: argparse.Namespace) -> int:
         project for project in selectable_projects if isinstance(project, RegisteredRemoteProject)
     )
     result = scan_all_projects()
+    statuses = tuple(
+        status for status in result.statuses if matches_project_query(status, args.query)
+    )
+    remote_projects = tuple(
+        project for project in remote_projects if matches_project_query(project, args.query)
+    )
 
-    if not result.statuses:
+    if not statuses:
         if not remote_projects:
-            print("No projects discovered.")
+            print("No matching projects." if args.query else "No projects discovered.")
     else:
-        _print_project_table(result.statuses)
+        _print_project_table(statuses)
 
     if remote_projects:
-        if result.statuses:
+        if statuses:
             print()
         print("REMOTE PROJECTS")
         _print_remote_project_table(remote_projects)

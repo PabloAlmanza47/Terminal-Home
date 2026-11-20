@@ -10,7 +10,12 @@ from pathlib import Path
 import pytest
 
 from dashboard.models import PaneKind, PaneSpec
-from dashboard.services.project_commands import CommandSource, detect_project_commands
+from dashboard.services.project_commands import (
+    CommandCategory,
+    CommandSource,
+    DetectedCommand,
+    detect_project_commands,
+)
 
 
 def _write_package(project: Path, scripts: object = None) -> None:
@@ -39,6 +44,10 @@ def test_node_manager_commands(
     detected = detect_project_commands(tmp_path)
     assert detected.development is not None
     assert detected.development.command == expected_dev
+    assert detected.development.id == "dev"
+    assert detected.development.category is CommandCategory.DEV
+    assert detected.development.argv is not None
+    assert detected.development.executable
     assert detected.test is not None
     assert detected.test.command == expected_test
 
@@ -70,6 +79,26 @@ def test_node_dev_wins_over_start(tmp_path: Path) -> None:
     assert detected.development is not None
     assert detected.development.command == "npm run dev"
     assert detected.development.source is CommandSource.NODE_DEV
+
+
+def test_node_build_and_lint_scripts_are_exposed_for_project_detail(
+    tmp_path: Path,
+) -> None:
+    _write_package(tmp_path, {"dev": "next dev", "build": "next build", "lint": "next lint"})
+
+    detected = detect_project_commands(tmp_path)
+
+    assert detected.build is not None
+    assert detected.build.command == "npm run build"
+    assert detected.lint is not None
+    assert detected.lint.command == "npm run lint"
+
+
+def test_shell_expression_is_informational_only() -> None:
+    command = DetectedCommand("pytest && rm -rf /", CommandSource.PYTEST)
+
+    assert command.argv is None
+    assert not command.executable
 
 
 def test_multiple_lockfiles_follow_documented_precedence(tmp_path: Path) -> None:

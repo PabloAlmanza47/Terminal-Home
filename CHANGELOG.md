@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Hardened remembered tmux layouts by normalizing volatile pane IDs and
+  rebinding saved geometry to newly created panes during workspace recreation.
+- Expanded Project Detail into an operational project command center with live
+  workspace summaries, Git state, detected project commands, and contextual
+  tool availability.
+- Added explicit local project command execution from Project Detail. Safe
+  detected commands now run through a post-TUI request in semantic workspace
+  panes, with dedicated visible task windows for build, test, and lint output.
+  The target pane is identified by a role option set by pane id at workspace
+  creation, never by pane index or title; when it can't be identified
+  unambiguously the command runs in a dedicated task window.
+
 ## [0.4.0] - 2026-09-11
 
 ### Added

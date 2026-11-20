@@ -39,6 +39,8 @@ class PaneLayout:
     window_name: str
     pane_count: int
     tmux_layout: str
+    # Optional normalized form that does not retain volatile tmux pane ids.
+    tmux_layout_template: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.window_name, str) or not self.window_name.strip():
@@ -49,19 +51,25 @@ class PaneLayout:
             raise ValueError("Pane layout tmux layout must be non-empty.")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "window_name": self.window_name,
             "pane_count": self.pane_count,
             "tmux_layout": self.tmux_layout,
         }
+        if self.tmux_layout_template is not None:
+            result["tmux_layout_template"] = self.tmux_layout_template
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> PaneLayout:
-        if not isinstance(value, dict) or set(value) != {
-            "window_name", "pane_count", "tmux_layout"
-        }:
+        allowed = {"window_name", "pane_count", "tmux_layout", "tmux_layout_template"}
+        required = {"window_name", "pane_count", "tmux_layout"}
+        if not isinstance(value, dict) or not required.issubset(value) or set(value) - allowed:
             raise ValueError("Pane layout record has invalid fields.")
-        return cls(value["window_name"], value["pane_count"], value["tmux_layout"])
+        template = value.get("tmux_layout_template")
+        if template is not None and not isinstance(template, str):
+            raise ValueError("Pane layout template must be a string.")
+        return cls(value["window_name"], value["pane_count"], value["tmux_layout"], template)
 
 
 @dataclass(frozen=True, slots=True)

@@ -891,6 +891,6 @@ def test_back_to_list_button_makes_no_metadata_changes(
             return type(app.screen).__name__, app.return_value
 
     screen_name, return_value = _run(scenario())
-    assert screen_name == "HomeScreen"
+    assert screen_name == "ProjectsScreen"
     assert return_value is None
     assert load_workspace(project_path) == workspace

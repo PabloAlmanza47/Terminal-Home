@@ -252,6 +252,30 @@ def test_list_distinguishes_duplicate_names_by_path(
     assert str(work.resolve()) in out
 
 
+def test_list_query_matches_name_path_and_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _isolate(monkeypatch, tmp_path)
+    root = tmp_path / "projects"
+    _make_project(root, "SHPE-Connect")
+    _make_project(root, "school-project")
+    _configure_roots(root)
+    _assume_no_tmux_sessions(monkeypatch)
+
+    assert cli_module.run(["list", "shpe"]) == 0
+    out = capsys.readouterr().out
+    assert "SHPE-Connect" in out
+    assert "school-project" not in out
+
+    assert cli_module.run(["list", "school-project default"]) == 0
+    out = capsys.readouterr().out
+    assert "school-project" in out
+    assert "SHPE-Connect" not in out
+
+    assert cli_module.run(["list", "missing"]) == 0
+    assert capsys.readouterr().out.strip() == "No matching projects."
+
+
 def test_list_empty_discovery_prints_a_clear_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
