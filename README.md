@@ -386,9 +386,15 @@ shown only when Terminal Home can identify them safely, and unavailable tools
 are omitted or described as unavailable.
 
 Detected local commands are also executable from Project Detail. Selecting a
-development command reuses the configured Development Server pane when one is
-present; tests, builds, and lint commands use a dedicated `th-*` task window or
-reuse its completed task pane. Terminal Home creates a stopped saved workspace
+development or test command reuses the workspace's Development Server or Test
+Terminal pane; builds and lint commands use a dedicated `th-*` task window or
+reuse its completed task pane. A pane is reused only when it carries the role
+Terminal Home tagged it with by pane id when creating it (the tmux pane option
+`@terminal_home_role`), never because of its index or title, so custom
+`pane-base-index` settings, reordered panes, and programs that rename their
+pane can't redirect a command. When no single tagged pane exists (for example
+a session created before this tagging, or by hand), the command runs in a task
+window instead. Terminal Home creates a stopped saved workspace
 before running a command when necessary, keeps task output visible, and does
 not start a second copy of an already-running target. Commands that require
 unsupported shell syntax, projects without a saved workspace, and remote

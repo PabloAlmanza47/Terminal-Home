@@ -34,12 +34,18 @@ _LIST_FORMAT = "#{session_name}\t#{session_windows}\t#{session_created_string}\t
 _WINDOW_LAYOUT_FORMAT = "#{window_name}\t#{window_panes}\t#{window_layout}"
 _PANE_STATUS_FORMAT = (
     "#{session_name}\t#{window_name}\t#{pane_title}\t"
-    "#{pane_current_command}\t#{pane_dead}\t#{window_id}\t#{pane_id}\t#{pane_index}"
+    "#{pane_current_command}\t#{pane_dead}\t#{window_id}\t#{pane_id}\t#{pane_index}\t"
+    "#{@terminal_home_role}"
 )
 _SUBPROCESS_TIMEOUT_SECONDS = 3
 _SESSION_NAME_UNSAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 _TERMINAL_HOME_OPTION = "@terminal_home_workspace"
+# Pane-scoped user option naming a managed pane's role, set by pane id when
+# Terminal Home creates the pane. Unlike a pane title, the program running in
+# the pane can't change it, and it moves with the pane through swaps and
+# reordering, so it is the identity command execution trusts.
+PANE_ROLE_OPTION = "@terminal_home_role"
 _LAZYGIT_POPUP_OPTION = "@terminal_home_lazygit_popup"
 _AGENT_ATTENTION_POPUP_OPTION = "@terminal_home_agent_attention_popup"
 _LAZYGIT_POPUP_COMMAND = (
@@ -79,6 +85,7 @@ class TmuxPaneRuntime:
     window_id: str | None = None
     pane_id: str | None = None
     pane_index: int | None = None
+    role: str | None = None
 
 
 def _parse_window_layouts(output: str) -> dict[str, PaneLayout]:
@@ -554,14 +561,15 @@ def list_tmux_panes(*, runner: TmuxCommandRunner = run_tmux_command) -> list[Tmu
     panes: list[TmuxPaneRuntime] = []
     for line in result.stdout.splitlines():
         fields = line.split("\t")
-        if len(fields) not in {5, 7, 8}:
+        if len(fields) not in {5, 7, 8, 9}:
             continue
         session, window, title, command, dead = fields[:5]
         window_id, pane_id = (fields[5], fields[6]) if len(fields) >= 7 else (None, None)
-        pane_index = int(fields[7]) if len(fields) == 8 and fields[7].isdigit() else None
+        pane_index = int(fields[7]) if len(fields) >= 8 and fields[7].isdigit() else None
+        role = (fields[8] or None) if len(fields) == 9 else None
         panes.append(
             TmuxPaneRuntime(
-                session, window, title, command, dead == "1", window_id, pane_id, pane_index
+                session, window, title, command, dead == "1", window_id, pane_id, pane_index, role
             )
         )
     return panes
@@ -664,6 +672,9 @@ def generate_session_name(
 # assigned via `-P -F`, and every later command targets that id directly, so
 # construction never has to know or guess any base-index value.
 _CREATE_CAPTURE_FORMAT = "#{window_id} #{pane_id}"
+# Pane kinds project commands can run in; each such pane is tagged with its
+# kind as PANE_ROLE_OPTION when created.
+COMMAND_TARGET_ROLES = frozenset({"dev_server", "test_terminal"})
 _PANE_CAPTURE_FORMAT = "#{pane_id}"
 
 
@@ -746,6 +757,24 @@ def set_pane_title(
 ) -> None:
     """Assign a stable semantic title to a managed pane."""
     _run_step(runner, _select_pane_title_argv(pane_id, title))
+
+
+def set_pane_role(
+    pane_id: str,
+    role: str,
+    *,
+    runner: TmuxCommandRunner = run_tmux_command,
+) -> bool:
+    """Tag *pane_id* with Terminal Home's role option; True if tmux accepted it.
+
+    Best effort: a tmux without pane options (before 3.0) only loses command
+    targeting -- commands then go to a dedicated task window instead.
+    """
+    try:
+        result = runner(["tmux", "set-option", "-p", "-t", pane_id, PANE_ROLE_OPTION, role])
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 def create_task_window(
@@ -857,6 +886,9 @@ def _create_window_panes(
             _run_step(runner, _select_layout_argv(window_id, default_layout))
 
     for pane_index, pane_id in enumerate(pane_ids):
+        kind = window.panes[pane_index].kind.value
+        if kind in COMMAND_TARGET_ROLES:
+            set_pane_role(pane_id, kind, runner=runner)
         plan = pane_plans.get((window.window_name, pane_index))
         if plan is None:
             continue
