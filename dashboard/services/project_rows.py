@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from rich.cells import cell_len
 
 from dashboard.services.project_selection import RegisteredRemoteProject
+from dashboard.services.worktree_inventory import ProjectWorktree
 
 _STATUS_COLUMN_WIDTH = 20
 _BRANCH_COLUMN_WIDTH = 24
@@ -290,3 +291,22 @@ def format_recent_project_rows(
         detail_width = max(0, width - cell_len(line))
         result.append((line + _ellipsis(detail, detail_width)).rstrip())
     return result
+
+
+def worktree_branch_label(worktree: ProjectWorktree) -> str:
+    """Branch column text for a grouped checkout.
+
+    ``*`` marks uncommitted changes, ``?`` unknown status, ``!`` an upstream
+    warning (see ProjectWorktree.upstream_warning).
+    """
+    if worktree.branch:
+        text = worktree.branch
+    else:
+        text = f"detached {worktree.head[:7]}" if worktree.head else "detached"
+    if worktree.clean is False:
+        text += " *"
+    elif worktree.clean is None:
+        text += " ?"
+    if worktree.upstream_warning:
+        text += " !"
+    return text

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Continue Project now groups Git worktrees under their repository, including
+  linked worktrees outside the configured roots, with read-only branch,
+  detached-HEAD, change and upstream-mismatch status and tmux session details.
+  Discovery uses `git worktree list --porcelain` and Git's common directory;
+  CLI commands and Home are unchanged (#2).
 - Hardened remembered tmux layouts by normalizing volatile pane IDs and
   rebinding saved geometry to newly created panes during workspace recreation.
 - Expanded Project Detail into an operational project command center with live

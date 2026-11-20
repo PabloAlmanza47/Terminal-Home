@@ -10,6 +10,9 @@ created, or attached to.
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -184,7 +187,7 @@ def test_category_header_remains_visible_when_navigation_wraps(
         registration,
     )
     scan_result = ProjectScanResult(statuses, truncated=False, warnings=())
-    monkeypatch.setattr(projects_module, "scan_all_projects", lambda: scan_result)
+    monkeypatch.setattr(projects_module, "scan_all_projects", lambda **_: scan_result)
     monkeypatch.setattr(
         projects_module,
         "list_selectable_projects",
@@ -601,3 +604,112 @@ def test_selecting_either_same_named_project_opens_its_own_canonical_path(
     opened_work = _run(select(work_id))
     assert opened_work == work_example
     assert opened_work != opened_school
+
+
+# --- Git worktree grouping (issue #2) -----------------------------------------
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd, check=True, capture_output=True, text=True,
+    )
+
+
+def _repo_with_external_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, projects_root: Path
+) -> tuple[Path, Path]:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    repo = projects_root / "orbit"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    worktree = tmp_path / "worktrees" / "orbit" / "m3-docs"
+    _git(repo, "worktree", "add", "-q", "-b", "docs/m3", str(worktree))
+    return repo, worktree
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_linked_worktree_is_grouped_under_its_repository_and_navigable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "zeta").mkdir()  # an ordinary, non-Git project
+    repo, worktree = _repo_with_external_worktree(monkeypatch, tmp_path, projects_root)
+
+    async def scenario() -> tuple[list[str], list[str], str, str, str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            option_list = app.screen.query_one("#project-list", OptionList)
+            labels = [str(option.prompt) for option in option_list.options]
+            ids = _option_ids(pilot)
+            option_list.highlighted = _option_index(option_list, _project_id(repo))
+            option_list.focus()
+            await pilot.press("down")
+            await pilot.pause()
+            details = str(app.screen.query_one("#project-path").render())
+            highlighted = str(option_list.get_option_at_index(option_list.highlighted).id)
+            await pilot.press("enter")
+            await pilot.pause()
+            detail = app.screen
+            return ids, labels, details, highlighted, str(detail.project.path)
+
+    ids, labels, details, highlighted, opened = _run(scenario())
+    assert ids == [_project_id(repo), _project_id(worktree), _project_id(projects_root / "zeta")]
+    parent_label = next(label for label in labels if label.strip().startswith("orbit "))
+    child_label = next(label for label in labels if "m3-docs" in label)
+    # The child sits one tree step under its parent and shows its own branch.
+    indent = len(parent_label) - len(parent_label.lstrip())
+    assert child_label[indent:].startswith("└ m3-docs") and "docs/m3" in child_label
+    assert highlighted == _project_id(worktree)
+    assert f"Worktree: linked to {repo.resolve()}" in details
+    assert "Changes: clean" in details and "Upstream: none" in details
+    assert "tmux session: orbit-m3-docs (not running)" in details
+    assert opened == str(worktree.resolve())
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_filtering_by_worktree_branch_keeps_its_repository_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    (projects_root / "other").mkdir()
+    repo, worktree = _repo_with_external_worktree(monkeypatch, tmp_path, projects_root)
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            app.screen.query_one("#project-filter", Input).value = "docs/m3"
+            await pilot.pause()
+            return _option_ids(pilot)
+
+    assert _run(scenario()) == [_project_id(repo), _project_id(worktree)]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_remote_projects_still_listed_beside_grouped_repositories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = _isolate(monkeypatch, tmp_path)
+    repo, worktree = _repo_with_external_worktree(monkeypatch, tmp_path, projects_root)
+    host_id = "d84aeefb-7c29-4c63-b39c-766d559df977"
+    create_remote_project(
+        RemoteProjectRegistration(
+            "c27c7b67-8e3f-4ebc-8dce-d66be8fd1ea3", host_id, "remote-api", "/srv/api"
+        )
+    )
+
+    async def scenario() -> list[str]:
+        app = TerminalHomeApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            await _open_projects_screen(pilot)
+            return _option_ids(pilot)
+
+    assert _run(scenario()) == [
+        _project_id(repo),
+        _project_id(worktree),
+        f"ssh:{host_id}:/srv/api",
+    ]

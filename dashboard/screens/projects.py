@@ -24,11 +24,14 @@ from dashboard.services.project_categories import (
     ProjectEntry,
     group_project_entries,
     matches_project_query,
+    split_worktree_children,
+    with_worktree_parents,
 )
 from dashboard.services.project_rows import (
     format_project_row,
     format_remote_project_row,
     project_row_width,
+    worktree_branch_label,
 )
 from dashboard.services.project_selection import (
     RegisteredRemoteProject,
@@ -69,11 +72,42 @@ def _details_text(status: ProjectStatus) -> str:
         lines.append(f"Git branch: {status.git_branch or '(unknown)'}")
     else:
         lines.append("Git: not a git repository")
+    worktree = status.worktree
+    if worktree is not None:
+        if worktree.is_main:
+            lines.append("Worktree: main checkout")
+        else:
+            lines.append(f"Worktree: linked to {worktree.parent_path}")
+        if worktree.detached:
+            lines.append(f"HEAD: detached at {(worktree.head or '?')[:12]}")
+        changes = {True: "clean", False: "uncommitted changes", None: "unknown"}
+        lines.append(f"Changes: {changes[worktree.clean]}")
+        if worktree.upstream is None:
+            lines.append("Upstream: none")
+        elif worktree.ahead is not None and worktree.behind is not None:
+            lines.append(
+                f"Upstream: {worktree.upstream} (ahead {worktree.ahead}, "
+                f"behind {worktree.behind} as of last fetch)"
+            )
+        else:
+            lines.append(f"Upstream: {worktree.upstream}")
+        if worktree.upstream_warning:
+            lines.append(f"Warning: branch {worktree.upstream_warning}")
+        if worktree.locked:
+            lines.append("Locked: yes")
+        session = "running" if status.session_running else "not running"
+        lines.append(f"tmux session: {status.expected_session_name} ({session})")
     if status.last_modified is not None:
         lines.append(f"Last modified: {status.last_modified:%Y-%m-%d %H:%M}")
     if not status.tmux_available:
         lines.append("tmux is not installed.")
     return "\n".join(lines)
+
+
+def _branch_text(status: ProjectStatus) -> str | None:
+    if status.worktree is not None:
+        return worktree_branch_label(status.worktree)
+    return status.git_branch if status.is_git_repo else None
 
 
 def _remote_details_text(project: RegisteredRemoteProject) -> str:
@@ -142,7 +176,7 @@ class ProjectsScreen(Screen[None]):
         """Runs in a worker thread: scan_all_projects makes blocking
         filesystem/subprocess calls.
         """
-        scan_result = scan_all_projects()
+        scan_result = scan_all_projects(include_worktrees=True)
         selectable = list_selectable_projects()
         self.app.call_from_thread(self._on_scan_complete, scan_result, selectable)
 
@@ -159,6 +193,12 @@ class ProjectsScreen(Screen[None]):
             if isinstance(project, RegisteredRemoteProject)
             or project.location in statuses_by_location
         ]
+        # Linked worktrees found outside the configured roots aren't
+        # selectable through discovery; they come only from the scan.
+        listed = {project.location for project in selectable if isinstance(project, Project)}
+        self._all_entries.extend(
+            status for status in scan_result.statuses if status.project.location not in listed
+        )
         self._entries_by_id = {
             project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector: entry
             for entry in self._all_entries
@@ -168,7 +208,8 @@ class ProjectsScreen(Screen[None]):
         self._populate(self._filtered(query))
 
     def _filtered(self, query: str) -> list[ProjectStatus | RegisteredRemoteProject]:
-        return [entry for entry in self._all_entries if matches_project_query(entry, query)]
+        matches = [entry for entry in self._all_entries if matches_project_query(entry, query)]
+        return with_worktree_parents(matches, self._all_entries)
 
     def _populate(self, entries: list[ProjectStatus | RegisteredRemoteProject]) -> None:
         option_list = self.query_one("#project-list", OptionList)
@@ -195,8 +236,12 @@ class ProjectsScreen(Screen[None]):
         }
         content_width = option_list.content_region.width or option_list.size.width
         child_indent = "  "
+        worktree_indent = child_indent + "└ "
         row_width = project_row_width(content_width, leading_indent=len(child_indent))
-        for category in group_project_entries(entries):
+        worktree_row_width = project_row_width(content_width, leading_indent=len(worktree_indent))
+        top_level, worktree_children = split_worktree_children(entries)
+        displayed_ids: list[str] = []
+        for category in group_project_entries(top_level):
             header_index = option_list.option_count
             option_list.add_option(Option(f"── {category.title} ──", disabled=True))
             for entry in category.entries:
@@ -205,7 +250,7 @@ class ProjectsScreen(Screen[None]):
                     label = format_project_row(
                         display_names_by_id[option_id],
                         _status_label(entry),
-                        entry.git_branch if entry.is_git_repo else None,
+                        _branch_text(entry),
                         row_width,
                     )
                 else:
@@ -219,21 +264,29 @@ class ProjectsScreen(Screen[None]):
                     option_id = entry.selector
                 self._category_header_index_by_entry_id[option_id] = header_index
                 option_list.add_option(Option(child_indent + label, id=option_id))
-        visible_ids = {
-            project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
-            for entry in entries
-        }
+                displayed_ids.append(option_id)
+                children = (
+                    worktree_children.get(entry.canonical_path, [])
+                    if isinstance(entry, ProjectStatus)
+                    else []
+                )
+                for child in children:
+                    child_id = project_option_id(child)
+                    child_label = format_project_row(
+                        child.canonical_path.name,
+                        _status_label(child),
+                        _branch_text(child),
+                        worktree_row_width,
+                    )
+                    self._category_header_index_by_entry_id[child_id] = header_index
+                    option_list.add_option(Option(worktree_indent + child_label, id=child_id))
+                    displayed_ids.append(child_id)
+        visible_ids = set(displayed_ids)
         self._restore_highlight(preferred_id if preferred_id in visible_ids else None)
         first_id = (
             preferred_id
             if preferred_id in visible_ids
-            else next(
-                (
-                    project_option_id(entry) if isinstance(entry, ProjectStatus) else entry.selector
-                    for entry in entries
-                ),
-                None,
-            )
+            else next(iter(displayed_ids), None)
         )
         self._preferred_entry_id = first_id
         self._show_details(first_id)

@@ -25,6 +25,11 @@ from dashboard.services.projects_config_store import (
     load_projects_config_result,
 )
 from dashboard.services.workspace_store import load_workspace_result
+from dashboard.services.worktree_inventory import (
+    ProjectWorktree,
+    WorktreeInventory,
+    inventory_worktrees,
+)
 
 # Hex characters of a canonical path's SHA-256 kept for a collision-
 # disambiguating session-name suffix -- short enough to stay readable
@@ -260,6 +265,9 @@ class ProjectStatus:
     running_pane_count: int | None = None
     session_attached: bool | None = None
     workspace_query_error: str | None = None
+    # Set only by scan_all_projects(include_worktrees=True): this checkout's
+    # repository identity, group parent and read-only Git status.
+    worktree: ProjectWorktree | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,9 +286,33 @@ class ProjectScanResult:
     agent_snapshot: AgentDeckSnapshot | None = None
 
 
+def _linked_worktree_projects(
+    projects: tuple[Project, ...], inventory: WorktreeInventory
+) -> tuple[Project, ...]:
+    """Projects for checkouts the inventory found that discovery didn't.
+
+    A linked worktree outside the configured roots is named
+    ``<parent>/<folder>`` so it reads as part of its repository and, once
+    sanitized (``parent-folder``), its default tmux session name doesn't
+    collide with another repository's identically named worktree folder.
+    """
+    known = {project.path.resolve(): project for project in projects}
+    extra: list[Project] = []
+    for path, worktree in sorted(inventory.worktrees.items()):
+        if path in known:
+            continue
+        parent = known.get(worktree.parent_path)
+        parent_name = parent.name if parent is not None else worktree.parent_path.name
+        name = parent_name if path == worktree.parent_path else f"{parent_name}/{path.name}"
+        extra.append(Project(name=name, path=path))
+    return tuple(extra)
+
+
 def scan_all_projects(
     config: ProjectsConfig | None = None,
     store_path: Path | None = None,
+    *,
+    include_worktrees: bool = False,
 ) -> ProjectScanResult:
     """Discover every configured project and gather each one's status in a
     single pass, sharing one `tmux list-sessions` call across all of them
@@ -292,6 +324,12 @@ def scan_all_projects(
     so the Open Project list screen and the home screen's recent-projects/
     active-sessions panels both consume the same result rather than each
     loading or interpreting configuration on its own.
+
+    *include_worktrees* (the Open Project picker) additionally groups Git
+    checkouts by repository and adds discovered repositories' linked
+    worktrees that live outside the configured roots; see
+    dashboard.services.worktree_inventory.  Off by default, so every other
+    caller sees exactly the configured discovery result.
     """
     config_warning: str | None = None
     if config is None:
@@ -299,13 +337,21 @@ def scan_all_projects(
         config = config_result.value
         config_warning = config_result.warning
     discovery = discover_projects(config)
+    projects = discovery.projects
+    inventory = WorktreeInventory({})
+    if include_worktrees:
+        inventory = inventory_worktrees(project.path for project in projects)
+        projects = projects + _linked_worktree_projects(projects, inventory)
     tmux_sessions = tuple(tmux.list_tmux_sessions())
     running_sessions = {session.name for session in tmux_sessions}
     panes = tuple(tmux.list_tmux_panes())
     agent_snapshot = agent_deck_snapshot()
+    # Counted over discovered projects only -- the same set Project Detail's
+    # gather_single_project_status counts -- so both agree on session names.
     base_session_name_counts = _base_session_name_counts(discovery.projects)
     statuses = tuple(
-        gather_project_status(
+        replace(
+            gather_project_status(
             project,
             store_path=store_path,
             running_sessions=running_sessions,
@@ -316,10 +362,13 @@ def scan_all_projects(
                 if session.path == project.path.resolve()
             ),
             pane_runtimes=panes,
+            ),
+            worktree=inventory.worktrees.get(project.path.resolve()),
         )
-        for project in discovery.projects
+        for project in projects
     )
     warnings = list(discovery.warnings)
+    warnings.extend(inventory.warnings)
     if config_warning:
         warnings.append(config_warning)
     warnings.extend(

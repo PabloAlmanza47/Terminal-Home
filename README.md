@@ -750,6 +750,40 @@ to Default Workspace**, and **Forget Saved Workspace** — all confirmation-
 gated where destructive, and none of them ever touch the project directory,
 its git history, or a currently running session.
 
+#### Git worktrees
+
+The Continue Project list groups Git checkouts by repository. A linked
+worktree (`git worktree add`) is shown indented beneath its repository's
+main checkout, with its own branch (or `detached <sha>`), and each one is
+selected and opened like any other project, with its own saved workspace
+and tmux session. Linked worktrees are found even when they live outside
+every configured root: Terminal Home asks each discovered repository for its
+worktrees with `git worktree list --porcelain`, so registering the
+repository (as a root entry or a manual project) is enough. No other
+directory is scanned. The suggested convention is
+`~/worktrees/<repository>/<slug>`, for example `~/worktrees/orbit/m3-docs`;
+nothing in Terminal Home hard-codes it.
+
+Repository identity is Git's common directory, never the folder name, so a
+symlinked path and its target, or a worktree that is also under a configured
+root, appear once. A worktree found outside the roots is named
+`<repository>/<folder>` (default session `<repository>-<folder>`). Branch
+markers: `*` uncommitted changes, `?` status unknown, `!` an upstream
+warning, which is a branch tracking a differently named branch (such as a
+feature branch tracking `origin/main`) or an upstream Git can't find. No
+upstream is never a warning, and ahead/behind counts are as of your last
+fetch: Terminal Home never fetches. The detail panel also shows the
+worktree's change state, upstream and tmux session.
+
+This is read-only. Terminal Home runs `git rev-parse`, `git worktree list`
+and `git status` (with `GIT_OPTIONAL_LOCKS=0`, so it never takes
+`index.lock`), and nothing that creates, moves, prunes or removes worktrees
+or branches. A worktree path that no longer exists, a repository with more
+than 64 worktrees, or a failing Git command produces a nonfatal warning.
+Without `git`, the list falls back to ungrouped projects. Grouping is
+currently limited to the Continue Project list; `th list`, `th up`,
+`th switch` and Home keep the configured discovery result.
+
 ### Session identity
 
 Every workspace is keyed by its project's canonical (resolved) path, not
